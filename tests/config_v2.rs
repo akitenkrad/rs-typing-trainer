@@ -72,7 +72,7 @@ db_path = "/tmp/test-sessions.db"
     .unwrap();
 
     assert_eq!(config.session.duration_seconds, 90);
-    assert_eq!(config.display.prompt_size, "xlarge");
+    assert_eq!(config.display.prompt_style, "large", "legacy prompt_size = \"xlarge\" reads as large");
     assert_eq!(config.session.item_timeout_seconds, 0);
     assert_eq!(config.session.error_mode, ErrorMode::Advance);
     assert_eq!(config.session.preview_items, 2);

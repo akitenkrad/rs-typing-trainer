@@ -18,7 +18,7 @@ fn v1_config_remains_compatible_and_defaults_to_english() {
     assert_eq!(config.keyboard.input_layout, "same");
     assert_eq!(config.keyboard.geometry, "ansi");
     assert_eq!(config.keyboard.show, "full");
-    assert_eq!(config.display.prompt_size, "auto");
+    assert_eq!(config.display.prompt_style, "large");
     assert_eq!(config.keyboard.heatmap, "off");
     assert!(config.keyboard.finger_guide);
     assert_eq!(config.keyboard.digit6_finger, "left-index");

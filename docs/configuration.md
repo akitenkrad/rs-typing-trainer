@@ -9,7 +9,7 @@ Every supported key is listed here. “Unset” means that the application deriv
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `general.lang` | `en` / `ja` | `"en"` | Interface language. |
-| `display.prompt_size` | `auto` / `normal` / `large` / `xlarge` | `"auto"` | Prompt size. `large` uses the 12-dot bitmap and `xlarge` the 16-dot bitmap; constrained screens step down automatically. |
+| `display.prompt_style` | `large` / `normal` | `"large"` | How the prompt is drawn. `large` uses bitmap glyphs (16-dot, or 12-dot when 16 does not fit) and falls back to normal text when neither fits; `normal` draws terminal-size text in a framed card with wider letter spacing. Also toggled with `Z` on the mode selection screen. The older `prompt_size` key is still read (`normal` → `normal`, anything else → `large`); saving from the app writes `prompt_style`. |
 | `keyboard.layout` | string | `"qwerty"` | Practice layout; bundled or user-defined name. |
 | `keyboard.input_layout` | string | `"same"` | OS input layout used for physical-key remapping. |
 | `keyboard.geometry` | `ansi` / `jis` | `"ansi"` | Physical keyboard geometry. |

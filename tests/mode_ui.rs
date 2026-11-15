@@ -216,9 +216,9 @@ fn romaji_play_screen_has_surface_kana_and_guide_rows() {
     for (width, height) in [(80, 24), (80, 20), (80, 16)] {
         let output = text(&render(&app, width, height));
         let compact = output.chars().filter(|character| !character.is_whitespace()).collect::<String>();
-        assert!(compact.contains("表記:"), "{width}x{height}: {output}");
-        assert!(compact.contains("かな:"), "{width}x{height}: {output}");
-        assert!(compact.contains("ローマ字:"), "{width}x{height}: {output}");
+        assert!(compact.contains("表記"), "{width}x{height}: {output}");
+        assert!(compact.contains("かな"), "{width}x{height}: {output}");
+        assert!(compact.contains("ローマ字"), "{width}x{height}: {output}");
         assert!(compact.contains("[ESC]中断"), "{width}x{height}: {output}");
     }
 }
@@ -396,9 +396,9 @@ fn japanese_sentence_shows_three_guides_without_timer_at_common_sizes() {
         let terminal = render(&app, width, height);
         let output = text(&terminal);
         let compact = output.chars().filter(|character| !character.is_whitespace()).collect::<String>();
-        assert!(compact.contains("表記:小さな鳥が庭で休んでいる。"), "{width}x{height}: {output}");
-        assert!(compact.contains("かな:ちいさなとりがにわでやすんでいる。"), "{width}x{height}: {output}");
-        assert!(compact.contains("ローマ字:"), "{width}x{height}: {output}");
+        assert!(compact.contains("表記小さな鳥が庭で休んでいる。"), "{width}x{height}: {output}");
+        assert!(compact.contains("かなちいさなとりがにわでやすんでいる。"), "{width}x{height}: {output}");
+        assert!(compact.contains("ローマ字"), "{width}x{height}: {output}");
         assert!(!compact.contains("単語タイマー"), "{width}x{height}: {output}");
         assert!(compact.contains("[ESC]中断"), "{width}x{height}: {output}");
     }
@@ -580,7 +580,9 @@ fn every_prompt_family_picks_the_expected_stage_at_common_sizes() {
                 (120, 40, XlargeSelected, dot16, keycap),
                 (100, 36, XlargeSelected, dot16, keycap),
                 (80, 24, LargeHidden, dot12, None),
-                (80, 20, NormalKeyboard, None, keycap),
+                // The normal-text card is taller than the old three rows, so
+                // the keyboard gives way first.
+                (80, 20, NormalKeyboard, None, None),
             ],
         ),
         (
@@ -600,7 +602,7 @@ fn every_prompt_family_picks_the_expected_stage_at_common_sizes() {
                 (120, 40, XlargeSelected, dot16, keycap),
                 (100, 36, LargeSelected, dot12, keycap),
                 (80, 24, LargeHidden, dot12, None),
-                (80, 20, NormalKeyboard, None, keycap),
+                (80, 20, NormalKeyboard, None, None),
             ],
         ),
     ];
@@ -647,11 +649,15 @@ fn every_prompt_family_picks_the_expected_stage_at_common_sizes() {
             let game = app.game.as_ref().unwrap();
             let labelled = game.current_prompt.reading.is_some();
             if let Some(size) = size {
-                // Romaji and Japanese sentences put the "表記:" label first;
-                // otherwise the large glyphs themselves start on that row.
-                let glyph_row = metrics_row + 1 + u16::from(labelled);
+                // The large glyphs start on the row right below the metrics;
+                // a label ("表記") sits to their left on the same row.
+                let glyph_row = metrics_row + 1;
                 if labelled {
                     assert!(row_has_text(&terminal, metrics_row + 1), "{label}: label missing: {output}");
+                    assert!(
+                        compact_row(&terminal, "表記") == glyph_row,
+                        "{label}: label must share the glyph row: {output}"
+                    );
                 }
                 let first = game.current_prompt.text.chars().next().unwrap();
                 let raster = raster_of(size, first);
@@ -670,8 +676,8 @@ fn every_prompt_family_picks_the_expected_stage_at_common_sizes() {
 }
 
 #[test]
-fn prompt_size_setting_limits_or_disables_large_text() {
-    let normal = mode_app(ModeKind::Words, Lang::En, |config| config.display.prompt_size = "normal".to_owned());
+fn prompt_style_setting_chooses_large_or_normal_text() {
+    let normal = mode_app(ModeKind::Words, Lang::En, |config| config.display.prompt_style = "normal".to_owned());
     let layout = resolve_playing_layout(&normal, Rect::new(1, 1, 118, 38));
     assert_eq!(layout.stage, PromptLayoutStage::NormalKeyboard);
     assert_eq!(layout.bigtext, None);
@@ -679,30 +685,38 @@ fn prompt_size_setting_limits_or_disables_large_text() {
     let output = text(&terminal);
     let metrics_row = compact_row(&terminal, "Combo");
     assert!(!(metrics_row + 1..metrics_row + 4).any(|y| row_has_quadrants(&terminal, y)), "{output}");
-    let compact = output.chars().filter(|character| !character.is_whitespace()).collect::<String>();
-    assert!(compact.contains(&normal.game.as_ref().unwrap().current_prompt.target), "{output}");
+    let spaced = normal
+        .game
+        .as_ref()
+        .unwrap()
+        .current_prompt
+        .target
+        .chars()
+        .map(String::from)
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(output.contains(&spaced), "{output}");
     let caret_row = phrase_position(&terminal, "▲").1;
     assert!(
-        caret_row <= metrics_row + 3,
+        caret_row <= metrics_row + 5,
         "normal-size prompt must sit right below the metrics: {output}"
     );
 
-    let large = mode_app(ModeKind::Words, Lang::En, |config| config.display.prompt_size = "large".to_owned());
+    // Large text picks 16 dots when they fit and steps down to 12 dots.
+    let large = mode_app(ModeKind::Words, Lang::En, |config| config.display.prompt_style = "large".to_owned());
     let layout = resolve_playing_layout(&large, Rect::new(1, 1, 118, 38));
-    assert_eq!(layout.stage, PromptLayoutStage::LargeSelected);
-    assert_eq!(layout.bigtext, Some(BigTextSize::Dot12));
-
-    let xlarge = mode_app(ModeKind::Words, Lang::En, |config| config.display.prompt_size = "xlarge".to_owned());
-    assert_eq!(
-        resolve_playing_layout(&xlarge, Rect::new(1, 1, 118, 38)).bigtext,
-        Some(BigTextSize::Dot16)
-    );
-    let fallback = resolve_playing_layout(&xlarge, Rect::new(1, 1, 78, 22));
+    assert_eq!(layout.stage, PromptLayoutStage::XlargeSelected);
+    assert_eq!(layout.bigtext, Some(BigTextSize::Dot16));
+    let fallback = resolve_playing_layout(&large, Rect::new(1, 1, 78, 22));
     assert_eq!(
         fallback.bigtext,
         Some(BigTextSize::Dot12),
-        "xlarge steps down when it does not fit: {fallback:?}"
+        "large text steps down when 16 dots do not fit: {fallback:?}"
     );
+    // ...and to normal text when neither fits.
+    let tiny = resolve_playing_layout(&large, Rect::new(1, 1, 78, 8));
+    assert_eq!(tiny.bigtext, None, "{tiny:?}");
+    assert_eq!(tiny.stage, PromptLayoutStage::NormalKeyboard);
 }
 
 #[test]
@@ -754,13 +768,13 @@ fn romaji_screen_draws_surface_and_romaji_large_with_kana_between() {
             find_raster(&terminal, &raster_of(size, surface_first)).unwrap_or_else(|| panic!("{width}x{height}: surface glyph missing: {output}"));
         let guide =
             find_raster(&terminal, &raster_of(size, guide_first)).unwrap_or_else(|| panic!("{width}x{height}: romaji glyph missing: {output}"));
-        let kana_row = compact_row(&terminal, "かな:");
+        let kana_row = compact_row(&terminal, &format!("かな{reading}"));
         assert!(
             surface.1 < kana_row && kana_row < guide.1,
             "{width}x{height}: {surface:?} {kana_row} {guide:?}"
         );
         let compact = output.chars().filter(|character| !character.is_whitespace()).collect::<String>();
-        assert!(compact.contains(&format!("かな:{reading}")), "{width}x{height}: {output}");
+        assert!(compact.contains(&format!("かな{reading}")), "{width}x{height}: {output}");
     }
 }
 
@@ -815,21 +829,24 @@ fn long_japanese_sentence_keeps_every_guide_row_filled_at_common_sizes() {
                     .chars()
                     .filter(|character| !character.is_whitespace())
                     .collect::<String>()
+                    // The normal-text card draws its own frame.
+                    .trim_matches('│')
+                    .to_owned()
             })
             .collect::<Vec<_>>();
         let output = rows.join("\n");
-        let kana_rows = rows.iter().filter(|row| row.starts_with("かな:")).collect::<Vec<_>>();
+        let kana_rows = rows.iter().filter(|row| row.starts_with("かな")).collect::<Vec<_>>();
         assert!(!kana_rows.is_empty(), "{width}x{height}: {output}");
         for row in kana_rows {
             assert!(row.contains("に"), "{width}x{height}: the kana row must show the current kana: {output}");
         }
         assert!(
-            rows.iter().any(|row| row.starts_with("ローマ字:") && row.contains("ni")),
+            rows.iter().any(|row| row.starts_with("ローマ字") && row.contains("ni")),
             "{width}x{height}: the romaji row must show the current position: {output}"
         );
         assert!(
             rows.iter()
-                .any(|row| row.starts_with("表記:") && row.chars().count() > "表記:".chars().count()),
+                .any(|row| row.starts_with("表記") && row.chars().count() > "表記".chars().count()),
             "{width}x{height}: {output}"
         );
         assert!(output.contains("[ESC]中断"), "{width}x{height}: {output}");

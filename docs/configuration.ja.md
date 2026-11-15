@@ -9,7 +9,7 @@
 | キー | 型 | 既定値 | 説明 |
 |---|---|---|---|
 | `general.lang` | `en` / `ja` | `"en"` | 表示言語． |
-| `display.prompt_size` | `auto` / `normal` / `large` / `xlarge` | `"auto"` | 出題文字の大きさ．`large` は12ドット，`xlarge` は16ドットの字形を使い，収まらない場合は自動で段階を下げる． |
+| `display.prompt_style` | `large` / `normal` | `"large"` | 問題文の描き方．`large` は大きな字形（16ドット，入らなければ12ドット）で描き，どちらも入らなければ通常の文字にする．`normal` は端末の文字の大きさのまま，枠で囲んだカードに字間を広げて描く．モード選択画面の `Z` でも切り替えられる．旧キー `prompt_size` も読み込む（`normal` → `normal`，それ以外 → `large`）．アプリから保存すると `prompt_style` で書き戻す． |
 | `keyboard.layout` | 文字列 | `"qwerty"` | 同梱または利用者定義の練習レイアウト名． |
 | `keyboard.input_layout` | 文字列 | `"same"` | 物理キーの読み替えに使う OS 側のレイアウト． |
 | `keyboard.geometry` | `ansi` / `jis` | `"ansi"` | キーボードの物理配置． |

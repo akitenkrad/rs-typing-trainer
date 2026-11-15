@@ -24,6 +24,7 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | Mode selection | `P` | Toggle the pacer on supported modes |
 | Mode selection | `L` | Switch adaptive-practice language |
 | Mode selection | `[` / `]` | Decrease/increase preview items |
+| Mode selection | `Z` | Switch the prompt text between large and normal (saved when the mode starts) |
 | Mode selection | `Enter` | Continue to key selection or the countdown |
 | Benchmark selection | `↑` / `↓` (`k` / `j`) | Select Start or optional Part D |
 | Benchmark selection | `Enter` | Run the selected action |
@@ -58,9 +59,19 @@ While a word is sliding in or out, for about 200 ms on each side, keystrokes are
 
 The playing screen shows, from top to bottom: the header (time, WPM, item count and pace), the keyboard, the item timer bar, the combo/mistype/accuracy row, the prompt, and the preview and controls on the bottom row. The prompt starts immediately below the combo row instead of being vertically centred in the area below the keyboard, and remains centred horizontally.
 
-By default, prompts use the bundled Shinonome bitmap font. Four font dots become one terminal quadrant-block cell, so a 12-dot fullwidth character occupies 6×6 cells and a 16-dot character occupies 8×8 cells. English item modes enlarge the current item. Romaji enlarges both the written form and romanization, with emphasized normal-size kana between them. Sentence and endurance modes enlarge a window around the current position and retain the full sentence below at normal size. Pacer and ghost markers are placed above the corresponding large character. Blind mode leaves completed large glyphs blank. Large prompts keep one blank column inside the frame on each side. They need a terminal font that contains the quadrant block elements (U+2596–U+259F and U+2580–U+2590); if the terminal substitutes a fallback font whose glyphs are wider than one cell, the large rows can look wider than the frame, and `display.prompt_size = "normal"` avoids them. A character outside the bundled font (outside JIS X 0208 and ASCII/halfwidth kana) is drawn at normal size in the middle of its large cell.
+`display.prompt_style` chooses how the prompt is drawn: `large` (default) or `normal`. The settings screen calls it "Prompt text" with the values "Large text" and "Normal text", and `Z` on the mode selection screen toggles it.
 
-`display.prompt_size` selects `auto`, `normal`, `large` (12-dot), or `xlarge` (16-dot). The automatic order is 16-dot with the selected keyboard style, 12-dot with that style, 12-dot with a simpler keyboard, 12-dot with no keyboard, and normal prompt text with a keyboard. An explicitly selected size starts at its corresponding step and still steps down when necessary. The prompt and controls are never removed. `keyboard.show = "hidden"` omits and collapses the keyboard area at every height.
+**Large text** draws the item being typed with the bundled Shinonome bitmap font. Four font dots become one terminal quadrant-block cell, so a 12-dot fullwidth character occupies 6×6 cells and a 16-dot character occupies 8×8 cells. One blank row separates each large block from the normal-size rows around it, and labels sit in a column to the left of the block they name, on its top row:
+
+- English item modes: the large item and its `▔` cursor, then a blank row and a helper row (locking, mistype details, mistypes in this word, or the result) when there is room.
+- Romaji: the large written form, a blank row, the kana (bold, accent colour, the kana being typed reversed), a blank row, then the large romanization and its cursor. The labels (Surface / Kana / Romaji) line up in the left column and the blocks start at the same column.
+- Sentence and endurance: a large window around the current position and its cursor, a blank row, then the full sentence at normal size with the current position reversed. Japanese sentences show the romaji layout above, then a blank row and the surface / kana / romaji rows of the whole sentence.
+
+When the area is short, blank rows are given up first; glyphs are never cut. Pacer and ghost markers are placed above the corresponding large character. Blind mode leaves completed large glyphs blank. Large prompts keep one blank column inside the frame on each side. They need a terminal font that contains the quadrant block elements (U+2596–U+259F and U+2580–U+2590); if the terminal substitutes a fallback font whose glyphs are wider than one cell, the large rows can look wider than the frame, and `display.prompt_style = "normal"` avoids them. A character outside the bundled font (outside JIS X 0208 and ASCII/halfwidth kana) is drawn at normal size in the middle of its large cell.
+
+Large text picks its size from the terminal: 16-dot with the selected keyboard style, 12-dot with that style, 12-dot with a simpler keyboard, 12-dot with no keyboard, and finally normal text with whatever keyboard still fits. The prompt and controls are never removed. `keyboard.show = "hidden"` omits and collapses the keyboard area at every height.
+
+**Normal text** draws the prompt at terminal size inside a rounded card (`╭╮╰╯`) with two columns and one row of padding, centred below the combo row. Text still to type is bright and bold, the current character is reversed (on a red background while a mistype flashes), and typed text uses a calm colour. Item modes (words, random, n-gram, adaptive, unlock, rhythm, burst) put one blank cell between characters, with the `▲` caret directly below the current character. Romaji uses two columns — muted labels on the left, text on the right — for the written form (bold), kana and romaji, with a blank row between them; the current kana and romaji character are reversed. Sentences wrap inside the card; the row being typed is bright, the other rows are slightly dimmed, and the caret row follows the current row. Japanese sentences use the three-row layout with each row wrapped. Pacer and ghost markers sit on the row directly above the characters. Helper messages appear under the card. Normal text keeps the card in preference to the keyboard: the keyboard is simplified or hidden first, and on a very small terminal the card gives up its blank rows, padding and border before any text.
 
 ## Session history
 
@@ -76,7 +87,7 @@ If `--config` is omitted, rs-typing-trainer reads the first existing file from `
 
 `item_timeout_seconds = 0` disables the per-item timer and its bar. Sentence mode always disables that timer. An empty `mode.keys` value means no filtering in `words`, `romaji`, and `sentence`; `random` and `ngram` ask for keys on the key-selection screen.
 
-The settings screen edits layout, input layout, geometry, keyboard visibility (including `auto`), keyboard appearance, prompt size, language and error mode. It preserves existing comments and unrelated TOML values. See the [configuration reference](configuration.md) for every key and default, [Training tools](training.md) for training behavior, and [Keyboard layouts and display](keyboard.md) for remapping, custom layouts and key-release support.
+The settings screen edits layout, input layout, geometry, keyboard visibility (including `auto`), keyboard appearance, prompt text (large or normal), language and error mode. It preserves existing comments and unrelated TOML values. See the [configuration reference](configuration.md) for every key and default, [Training tools](training.md) for training behavior, and [Keyboard layouts and display](keyboard.md) for remapping, custom layouts and key-release support.
 
 ## If the terminal remains in a bad state
 

@@ -43,7 +43,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         (Msg::SettingGeometry, app.config.keyboard.geometry.as_str()),
         (Msg::SettingShow, app.config.keyboard.show.as_str()),
         (Msg::SettingKeyboardStyle, app.config.keyboard.style.as_str()),
-        (Msg::SettingPromptSize, app.config.display.prompt_size.as_str()),
+        (Msg::SettingPromptStyle, prompt_style_label(&app.config.display.prompt_style, lang)),
         (Msg::SettingLanguage, language),
         (
             Msg::SettingErrorMode,
@@ -130,10 +130,10 @@ fn setting_description(index: usize, lang: Lang) -> &'static str {
             "キーボードの見た目．keycap: 共有する罫線と実物に近いキー幅．raised: 色付きの面と影による立体表示．plain: 文字だけ．端末が小さいと自動で簡素なスタイルに切り替わります．既定: keycap．"
         }
         (5, Lang::En) => {
-            "Prompt size. auto chooses the largest text that fits. normal uses terminal text, large uses the 12-dot bitmap, and xlarge uses the 16-dot bitmap. If space is limited, the display steps down automatically. Default: auto."
+            "Large text (large): bitmap glyphs that get smaller automatically on a small terminal (16 → 12 dots, then normal text). Normal text (normal): terminal-size letters in a framed card with wider spacing. Also [Z] on mode select. Default: large."
         }
         (5, Lang::Ja) => {
-            "出題文字の大きさ．auto は収まる範囲で最大にします．normal は端末の通常文字，large は12ドット，xlarge は16ドットの字形です．場所が足りない場合は自動で段階を下げます．既定: auto．"
+            "大きな文字（large）は字形で大きく描き，端末が小さいと自動で小さくなる（16→12ドット→通常の文字）．通常の文字（normal）は端末の文字のまま枠で囲み，字間を広げて描く．モード選択の[Z]でも切り替えられる．既定:large．"
         }
         (6, Lang::En) => {
             "The interface language. Choose English or Japanese. This is separate from the practice language used by adaptive and sentence modes. Default: English."
@@ -148,5 +148,15 @@ fn setting_description(index: usize, lang: Lang) -> &'static str {
             "誤入力した文字の扱い．stop は正しいキーを打つまでその位置で止まります．advance は誤入力を記録して先へ進み，Backspace で戻れます．既定: stop．"
         }
         _ => "",
+    }
+}
+
+/// Localized label of a `display.prompt_style` value.
+pub fn prompt_style_label(value: &str, lang: Lang) -> &'static str {
+    match (value, lang) {
+        ("normal", Lang::En) => "Normal text",
+        ("normal", Lang::Ja) => "通常の文字",
+        (_, Lang::En) => "Large text",
+        (_, Lang::Ja) => "大きな文字",
     }
 }

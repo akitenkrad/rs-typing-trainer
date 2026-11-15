@@ -366,10 +366,10 @@ fn sentence_replay_shows_colored_progress_cursor_and_mistype_feedback() {
         "completed text color missing: {output}"
     );
     assert!(
-        central_cells.iter().any(|cell| cell.style().add_modifier.contains(Modifier::UNDERLINED)),
+        central_cells.iter().any(|cell| cell.style().add_modifier.contains(Modifier::REVERSED)),
         "current sentence position missing: {output}"
     );
-    assert!(output.contains("▲"), "sentence cursor missing: {output}");
+    assert!(output.contains("▔"), "sentence cursor missing: {output}");
 
     replay.advance_to(Duration::from_micros(5_739_037));
     terminal

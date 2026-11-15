@@ -119,7 +119,7 @@ fn every_setting_has_a_bilingual_description_with_options_and_a_default() {
         ("physical key arrangement", "物理的な並び"),
         ("full: always visible", "full: 常に表示"),
         ("Keyboard appearance", "キーボードの見た目"),
-        ("Prompt size", "出題文字の大きさ"),
+        ("Large text (large)", "大きな文字（large）"),
         ("interface language", "画面の表示言語"),
         ("mistyped character", "誤入力した文字"),
     ];
@@ -129,7 +129,7 @@ fn every_setting_has_a_bilingual_description_with_options_and_a_default() {
         ["ansi", "jis"].as_slice(),
         ["full", "auto", "dim", "hidden"].as_slice(),
         ["keycap", "raised", "plain"].as_slice(),
-        ["auto", "normal", "large", "xlarge"].as_slice(),
+        ["large", "normal", "16", "12"].as_slice(),
         ["English", "Japanese"].as_slice(),
         ["stop", "advance"].as_slice(),
     ];
@@ -227,11 +227,13 @@ fn settings_screen_cycles_and_saves_keyboard_style() {
 }
 
 #[test]
-fn settings_screen_cycles_saves_and_cancels_prompt_size() {
+fn settings_screen_cycles_saves_and_cancels_prompt_style() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("config.toml");
+    // A legacy key: read as `prompt_style = "large"` and rewritten under the new name.
     fs::write(&path, "[display]\nprompt_size = \"auto\" # keep\n").unwrap();
     let config = Config::from_path(&path).unwrap();
+    assert_eq!(config.display.prompt_style, "large");
     let mut app = test_app(config);
     app.config_path = Some(path.clone());
 
@@ -240,20 +242,42 @@ fn settings_screen_cycles_saves_and_cancels_prompt_size() {
         app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
     }
     app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
-    assert_eq!(app.config.display.prompt_size, "normal");
+    assert_eq!(app.config.display.prompt_style, "normal");
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-    assert_eq!(app.config.display.prompt_size, "auto");
+    assert_eq!(app.config.display.prompt_style, "large");
 
     app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
     for _ in 0..5 {
         app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
     }
     app.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
-    assert_eq!(app.config.display.prompt_size, "xlarge");
+    assert_eq!(app.config.display.prompt_style, "normal");
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
-    let updated = fs::read_to_string(path).unwrap();
-    assert!(updated.contains("prompt_size = \"xlarge\" # keep"), "{updated}");
+    let updated = fs::read_to_string(&path).unwrap();
+    assert!(updated.contains("prompt_style = \"normal\" # keep"), "{updated}");
+    assert!(!updated.contains("prompt_size"), "{updated}");
+    assert_eq!(Config::from_path(&path).unwrap().display.prompt_style, "normal");
+}
+
+#[test]
+fn legacy_prompt_size_values_map_to_prompt_style() {
+    let dir = TempDir::new().unwrap();
+    for (legacy, expected) in [("auto", "large"), ("normal", "normal"), ("large", "large"), ("xlarge", "large")] {
+        let path = dir.path().join(format!("{legacy}.toml"));
+        fs::write(&path, format!("[display]\nprompt_size = \"{legacy}\"\n")).unwrap();
+        assert_eq!(Config::from_path(&path).unwrap().display.prompt_style, expected, "{legacy}");
+    }
+    let both = dir.path().join("both.toml");
+    fs::write(&both, "[display]\nprompt_size = \"normal\"\nprompt_style = \"large\"\n").unwrap();
+    assert_eq!(Config::from_path(&both).unwrap().display.prompt_style, "large");
+    let new = dir.path().join("new.toml");
+    fs::write(&new, "[display]\nprompt_style = \"normal\"\n").unwrap();
+    assert_eq!(Config::from_path(&new).unwrap().display.prompt_style, "normal");
+    let invalid = dir.path().join("invalid.toml");
+    fs::write(&invalid, "[display]\nprompt_style = \"xlarge\"\n").unwrap();
+    assert!(Config::from_path(&invalid).is_err());
+    assert_eq!(Config::default().display.prompt_style, "large");
 }
 
 #[test]

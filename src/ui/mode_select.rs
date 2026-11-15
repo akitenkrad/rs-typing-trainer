@@ -38,7 +38,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     frame.render_widget(block, area);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Fill(1), Constraint::Length(12), Constraint::Length(3), Constraint::Fill(1)])
+        .constraints([Constraint::Fill(1), Constraint::Length(12), Constraint::Length(4), Constraint::Fill(1)])
         .split(inner);
     let lines = MODES
         .iter()
@@ -84,13 +84,19 @@ pub fn render(frame: &mut Frame, app: &App) {
         Lang::En => format!("[[]/[]] Preview: {}", app.config.session.preview_items),
         Lang::Ja => format!("[[]/[]] 先読み: {}", app.config.session.preview_items),
     };
+    let prompt_style = crate::ui::settings::prompt_style_label(&app.config.display.prompt_style, app.config.general.lang);
+    let options = [pacer, adaptive_language.as_str(), preview.as_str()]
+        .into_iter()
+        .filter(|option| !option.is_empty())
+        .collect::<Vec<_>>()
+        .join("  ");
     let hint = match app.config.general.lang {
         Lang::En => format!(
-            "{}\n{pacer}  {adaptive_language}  {preview}\n[↑/↓/k/j] Select  [ENTER] Continue  [ESC] Back",
+            "{}\n{options}\n[Z] Prompt text: {prompt_style}\n[↑/↓/k/j] Select  [ENTER] Continue  [ESC] Back",
             app.practice_theme.label(app.config.general.lang),
         ),
         Lang::Ja => format!(
-            "{}\n{pacer}  {adaptive_language}  {preview}\n[↑/↓/k/j] 選択  [ENTER] 次へ  [ESC] 戻る",
+            "{}\n{options}\n[Z] 問題文の表示: {prompt_style}\n[↑/↓/k/j] 選択  [ENTER] 次へ  [ESC] 戻る",
             app.practice_theme.label(app.config.general.lang),
         ),
     };

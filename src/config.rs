@@ -77,9 +77,35 @@ pub struct GeneralConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(from = "RawDisplayConfig")]
 pub struct DisplayConfig {
-    #[serde(default = "default_prompt_size")]
-    pub prompt_size: String,
+    /// `large` draws the prompt with bitmap glyphs (16 or 12 dots, whichever
+    /// fits, falling back to `normal`); `normal` draws it as terminal text in
+    /// a card.
+    pub prompt_style: String,
+}
+
+/// `[display]` as written on disk. Older files use `prompt_size`
+/// (`auto` / `normal` / `large` / `xlarge`); it is read as `prompt_style`
+/// (`normal` stays `normal`, every other value becomes `large`). When both
+/// keys are present, `prompt_style` wins.
+#[derive(Deserialize)]
+struct RawDisplayConfig {
+    #[serde(default)]
+    prompt_style: Option<String>,
+    #[serde(default)]
+    prompt_size: Option<String>,
+}
+
+impl From<RawDisplayConfig> for DisplayConfig {
+    fn from(raw: RawDisplayConfig) -> Self {
+        let prompt_style = raw.prompt_style.unwrap_or_else(|| match raw.prompt_size.as_deref() {
+            Some("normal") => "normal".to_owned(),
+            Some(_) => "large".to_owned(),
+            None => default_prompt_style(),
+        });
+        Self { prompt_style }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -526,7 +552,7 @@ impl Default for KeyboardConfig {
 impl Default for DisplayConfig {
     fn default() -> Self {
         Self {
-            prompt_size: default_prompt_size(),
+            prompt_style: default_prompt_style(),
         }
     }
 }
@@ -535,8 +561,8 @@ fn default_layout() -> String {
     "qwerty".to_owned()
 }
 
-fn default_prompt_size() -> String {
-    "auto".to_owned()
+fn default_prompt_style() -> String {
+    "large".to_owned()
 }
 
 fn default_duration_seconds() -> u64 {
@@ -802,10 +828,10 @@ impl Config {
                 value: self.keyboard.geometry.clone(),
             });
         }
-        if !matches!(self.display.prompt_size.as_str(), "auto" | "normal" | "large" | "xlarge") {
+        if !matches!(self.display.prompt_style.as_str(), "large" | "normal") {
             return Err(ConfigError::UnknownKeyboardSetting {
-                field: "display.prompt_size",
-                value: self.display.prompt_size.clone(),
+                field: "display.prompt_style",
+                value: self.display.prompt_style.clone(),
             });
         }
         if !matches!(self.keyboard.show.as_str(), "full" | "dim" | "hidden" | "auto") {
@@ -897,7 +923,7 @@ pub fn save_settings(path: &Path, config: &Config) -> AppResult<()> {
         Lang::Ja => "ja",
     };
     set_string_preserving_decor(&mut document["general"]["lang"], language);
-    set_string_preserving_decor(&mut document["display"]["prompt_size"], &config.display.prompt_size);
+    set_prompt_style(&mut document, &config.display.prompt_style);
     set_string_preserving_decor(
         &mut document["session"]["error_mode"],
         match config.session.error_mode {
@@ -937,8 +963,9 @@ pub fn save_mode_selection(path: &Path, mode: &ModeConfig) -> AppResult<()> {
 /// Persist controls edited directly on the mode-selection screen.
 pub fn save_mode_controls(path: &Path, config: &Config) -> AppResult<()> {
     let raw = if path.exists() { std::fs::read_to_string(path)? } else { String::new() };
-    let mut document = document_with_sections(&raw, &["session", "adaptive", "pacer"])?;
+    let mut document = document_with_sections(&raw, &["session", "adaptive", "pacer", "display"])?;
     set_integer_preserving_decor(&mut document["session"]["preview_items"], config.session.preview_items as i64);
+    set_prompt_style(&mut document, &config.display.prompt_style);
     set_string_preserving_decor(&mut document["adaptive"]["lang"], &config.adaptive.lang);
     set_bool_preserving_decor(&mut document["pacer"]["enabled"], config.pacer.enabled);
     if let Some(parent) = path.parent() {
@@ -984,6 +1011,27 @@ pub fn config_path_for_write(home: &Path, explicit: Option<&Path>) -> PathBuf {
         .map(Path::to_path_buf)
         .or_else(|| find_config_path(home))
         .unwrap_or_else(|| home.join(".config").join("rs-typing-trainer").join("config.toml"))
+}
+
+/// Write `display.prompt_style`, replacing a legacy `prompt_size` key in
+/// place of it (its comment is kept on the new key).
+fn set_prompt_style(document: &mut DocumentMut, value: &str) {
+    if let Some(display) = document["display"].as_table_like_mut()
+        && !display.contains_key("prompt_style")
+        && let Some(old) = display.remove("prompt_size")
+    {
+        let decor = old.as_value().map(|old| old.decor().clone());
+        let mut item = toml_edit::value(value);
+        if let (Some(decor), Some(new)) = (decor, item.as_value_mut()) {
+            *new.decor_mut() = decor;
+        }
+        display.insert("prompt_style", item);
+        return;
+    }
+    if let Some(display) = document["display"].as_table_like_mut() {
+        display.remove("prompt_size");
+    }
+    set_string_preserving_decor(&mut document["display"]["prompt_style"], value);
 }
 
 pub(crate) fn set_string_preserving_decor(item: &mut Item, value: &str) {

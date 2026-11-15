@@ -637,7 +637,7 @@ impl App {
                 self.settings_save_error = None;
                 self.settings_original = Some((
                     self.config.keyboard.clone(),
-                    self.config.display.prompt_size.clone(),
+                    self.config.display.prompt_style.clone(),
                     self.config.general.lang,
                     self.config.session.error_mode,
                 ));
@@ -672,7 +672,7 @@ impl App {
                 self.settings_save_error = None;
                 self.settings_original = Some((
                     self.config.keyboard.clone(),
-                    self.config.display.prompt_size.clone(),
+                    self.config.display.prompt_style.clone(),
                     self.config.general.lang,
                     self.config.session.error_mode,
                 ));
@@ -692,6 +692,14 @@ impl App {
                 if matches!(selected, ModeKind::Words | ModeKind::Sentence | ModeKind::Adaptive) {
                     self.config.pacer.enabled = !self.config.pacer.enabled;
                 }
+            }
+            KeyCode::Char('z') | KeyCode::Char('Z') => {
+                self.config.display.prompt_style = if self.config.display.prompt_style == "normal" {
+                    "large"
+                } else {
+                    "normal"
+                }
+                .to_owned();
             }
             KeyCode::Char('l') | KeyCode::Char('L') if MODES[self.mode_selected] == ModeKind::Adaptive => {
                 self.config.adaptive.lang = if self.config.adaptive.lang == "en" { "ja" } else { "en" }.to_owned();
@@ -1100,9 +1108,9 @@ impl App {
     }
 
     fn cancel_settings(&mut self) {
-        if let Some((keyboard, prompt_size, language, error_mode)) = self.settings_original.take() {
+        if let Some((keyboard, prompt_style, language, error_mode)) = self.settings_original.take() {
             self.config.keyboard = keyboard;
-            self.config.display.prompt_size = prompt_size;
+            self.config.display.prompt_style = prompt_style;
             self.config.general.lang = language;
             self.config.session.error_mode = error_mode;
         }
@@ -1133,8 +1141,8 @@ impl App {
                 direction,
             ),
             5 => cycle_string(
-                &mut self.config.display.prompt_size,
-                &["auto".to_owned(), "normal".to_owned(), "large".to_owned(), "xlarge".to_owned()],
+                &mut self.config.display.prompt_style,
+                &["large".to_owned(), "normal".to_owned()],
                 direction,
             ),
             6 => {

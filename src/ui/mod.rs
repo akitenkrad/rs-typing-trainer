@@ -12,6 +12,7 @@ pub mod key_picker;
 pub mod keyboard;
 pub mod mode_select;
 pub mod playing;
+pub mod prompt;
 pub mod replay;
 pub mod result;
 pub mod settings;
