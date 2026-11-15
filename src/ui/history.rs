@@ -4,12 +4,12 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Block, Borders, HighlightSpacing, List, ListItem, ListState, Paragraph};
 
 use crate::app::{App, HistorySort};
 use crate::i18n::Msg;
 use crate::record::db::SessionSummary;
-use crate::ui::theme::Theme;
+use crate::ui::{left_inset, theme::Theme};
 
 pub fn render(frame: &mut Frame, app: &App) {
     let theme = Theme::from_name(&app.config.ui.theme);
@@ -28,8 +28,8 @@ pub fn render(frame: &mut Frame, app: &App) {
         .constraints([Constraint::Length(2), Constraint::Min(0), Constraint::Length(2)])
         .split(inner);
 
-    render_header(frame, app, &theme, chunks[0]);
-    render_list(frame, app, &theme, chunks[1]);
+    render_header(frame, app, &theme, left_inset(chunks[0]));
+    render_list(frame, app, &theme, left_inset(chunks[1]));
     render_hint(frame, app, &theme, chunks[2]);
 }
 
@@ -68,9 +68,7 @@ fn render_list(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     }
 
     if app.history.is_empty() {
-        let p = Paragraph::new(Msg::NoPastSessions.text(lang))
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(theme.muted));
+        let p = Paragraph::new(Msg::NoPastSessions.text(lang)).style(Style::default().fg(theme.muted));
         frame.render_widget(p, area);
         return;
     }
@@ -116,7 +114,8 @@ fn render_list(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 
     let list = List::new(items)
         .highlight_style(Style::default().fg(theme.accent).add_modifier(Modifier::BOLD | Modifier::REVERSED))
-        .highlight_symbol("▶ ");
+        .highlight_symbol("▶ ")
+        .highlight_spacing(HighlightSpacing::Always);
 
     let mut state = ListState::default();
     state.select(Some(app.history_selected));
@@ -169,8 +168,6 @@ fn render_hint(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     } else {
         Msg::HistoryHint
     };
-    let p = Paragraph::new(message.text(app.config.general.lang))
-        .style(Style::default().fg(theme.accent))
-        .alignment(Alignment::Center);
-    frame.render_widget(p, area);
+    let p = Paragraph::new(message.text(app.config.general.lang)).style(Style::default().fg(theme.accent));
+    frame.render_widget(p, left_inset(area));
 }

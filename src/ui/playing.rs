@@ -1,4 +1,4 @@
-//! Playing screen — top stats bar, central word, word-timer bar, and footer.
+//! Playing screen — stats, keyboard, item timer, centred prompt, and footer.
 
 use std::time::{Duration, Instant};
 
@@ -98,10 +98,17 @@ pub fn render_with_footer(frame: &mut Frame, app: &App, footer: Option<Line<'sta
     if show_rhythm {
         constraints.push(Constraint::Length(1));
     }
-    constraints.extend([Constraint::Length(1), Constraint::Min(word_rows)]);
+    constraints.push(Constraint::Length(1));
     if show_keyboard {
-        constraints.extend([Constraint::Length(1), Constraint::Length(keyboard_rows)]);
+        constraints.push(Constraint::Length(keyboard_rows));
     }
+    if show_timer {
+        constraints.push(Constraint::Length(1));
+    }
+    if show_sub_stats {
+        constraints.push(Constraint::Length(1));
+    }
+    constraints.push(Constraint::Min(word_rows));
     constraints.push(Constraint::Length(1)); // footer
     let chunks = Layout::default().direction(Direction::Vertical).constraints(constraints).split(inner);
 
@@ -118,15 +125,23 @@ pub fn render_with_footer(frame: &mut Frame, app: &App, footer: Option<Line<'sta
     }
     frame.render_widget(separator_line(), chunks[index]);
     index += 1;
-    render_center(frame, app, &theme, chunks[index], show_sub_stats, show_timer);
+    if show_keyboard {
+        render_keyboard(frame, app, chunks[index]);
+        index += 1;
+    }
+    if show_timer {
+        render_word_timer(frame, app, &theme, chunks[index]);
+        index += 1;
+    }
+    if show_sub_stats {
+        if let Some(game) = app.game.as_ref() {
+            render_sub_stats(frame, game, &theme, chunks[index], lang);
+        }
+        index += 1;
+    }
+    render_word(frame, app, &theme, chunks[index]);
     index += 1;
-    let footer_index = if show_keyboard {
-        frame.render_widget(separator_line(), chunks[index]);
-        render_keyboard(frame, app, chunks[index + 1]);
-        index + 2
-    } else {
-        index
-    };
+    let footer_index = index;
     if let Some(footer) = footer {
         frame.render_widget(
             Paragraph::new(footer)
@@ -329,81 +344,6 @@ fn render_top_bar(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-fn render_center(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, show_sub_stats: bool, show_timer: bool) {
-    let Some(game) = app.game.as_ref() else { return };
-
-    if matches!(
-        app.config.mode.kind,
-        crate::config::ModeKind::Sentence | crate::config::ModeKind::Endurance
-    ) {
-        if show_sub_stats {
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Min(3), Constraint::Length(1), Constraint::Length(1)])
-                .split(area);
-            render_word(frame, app, theme, chunks[0]);
-            render_sub_stats(frame, game, theme, chunks[2], app.config.general.lang);
-        } else {
-            render_word(frame, app, theme, area);
-        }
-        return;
-    }
-
-    if !show_timer && show_sub_stats {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(0),
-                Constraint::Length(5),
-                Constraint::Length(1),
-                Constraint::Length(1),
-                Constraint::Min(0),
-            ])
-            .split(area);
-        render_word(frame, app, theme, chunks[1]);
-        render_sub_stats(frame, game, theme, chunks[3], app.config.general.lang);
-        return;
-    }
-
-    if show_timer && !show_sub_stats {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(0),
-                Constraint::Length(5),
-                Constraint::Length(1),
-                Constraint::Length(1),
-                Constraint::Min(0),
-            ])
-            .split(area);
-        render_word(frame, app, theme, chunks[1]);
-        render_word_timer(frame, app, theme, chunks[3]);
-        return;
-    }
-
-    if !show_sub_stats {
-        render_word(frame, app, theme, area);
-        return;
-    }
-
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(0),
-            Constraint::Length(5), // word
-            Constraint::Length(1),
-            Constraint::Length(1), // word timer
-            Constraint::Length(1),
-            Constraint::Length(1), // sub stats
-            Constraint::Min(0),
-        ])
-        .split(area);
-
-    render_word(frame, app, theme, chunks[1]);
-    render_word_timer(frame, app, theme, chunks[3]);
-    render_sub_stats(frame, game, theme, chunks[5], app.config.general.lang);
-}
-
 fn render_word(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let Some(game) = app.game.as_ref() else { return };
 
@@ -416,7 +356,7 @@ fn render_word(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             Paragraph::new(warning)
                 .alignment(Alignment::Center)
                 .style(Style::default().fg(theme.mistype).add_modifier(Modifier::BOLD)),
-            area,
+            vertically_centered(area, 1),
         );
         return;
     }
@@ -540,8 +480,9 @@ fn render_word(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 .add_modifier(if flashing { Modifier::BOLD } else { Modifier::empty() }),
         )),
     ]);
+    let content_area = vertically_centered(area, lines.len() as u16);
     let para = Paragraph::new(lines).alignment(Alignment::Center);
-    frame.render_widget(para, area);
+    frame.render_widget(para, content_area);
 }
 
 fn render_romaji_word(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
@@ -594,13 +535,15 @@ fn render_japanese_prompt(frame: &mut Frame, app: &App, theme: &Theme, area: Rec
         Span::styled(format!("{surface_label}: "), Style::default().fg(theme.muted)),
         Span::styled(game.current_prompt.text.clone(), Style::default().fg(theme.fg)),
     ];
+    let mut surface_suffix = String::new();
     if let WordState::Exiting { kind, .. } = &game.current_word.state {
         let (message, color) = match kind {
             ExitKind::Correct => (Msg::Correct.text(app.config.general.lang), theme.correct),
             ExitKind::Mistyped => (Msg::CompletedWithMistypes.text(app.config.general.lang), theme.warning),
             ExitKind::Timeout => (Msg::Timeout.text(app.config.general.lang), theme.mistype),
         };
-        surface_spans.push(Span::styled(format!("    {message}"), Style::default().fg(color)));
+        surface_suffix = format!("    {message}");
+        surface_spans.push(Span::styled(surface_suffix.clone(), Style::default().fg(color)));
     }
     let surface = Line::from(surface_spans);
     let kana = Line::from(
@@ -614,7 +557,21 @@ fn render_japanese_prompt(frame: &mut Frame, app: &App, theme: &Theme, area: Rec
             .collect::<Vec<_>>(),
     );
     let markers = progress_markers(app, 1);
-    let constraints = if markers.is_some() {
+    let surface_width = UnicodeWidthStr::width(format!("{surface_label}: {}{surface_suffix}", game.current_prompt.text).as_str());
+    let kana_width = UnicodeWidthStr::width(format!("{reading_label}: {reading}").as_str());
+    let romaji_width = UnicodeWidthStr::width(format!("{romaji_label}: {guide}").as_str());
+    let content_width = surface_width.max(kana_width).max(romaji_width).clamp(1, usize::from(area.width.max(1))) as u16;
+    let row_heights = [surface_width, kana_width, romaji_width].map(|width| width.div_ceil(usize::from(content_width)).max(1) as u16);
+    let desired_height = row_heights.iter().sum::<u16>() + u16::from(markers.is_some());
+    let content_area = centered_rect(area, content_width, desired_height.min(area.height));
+    let constraints = if desired_height <= area.height {
+        let mut constraints = Vec::with_capacity(4);
+        if markers.is_some() {
+            constraints.push(Constraint::Length(1));
+        }
+        constraints.extend(row_heights.map(Constraint::Length));
+        constraints
+    } else if markers.is_some() {
         vec![
             Constraint::Length(1),
             Constraint::Ratio(1, 3),
@@ -624,7 +581,10 @@ fn render_japanese_prompt(frame: &mut Frame, app: &App, theme: &Theme, area: Rec
     } else {
         vec![Constraint::Ratio(1, 3), Constraint::Ratio(1, 3), Constraint::Ratio(1, 3)]
     };
-    let rows = Layout::default().direction(Direction::Vertical).constraints(constraints).split(area);
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
+        .split(content_area);
     let offset = usize::from(markers.is_some());
     if let Some(markers) = markers {
         frame.render_widget(Paragraph::new(markers), rows[0]);
@@ -665,19 +625,9 @@ fn render_wrapped_guide(frame: &mut Frame, line: Line<'static>, area: Rect, curs
 
 fn render_sentence(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let Some(game) = app.game.as_ref() else { return };
-    let (marker_area, text_area) = if progress_markers(app, 1).is_some() && area.height > 1 {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(1), Constraint::Min(1)])
-            .split(area);
-        (Some(chunks[0]), chunks[1])
-    } else {
-        (None, area)
-    };
-    if let (Some(marker_area), Some(markers)) = (marker_area, progress_markers(app, 1)) {
-        frame.render_widget(Paragraph::new(markers), marker_area);
-    }
-    let width = text_area.width.max(1) as usize;
+    let markers = progress_markers(app, 1);
+    let content_width = area.width.clamp(1, 72);
+    let width = usize::from(content_width);
     let graphemes = game.current_prompt.text.graphemes(true).map(str::to_owned).collect::<Vec<_>>();
     let display_start = if app.config.mode.sentence.hide_typed {
         game.typed_index.min(graphemes.len())
@@ -724,15 +674,48 @@ fn render_sentence(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 .map(|grapheme| UnicodeWidthStr::width(grapheme.as_str()))
                 .sum::<usize>();
             let glyph = if flashing { "✗" } else { "▲" };
+            let line_width = visible[start..end]
+                .iter()
+                .map(|grapheme| UnicodeWidthStr::width(grapheme.as_str()))
+                .sum::<usize>();
             lines.push(Line::from(Span::styled(
-                format!("{}{glyph}", " ".repeat(column)),
+                format!("{}{glyph}{}", " ".repeat(column), " ".repeat(line_width.saturating_sub(column + 1))),
                 Style::default()
                     .fg(if flashing { theme.mistype } else { theme.accent })
                     .add_modifier(if flashing { Modifier::BOLD } else { Modifier::empty() }),
             )));
         }
     }
-    frame.render_widget(Paragraph::new(lines).alignment(Alignment::Left).wrap(Wrap { trim: false }), text_area);
+    let desired_height = lines.len() as u16 + u16::from(markers.is_some());
+    let content_area = centered_rect(area, content_width, desired_height.min(area.height));
+    let (marker_area, text_area) = if markers.is_some() && content_area.height > 1 {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(1)])
+            .split(content_area);
+        (Some(chunks[0]), chunks[1])
+    } else {
+        (None, content_area)
+    };
+    if let (Some(marker_area), Some(markers)) = (marker_area, markers) {
+        frame.render_widget(Paragraph::new(markers).alignment(Alignment::Center), marker_area);
+    }
+    frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), text_area);
+}
+
+fn vertically_centered(area: Rect, desired_height: u16) -> Rect {
+    centered_rect(area, area.width, desired_height.min(area.height))
+}
+
+fn centered_rect(area: Rect, desired_width: u16, desired_height: u16) -> Rect {
+    let width = desired_width.min(area.width);
+    let height = desired_height.min(area.height);
+    Rect::new(
+        area.x + area.width.saturating_sub(width) / 2,
+        area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    )
 }
 
 fn progress_markers(app: &App, cell_width: usize) -> Option<Line<'static>> {
@@ -802,17 +785,27 @@ fn wrap_graphemes(graphemes: &[String], width: usize) -> Vec<(usize, usize)> {
     }
     let mut ranges = Vec::new();
     let mut start = 0;
-    let mut current_width = 0usize;
-    for (index, grapheme) in graphemes.iter().enumerate() {
-        let grapheme_width = UnicodeWidthStr::width(grapheme.as_str());
-        if current_width > 0 && current_width + grapheme_width > width {
-            ranges.push((start, index));
-            start = index;
-            current_width = 0;
+    while start < graphemes.len() {
+        let mut end = start;
+        let mut current_width = 0usize;
+        let mut last_word_break = None;
+        while end < graphemes.len() {
+            let grapheme_width = UnicodeWidthStr::width(graphemes[end].as_str());
+            if current_width > 0 && current_width + grapheme_width > width {
+                break;
+            }
+            current_width += grapheme_width;
+            end += 1;
+            if graphemes[end - 1].chars().all(char::is_whitespace) {
+                last_word_break = Some(end);
+            }
         }
-        current_width += grapheme_width;
+        if end < graphemes.len() {
+            end = last_word_break.filter(|word_break| *word_break > start).unwrap_or(end);
+        }
+        ranges.push((start, end));
+        start = end;
     }
-    ranges.push((start, graphemes.len()));
     ranges
 }
 

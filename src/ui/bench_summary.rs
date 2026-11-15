@@ -1,5 +1,5 @@
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Constraint, Direction, Layout};
+use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
@@ -7,7 +7,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use crate::app::App;
 use crate::bench::BenchPart;
 use crate::i18n::Msg;
-use crate::ui::theme::Theme;
+use crate::ui::{left_inset, theme::Theme};
 
 pub fn render(frame: &mut Frame, app: &App) {
     let lang = app.config.general.lang;
@@ -38,12 +38,10 @@ pub fn render(frame: &mut Frame, app: &App) {
         ]));
         lines.push(Line::from(format!("    {}: {}", Msg::BenchVersion.text(lang), result.id)));
     }
-    frame.render_widget(Paragraph::new(lines), chunks[0]);
+    frame.render_widget(Paragraph::new(lines), left_inset(chunks[0]));
     frame.render_widget(
-        Paragraph::new(Msg::BenchSummaryHint.text(lang))
-            .style(Style::default().fg(theme.accent).add_modifier(Modifier::BOLD))
-            .alignment(Alignment::Center),
-        chunks[1],
+        Paragraph::new(Msg::BenchSummaryHint.text(lang)).style(Style::default().fg(theme.accent).add_modifier(Modifier::BOLD)),
+        left_inset(chunks[1]),
     );
 }
 

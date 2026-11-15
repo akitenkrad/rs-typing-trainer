@@ -1,12 +1,11 @@
 use ratatui::Frame;
-use ratatui::layout::Alignment;
 use ratatui::style::{Modifier, Style};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::app::App;
 use crate::i18n::Msg;
-use crate::ui::theme::Theme;
+use crate::ui::{left_inset, theme::Theme};
 
 pub fn render(frame: &mut Frame, app: &App) {
     let lang = app.config.general.lang;
@@ -21,16 +20,25 @@ pub fn render(frame: &mut Frame, app: &App) {
         .title(format!(" {} ", Msg::BenchSelectTitle.text(lang)));
     let inner = block.inner(frame.area());
     frame.render_widget(block, frame.area());
-    frame.render_widget(
-        Paragraph::new(vec![
-            Line::from(""),
-            Line::from(Msg::BenchRequiredParts.text(lang)),
-            Line::from(""),
-            Line::from(optional).style(Style::default().fg(theme.accent).add_modifier(Modifier::BOLD)),
-            Line::from(""),
-            Line::from(Msg::BenchSelectHint.text(lang)),
+    let start = match lang {
+        crate::i18n::Lang::En => "Start benchmark  [Enter]",
+        crate::i18n::Lang::Ja => "ベンチマーク開始  [Enter]",
+    };
+    let items = [start, optional];
+    let mut lines = vec![Line::from(""), Line::from(Msg::BenchRequiredParts.text(lang)), Line::from("")];
+    lines.extend(items.iter().enumerate().map(|(index, label)| {
+        let selected = index == app.bench_selected;
+        Line::from(vec![
+            Span::styled(if selected { "▶  " } else { "   " }, Style::default().fg(theme.accent)),
+            Span::styled(
+                *label,
+                Style::default()
+                    .fg(if selected { theme.warning } else { theme.fg })
+                    .add_modifier(if selected { Modifier::BOLD } else { Modifier::empty() }),
+            ),
         ])
-        .alignment(Alignment::Center),
-        inner,
-    );
+    }));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Msg::BenchSelectHint.text(lang)).style(Style::default().fg(theme.accent)));
+    frame.render_widget(Paragraph::new(lines), left_inset(inner));
 }

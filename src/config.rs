@@ -829,10 +829,7 @@ impl Config {
 /// Update only `[keyboard].layout`, preserving comments and unrelated keys.
 pub fn save_keyboard_layout(path: &Path, layout: &str) -> AppResult<()> {
     let raw = if path.exists() { std::fs::read_to_string(path)? } else { String::new() };
-    let mut document = raw.parse::<DocumentMut>()?;
-    if !document.as_table().contains_key("keyboard") {
-        document["keyboard"] = Item::Table(toml_edit::Table::new());
-    }
+    let mut document = document_with_sections(&raw, &["keyboard"])?;
     set_string_preserving_decor(&mut document["keyboard"]["layout"], layout);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -845,16 +842,7 @@ pub fn save_keyboard_layout(path: &Path, layout: &str) -> AppResult<()> {
 /// rest of the document.
 pub fn save_settings(path: &Path, config: &Config) -> AppResult<()> {
     let raw = if path.exists() { std::fs::read_to_string(path)? } else { String::new() };
-    let mut document = raw.parse::<DocumentMut>()?;
-    if !document.as_table().contains_key("keyboard") {
-        document["keyboard"] = Item::Table(toml_edit::Table::new());
-    }
-    if !document.as_table().contains_key("general") {
-        document["general"] = Item::Table(toml_edit::Table::new());
-    }
-    if !document.as_table().contains_key("session") {
-        document["session"] = Item::Table(toml_edit::Table::new());
-    }
+    let mut document = document_with_sections(&raw, &["keyboard", "general", "session"])?;
     for (key, value) in [
         ("layout", config.keyboard.layout.as_str()),
         ("input_layout", config.keyboard.input_layout.as_str()),
@@ -886,10 +874,7 @@ pub fn save_settings(path: &Path, config: &Config) -> AppResult<()> {
 /// preserving comments and unrelated keys.
 pub fn save_mode_selection(path: &Path, mode: &ModeConfig) -> AppResult<()> {
     let raw = if path.exists() { std::fs::read_to_string(path)? } else { String::new() };
-    let mut document = raw.parse::<DocumentMut>()?;
-    if !document.as_table().contains_key("mode") {
-        document["mode"] = Item::Table(toml_edit::Table::new());
-    }
+    let mut document = document_with_sections(&raw, &["mode"])?;
     set_string_preserving_decor(&mut document["mode"]["kind"], mode.kind.as_str());
     set_string_preserving_decor(&mut document["mode"]["keys"], &mode.keys);
     set_string_preserving_decor(
@@ -910,12 +895,7 @@ pub fn save_mode_selection(path: &Path, mode: &ModeConfig) -> AppResult<()> {
 /// Persist controls edited directly on the mode-selection screen.
 pub fn save_mode_controls(path: &Path, config: &Config) -> AppResult<()> {
     let raw = if path.exists() { std::fs::read_to_string(path)? } else { String::new() };
-    let mut document = raw.parse::<DocumentMut>()?;
-    for section in ["session", "adaptive", "pacer"] {
-        if !document.as_table().contains_key(section) {
-            document[section] = Item::Table(toml_edit::Table::new());
-        }
-    }
+    let mut document = document_with_sections(&raw, &["session", "adaptive", "pacer"])?;
     set_integer_preserving_decor(&mut document["session"]["preview_items"], config.session.preview_items as i64);
     set_string_preserving_decor(&mut document["adaptive"]["lang"], &config.adaptive.lang);
     set_bool_preserving_decor(&mut document["pacer"]["enabled"], config.pacer.enabled);
@@ -924,6 +904,37 @@ pub fn save_mode_controls(path: &Path, config: &Config) -> AppResult<()> {
     }
     std::fs::write(path, document.to_string())?;
     Ok(())
+}
+
+fn document_with_sections(raw: &str, sections: &[&str]) -> AppResult<DocumentMut> {
+    let document = raw.parse::<DocumentMut>()?;
+    let missing = sections
+        .iter()
+        .copied()
+        .filter(|section| !document.as_table().contains_key(section))
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
+        return Ok(document);
+    }
+
+    let mut extended = raw.to_owned();
+    if !extended.is_empty() {
+        if !extended.ends_with('\n') {
+            extended.push('\n');
+        }
+        if !extended.ends_with("\n\n") {
+            extended.push('\n');
+        }
+    }
+    for (index, section) in missing.iter().enumerate() {
+        if index > 0 {
+            extended.push('\n');
+        }
+        extended.push('[');
+        extended.push_str(section);
+        extended.push_str("]\n");
+    }
+    Ok(extended.parse::<DocumentMut>()?)
 }
 
 pub fn config_path_for_write(home: &Path, explicit: Option<&Path>) -> PathBuf {

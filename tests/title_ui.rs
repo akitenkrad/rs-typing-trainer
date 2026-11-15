@@ -1,5 +1,7 @@
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use rs_typing_trainer::app::Screen;
 use rs_typing_trainer::config::Config;
 use rs_typing_trainer::i18n::{Lang, Msg};
 use rs_typing_trainer::ui;
@@ -34,13 +36,63 @@ fn without_whitespace(text: &str) -> String {
     text.chars().filter(|ch| !ch.is_whitespace()).collect()
 }
 
+fn key(code: KeyCode) -> KeyEvent {
+    KeyEvent::new(code, KeyModifiers::NONE)
+}
+
+fn render_app(app: &rs_typing_trainer::app::App) -> Terminal<TestBackend> {
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+    terminal.draw(|frame| ui::title::render(frame, app)).unwrap();
+    terminal
+}
+
+fn symbol_column(terminal: &Terminal<TestBackend>, symbol: &str) -> u16 {
+    let buffer = terminal.backend().buffer();
+    buffer
+        .content()
+        .iter()
+        .enumerate()
+        .find(|(_, cell)| cell.symbol() == symbol)
+        .map(|(index, _)| index as u16 % buffer.area.width)
+        .unwrap_or_else(|| panic!("symbol {symbol:?} was not rendered"))
+}
+
+fn phrase_column(terminal: &Terminal<TestBackend>, phrase: &str) -> u16 {
+    let buffer = terminal.backend().buffer();
+    for y in 0..buffer.area.height {
+        for x in 0..buffer.area.width {
+            let suffix = (x..buffer.area.width).map(|column| buffer[(column, y)].symbol()).collect::<String>();
+            if suffix.starts_with(phrase) {
+                return x;
+            }
+        }
+    }
+    panic!("phrase {phrase:?} was not rendered");
+}
+
+fn row_containing(terminal: &Terminal<TestBackend>, phrase: &str) -> u16 {
+    let buffer = terminal.backend().buffer();
+    for y in 0..buffer.area.height {
+        let row = (0..buffer.area.width).map(|x| buffer[(x, y)].symbol()).collect::<String>();
+        if without_whitespace(&row).contains(&without_whitespace(phrase)) {
+            return y;
+        }
+    }
+    panic!("phrase {phrase:?} was not rendered");
+}
+
+fn colon_columns(terminal: &Terminal<TestBackend>, row: u16) -> Vec<u16> {
+    let buffer = terminal.backend().buffer();
+    (0..buffer.area.width).filter(|x| buffer[(*x, row)].symbol() == ":").collect()
+}
+
 #[test]
 fn title_uses_english_messages() {
     let rendered = render_title(Lang::En);
 
     assert!(without_whitespace(&rendered).contains(&without_whitespace(Msg::TitleLogo.text(Lang::En))));
     assert!(without_whitespace(&rendered).contains(&without_whitespace(Msg::TitleTagline.text(Lang::En))));
-    assert!(rendered.contains("[B] Benchmark"), "{rendered}");
+    assert!(rendered.contains("Benchmark  [B]"), "{rendered}");
 }
 
 #[test]
@@ -52,6 +104,54 @@ fn title_uses_japanese_messages() {
         without_whitespace(&rendered).contains(&without_whitespace(Msg::TitleTagline.text(Lang::Ja))),
         "rendered buffer:\n{rendered}"
     );
+}
+
+#[test]
+fn title_uses_the_product_name_and_localizes_the_practice_label() {
+    for lang in [Lang::En, Lang::Ja] {
+        let rendered = render_title(lang);
+        assert!(
+            rendered.contains(concat!("rs-typing-trainer  v", env!("CARGO_PKG_VERSION"))),
+            "{lang:?}: {rendered}"
+        );
+        assert!(!rendered.contains("RS -"), "{lang:?}: {rendered}");
+        assert!(
+            without_whitespace(&rendered).contains(&without_whitespace(Msg::Practice.text(lang))),
+            "{lang:?}: {rendered}"
+        );
+    }
+    assert!(!render_title(Lang::Ja).contains("Practice"));
+}
+
+#[test]
+fn title_information_uses_unicode_width_to_align_label_and_value_columns() {
+    for lang in [Lang::En, Lang::Ja] {
+        let mut config = Config::default();
+        config.general.lang = lang;
+        let app = test_app(config);
+        let terminal = render_app(&app);
+        let primary_labels = [Msg::Practice, Msg::Charset, Msg::Duration, Msg::WordLength, Msg::Database];
+        let primary_colons = primary_labels
+            .iter()
+            .map(|message| {
+                let row = row_containing(&terminal, message.text(lang));
+                colon_columns(&terminal, row)[0]
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            primary_colons.windows(2).all(|columns| columns[0] == columns[1]),
+            "{lang:?}: {primary_colons:?}"
+        );
+
+        let secondary_colons = [Msg::WordTimeout, Msg::Animation]
+            .iter()
+            .map(|message| {
+                let row = row_containing(&terminal, message.text(lang));
+                *colon_columns(&terminal, row).last().unwrap()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(secondary_colons[0], secondary_colons[1], "{lang:?}: {secondary_colons:?}");
+    }
 }
 
 #[test]
@@ -83,5 +183,90 @@ fn title_shows_database_copy_notice_in_both_languages() {
             .collect::<Vec<_>>()
             .join("");
         assert!(without_whitespace(&rendered).contains(&without_whitespace(Msg::LegacyDatabaseCopied.text(lang))));
+    }
+}
+
+#[test]
+fn title_fits_all_optional_notices_at_80_by_24() {
+    let mut app = test_app(Config::default());
+    app.storage_notice = true;
+    app.recommend_preview = true;
+    app.recommend_rhythm = true;
+    let terminal = render_app(&app);
+    let rendered = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<Vec<_>>()
+        .join("");
+
+    assert!(rendered.to_lowercase().contains("copied"), "{rendered}");
+    assert!(rendered.contains("preview"), "{rendered}");
+    assert!(rendered.contains("Rhythm"), "{rendered}");
+}
+
+#[test]
+fn title_menu_moves_with_arrows_and_vi_keys_and_enter_runs_the_selection() {
+    let mut app = test_app(Config::default());
+
+    app.handle_key(key(KeyCode::Down));
+    app.handle_key(key(KeyCode::Enter));
+    assert_eq!(app.screen, Screen::BenchSelect);
+
+    let mut app = test_app(Config::default());
+    app.handle_key(key(KeyCode::Char('j')));
+    app.handle_key(key(KeyCode::Char('j')));
+    app.handle_key(key(KeyCode::Char('k')));
+    app.handle_key(key(KeyCode::Enter));
+    assert_eq!(app.screen, Screen::BenchSelect);
+}
+
+#[test]
+fn title_menu_keeps_all_shortcuts() {
+    for (code, expected) in [
+        (KeyCode::Char(' '), Some(Screen::ModeSelect)),
+        (KeyCode::Char('b'), Some(Screen::BenchSelect)),
+        (KeyCode::Char('a'), Some(Screen::Analysis)),
+        (KeyCode::Char('h'), Some(Screen::History)),
+        (KeyCode::Char('s'), Some(Screen::Settings)),
+    ] {
+        let mut app = test_app(Config::default());
+        app.handle_key(key(code));
+        assert_eq!(Some(app.screen), expected);
+    }
+
+    for code in [KeyCode::Char('q'), KeyCode::Esc] {
+        let mut app = test_app(Config::default());
+        app.handle_key(key(code));
+        assert!(app.should_quit);
+    }
+}
+
+#[test]
+fn title_menu_is_left_aligned_and_only_the_selection_has_an_arrow_in_both_languages() {
+    for lang in [Lang::En, Lang::Ja] {
+        let mut config = Config::default();
+        config.general.lang = lang;
+        let app = test_app(config);
+        let terminal = render_app(&app);
+        let buffer = terminal.backend().buffer();
+        let arrows = buffer.content().iter().filter(|cell| cell.symbol() == "▶").count();
+        assert_eq!(arrows, 1);
+        assert_eq!(symbol_column(&terminal, "▶"), 3);
+
+        let columns = match lang {
+            Lang::En => ["Start", "Benchmark", "Analysis", "History", "Settings", "Quit"]
+                .iter()
+                .map(|phrase| phrase_column(&terminal, phrase))
+                .collect::<Vec<_>>(),
+            Lang::Ja => ["開", "ベ", "分", "履", "設", "終"]
+                .iter()
+                .map(|symbol| symbol_column(&terminal, symbol))
+                .collect::<Vec<_>>(),
+        };
+        assert!(columns.windows(2).all(|pair| pair[0] == pair[1]), "{lang:?}: {columns:?}");
+        assert_eq!(columns[0], 6);
     }
 }

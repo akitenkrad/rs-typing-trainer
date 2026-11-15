@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Constraint, Direction, Layout};
+use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::Style;
 use ratatui::widgets::{Block, Borders, Paragraph};
 
@@ -13,7 +13,7 @@ use crate::i18n::Lang;
 use crate::layout::KeyStroke;
 use crate::layout::geometry::geometry;
 use crate::ui::keyboard::{KeyboardState, KeyboardView};
-use crate::ui::theme::Theme;
+use crate::ui::{left_inset, theme::Theme};
 
 pub fn render(frame: &mut Frame, app: &App) {
     let theme = Theme::from_name(&app.config.ui.theme);
@@ -45,7 +45,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         Lang::En => format!("Selected: {}    Filter: {filter}", app.config.mode.keys),
         Lang::Ja => format!("選択: {}    絞り込み: {filter}", app.config.mode.keys),
     };
-    frame.render_widget(Paragraph::new(summary).alignment(Alignment::Center), chunks[0]);
+    frame.render_widget(Paragraph::new(summary), left_inset(chunks[0]));
 
     if let Some(geometry) = geometry(&app.config.keyboard.geometry) {
         let layout = app.practice_layout();
@@ -80,21 +80,16 @@ pub fn render(frame: &mut Frame, app: &App) {
         Lang::En => "[Arrows] Move    [Space] Toggle key    [Tab] include / only",
         Lang::Ja => "[矢印] 移動    [Space] キー切替    [Tab] include / only",
     };
-    frame.render_widget(
-        Paragraph::new(hint).alignment(Alignment::Center).style(Style::default().fg(theme.accent)),
-        chunks[2],
-    );
+    frame.render_widget(Paragraph::new(hint).style(Style::default().fg(theme.accent)), left_inset(chunks[2]));
     let enter = match app.config.general.lang {
         Lang::En => "[Enter] Start    [Esc] Back",
         Lang::Ja => "[Enter] 開始    [Esc] 戻る",
     };
-    frame.render_widget(Paragraph::new(enter).alignment(Alignment::Center), chunks[3]);
+    frame.render_widget(Paragraph::new(enter), left_inset(chunks[3]));
     if let Some(warning) = &app.mode_warning {
         frame.render_widget(
-            Paragraph::new(warning.clone())
-                .alignment(Alignment::Center)
-                .style(Style::default().fg(theme.warning)),
-            chunks[4],
+            Paragraph::new(warning.clone()).style(Style::default().fg(theme.warning)),
+            left_inset(chunks[4]),
         );
     }
 }

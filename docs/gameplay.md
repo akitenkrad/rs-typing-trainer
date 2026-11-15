@@ -12,17 +12,24 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 
 | Screen | Keys | Action |
 |---|---|---|
-| Title | `Space` / `Enter` | Open mode selection |
+| Title | `↑` / `↓` (`k` / `j`) | Move the menu selection |
+| Title | `Enter` | Run the selected menu item |
+| Title | `Space` | Open mode selection directly |
 | Title | `H` | Open history |
-| Title | `B` | Run `bench-v1` |
+| Title | `B` | Open `bench-v1` selection |
 | Title | `A` | Open analysis |
 | Title | `S` | Open settings |
 | Title | `Q` / `Esc` | Quit |
-| Mode selection | `↑` / `↓` | Select any practice mode |
+| Mode selection | `↑` / `↓` (`k` / `j`) | Select any practice mode |
 | Mode selection | `P` | Toggle the pacer on supported modes |
 | Mode selection | `L` | Switch adaptive-practice language |
 | Mode selection | `[` / `]` | Decrease/increase preview items |
 | Mode selection | `Enter` | Continue to key selection or the countdown |
+| Benchmark selection | `↑` / `↓` (`k` / `j`) | Select Start or optional Part D |
+| Benchmark selection | `Enter` | Run the selected action |
+| Benchmark selection | `Space` | Start the benchmark directly |
+| Benchmark selection | `D` | Toggle optional Part D directly |
+| Benchmark selection | `Esc` / `Q` | Return to the title screen |
 | Key selection | Arrow keys | Move on the keyboard |
 | Key selection | `Space` | Toggle the current key |
 | Key selection | `Tab` | Switch `include` / `only` |
@@ -46,6 +53,12 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | Settings | `Esc` / `Q` | Cancel and return to the title |
 
 While a word is sliding in or out, for about 200 ms on each side, keystrokes are dropped. This prevents the key that completed one word from being credited to the next word.
+
+## Playing-screen layout
+
+The playing screen keeps the time, WPM, item count and pace in the header. The on-screen keyboard and finger guide appear below it, followed by the per-item timer when enabled and the combo, mistype and accuracy row. The prompt uses the remaining space and is centred horizontally and vertically; romaji keeps its Surface, Kana and Romaji rows aligned, while sentence and endurance text is centred as a wrapped block. The preview and controls remain on the bottom row.
+
+When height is limited, the screen omits the keyboard first, then the combo row, then the per-item timer. The prompt and controls remain visible. `keyboard.show = "hidden"` omits and collapses the keyboard area at every height.
 
 ## Session history
 

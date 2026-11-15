@@ -10,7 +10,7 @@ use crate::app::{App, ResultOrigin};
 use crate::bench::BenchPart;
 use crate::i18n::{Lang, Msg};
 use crate::metrics::stats::GameResult;
-use crate::ui::theme::Theme;
+use crate::ui::{left_inset, theme::Theme};
 
 pub fn render(frame: &mut Frame, app: &App) {
     let theme = Theme::from_name(&app.config.ui.theme);
@@ -48,19 +48,19 @@ pub fn render(frame: &mut Frame, app: &App) {
         .split(inner);
 
     let Some(result) = app.last_result.as_ref() else {
-        let none = Paragraph::new(Msg::NoResultYet.text(lang)).alignment(Alignment::Center);
-        frame.render_widget(none, chunks[0]);
+        let none = Paragraph::new(Msg::NoResultYet.text(lang));
+        frame.render_widget(none, left_inset(chunks[0]));
         return;
     };
 
     render_big_summary(frame, result, app.legacy_wpm, &theme, chunks[0], lang);
     render_secondary_box(frame, app, result, &theme, chunks[2], lang);
     if app.config.mode.kind == crate::config::ModeKind::Adaptive && app.result_origin == ResultOrigin::JustPlayed {
-        render_adaptive_result(frame, app, &theme, chunks[4], lang);
+        render_adaptive_result(frame, app, &theme, left_inset(chunks[4]), lang);
     } else {
-        render_mistype_heatmap(frame, result, &theme, chunks[4], lang);
+        render_mistype_heatmap(frame, result, &theme, left_inset(chunks[4]), lang);
     }
-    render_reaction_and_save(frame, app, result, &theme, chunks[6]);
+    render_reaction_and_save(frame, app, result, &theme, left_inset(chunks[6]));
     match app.result_origin {
         ResultOrigin::JustPlayed => render_hint(frame, &theme, chunks[7], lang),
         ResultOrigin::History => render_hint_history(frame, &theme, chunks[7], lang),
@@ -75,7 +75,7 @@ fn render_benchmark_result(frame: &mut Frame, app: &App, theme: &Theme, area: Re
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
     let Some(result) = app.last_result.as_ref() else {
-        frame.render_widget(Paragraph::new(Msg::NoResultYet.text(lang)).alignment(Alignment::Center), inner);
+        frame.render_widget(Paragraph::new(Msg::NoResultYet.text(lang)), left_inset(inner));
         return;
     };
     let part = app.active_bench_part().or_else(|| app.active_bench_id.as_deref().and_then(part_from_id));
@@ -110,7 +110,7 @@ fn render_benchmark_result(frame: &mut Frame, app: &App, theme: &Theme, area: Re
         Line::from(Span::styled(next_line, Style::default().fg(theme.accent).add_modifier(Modifier::BOLD))),
         Line::from(Msg::BenchAbortNote.text(lang)),
     ];
-    frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), inner);
+    frame.render_widget(Paragraph::new(lines), left_inset(inner));
 }
 
 fn part_from_id(id: &str) -> Option<BenchPart> {
@@ -290,8 +290,8 @@ fn render_secondary_box(frame: &mut Frame, app: &App, r: &GameResult, theme: &Th
         }
     }
 
-    let p = Paragraph::new(lines).alignment(Alignment::Center);
-    frame.render_widget(p, inner);
+    let p = Paragraph::new(lines);
+    frame.render_widget(p, left_inset(inner));
 }
 
 fn render_adaptive_result(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, lang: Lang) {
@@ -421,21 +421,17 @@ fn render_reaction_and_save(frame: &mut Frame, app: &App, r: &GameResult, theme:
             ])
         }
     };
-    frame.render_widget(Paragraph::new(save_line), chunks[1]);
+    frame.render_widget(Paragraph::new(save_line), left_inset(chunks[1]));
 }
 
 fn render_hint(frame: &mut Frame, theme: &Theme, area: Rect, lang: Lang) {
-    let p = Paragraph::new(Msg::ResultHint.text(lang))
-        .style(Style::default().fg(theme.accent))
-        .alignment(Alignment::Center);
-    frame.render_widget(p, area);
+    let p = Paragraph::new(Msg::ResultHint.text(lang)).style(Style::default().fg(theme.accent));
+    frame.render_widget(p, left_inset(area));
 }
 
 fn render_hint_history(frame: &mut Frame, theme: &Theme, area: Rect, lang: Lang) {
-    let p = Paragraph::new(Msg::HistoryDetailHint.text(lang))
-        .style(Style::default().fg(theme.accent))
-        .alignment(Alignment::Center);
-    frame.render_widget(p, area);
+    let p = Paragraph::new(Msg::HistoryDetailHint.text(lang)).style(Style::default().fg(theme.accent));
+    frame.render_widget(p, left_inset(area));
 }
 
 /// Render `s` as a 5-row block-character "big text" suitable for the result

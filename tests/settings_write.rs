@@ -101,6 +101,89 @@ fn settings_values_share_one_column() {
 
     assert_eq!(value_columns.len(), 6);
     assert!(value_columns.windows(2).all(|pair| pair[0] == pair[1]), "{value_columns:?}");
+    let arrow_columns = buffer
+        .content()
+        .iter()
+        .enumerate()
+        .filter(|(_, cell)| cell.symbol() == "▶")
+        .map(|(index, _)| index as u16 % buffer.area.width)
+        .collect::<Vec<_>>();
+    assert_eq!(arrow_columns, vec![3]);
+}
+
+#[test]
+fn every_setting_has_a_bilingual_description_with_options_and_a_default() {
+    let expected = [
+        ("Practice layout", "練習する配列"),
+        ("OS input layout", "OS が使っている配列"),
+        ("physical key arrangement", "物理的な並び"),
+        ("full: always visible", "full: 常に表示"),
+        ("interface language", "画面の表示言語"),
+        ("mistyped character", "誤入力した文字"),
+    ];
+    let options = [
+        ["qwerty", "dvorak", "colemak-dh-ansi", "workman"].as_slice(),
+        ["same", "qwerty", "colemak-dh-ansi", "jis-qwerty"].as_slice(),
+        ["ansi", "jis"].as_slice(),
+        ["full", "auto", "dim", "hidden"].as_slice(),
+        ["English", "Japanese"].as_slice(),
+        ["stop", "advance"].as_slice(),
+    ];
+
+    for (lang, default_word) in [
+        (rs_typing_trainer::i18n::Lang::En, "Default"),
+        (rs_typing_trainer::i18n::Lang::Ja, "既定"),
+    ] {
+        let mut config = Config::default();
+        config.general.lang = lang;
+        let mut app = test_app(config);
+        app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
+        for (index, snippets) in expected.iter().enumerate() {
+            let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+            terminal.draw(|frame| ui::render(frame, &app)).unwrap();
+            let buffer = terminal.backend().buffer();
+            let description_row_has_text = |y| {
+                (3..77).any(|x| {
+                    let symbol = buffer[(x, y)].symbol();
+                    !symbol.trim().is_empty()
+                })
+            };
+            assert!(description_row_has_text(9), "setting {index}, {lang:?} has no description");
+            assert!(
+                description_row_has_text(10),
+                "setting {index}, {lang:?} needs at least two description lines"
+            );
+            assert!(!description_row_has_text(13), "setting {index}, {lang:?} exceeded four description lines");
+            let rendered = terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<Vec<_>>()
+                .join("");
+            let compact = rendered.chars().filter(|character| !character.is_whitespace()).collect::<String>();
+            let snippet = if lang == rs_typing_trainer::i18n::Lang::En {
+                snippets.0
+            } else {
+                snippets.1
+            };
+            assert!(
+                compact.contains(&snippet.chars().filter(|character| !character.is_whitespace()).collect::<String>()),
+                "setting {index}, {lang:?}: compact={compact:?}\n{rendered}"
+            );
+            for option in options[index] {
+                assert!(compact.contains(option), "setting {index} omitted {option}, {lang:?}: {rendered}");
+            }
+            if lang == rs_typing_trainer::i18n::Lang::En {
+                assert!(compact.contains(default_word), "setting {index}, {lang:?}: {rendered}");
+            } else {
+                assert!(compact.contains('既') && compact.contains('定'), "setting {index}, {lang:?}: {rendered}");
+            }
+            assert!(compact.contains("Save") || compact.contains("保存"), "80x24 clipped the hint: {rendered}");
+            app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        }
+    }
 }
 
 #[test]
@@ -116,4 +199,26 @@ fn settings_save_updates_error_mode_without_rewriting_unrelated_keys() {
     assert!(updated.contains("error_mode = \"advance\" # keep"));
     assert!(updated.contains("preview_items = 3"));
     assert!(updated.contains("# retained"));
+}
+
+#[test]
+fn adding_sections_keeps_a_trailing_comment_with_its_original_section() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("config.toml");
+    fs::write(
+        &path,
+        "[metrics]\ndb_path = \"metrics.db\"\n# Override the SQLite database path for this metrics section.\n",
+    )
+    .unwrap();
+
+    rs_typing_trainer::config::save_settings(&path, &Config::default()).unwrap();
+
+    let updated = fs::read_to_string(path).unwrap();
+    let comment = updated.find("# Override the SQLite database path").unwrap();
+    let keyboard = updated.find("[keyboard]").unwrap();
+    let general = updated.find("[general]").unwrap();
+    let session = updated.find("[session]").unwrap();
+    assert!(comment < keyboard, "{updated}");
+    assert!(comment < general, "{updated}");
+    assert!(comment < session, "{updated}");
 }

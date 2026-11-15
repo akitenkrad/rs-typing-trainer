@@ -18,6 +18,7 @@ pub mod theme;
 pub mod title;
 
 use ratatui::Frame;
+use ratatui::layout::Rect;
 
 use crate::app::{App, Screen};
 
@@ -35,4 +36,8 @@ pub fn render(frame: &mut Frame, app: &App) {
         Screen::BenchSummary => bench_summary::render(frame, app),
         Screen::Analysis => analysis::render(frame, app),
     }
+}
+
+pub(crate) fn left_inset(area: Rect) -> Rect {
+    Rect::new(area.x.saturating_add(2), area.y, area.width.saturating_sub(4), area.height)
 }

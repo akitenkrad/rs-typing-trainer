@@ -26,6 +26,31 @@ fn buffer_text(terminal: &Terminal<TestBackend>) -> String {
         .join("")
 }
 
+fn buffer_rows(terminal: &Terminal<TestBackend>) -> Vec<String> {
+    let buffer = terminal.backend().buffer();
+    (0..buffer.area.height)
+        .map(|y| (0..buffer.area.width).map(|x| buffer[(x, y)].symbol()).collect())
+        .collect()
+}
+
+fn compact_row(row: &str) -> String {
+    row.chars().filter(|character| !character.is_whitespace()).collect()
+}
+
+fn row_containing(terminal: &Terminal<TestBackend>, needle: &str) -> u16 {
+    buffer_rows(terminal)
+        .iter()
+        .position(|row| row.contains(needle))
+        .unwrap_or_else(|| panic!("{needle:?} was not rendered")) as u16
+}
+
+fn compact_row_containing(terminal: &Terminal<TestBackend>, needle: &str) -> u16 {
+    buffer_rows(terminal)
+        .iter()
+        .position(|row| compact_row(row).contains(needle))
+        .unwrap_or_else(|| panic!("{needle:?} was not rendered")) as u16
+}
+
 fn render_keyboard(layout_name: &str, show: &str, next: Option<KeyStroke>, width: u16) -> Terminal<TestBackend> {
     let layout = builtin_layout(layout_name).unwrap();
     let geometry = geometry("ansi").unwrap();
@@ -105,6 +130,81 @@ fn play_screen_and_keyboard_fit_at_eighty_by_twenty_four() {
     let compact: String = text.chars().filter(|character| !character.is_whitespace()).collect();
     assert!(compact.contains(&word), "{text}");
     assert!(compact.contains("asdf"), "{text}");
+}
+
+#[test]
+fn play_screen_orders_keyboard_timer_stats_and_centered_prompt() {
+    let mut config = Config::default();
+    config.mode.keys = "z".to_owned();
+    config.mode.base_keys = "none".to_owned();
+    config.mode.random.word_length = 8;
+    config.characters.charset = "z".to_owned();
+    config.charset_graphemes = vec!["z".to_owned()];
+    config.game.word_length = 8;
+    config.ui.animation_enabled = false;
+    let mut app = test_app(config);
+    let now = Instant::now();
+    app.handle_key_at(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+    app.handle_key_at(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+    app.on_tick_at(Duration::from_secs(3), now).unwrap();
+    app.on_tick_at(Duration::from_millis(1), now).unwrap();
+
+    let terminal = {
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|frame| ui::render(frame, &app)).unwrap();
+        terminal
+    };
+    let keyboard_row = compact_row_containing(&terminal, "zxc");
+    let timer_row = row_containing(&terminal, "Word timer");
+    let stats_row = row_containing(&terminal, "Combo");
+    let prompt_row = compact_row_containing(&terminal, "zzzzzzzz");
+    assert!(keyboard_row < timer_row, "keyboard={keyboard_row}, timer={timer_row}");
+    assert_eq!(timer_row, 9, "the 80x24 timer row should remain at its former position");
+    assert!(timer_row < stats_row, "timer={timer_row}, stats={stats_row}");
+    assert!(stats_row < prompt_row, "stats={stats_row}, prompt={prompt_row}");
+
+    let buffer = terminal.backend().buffer();
+    let prompt_columns = (0..buffer.area.width)
+        .filter(|x| buffer[(*x, prompt_row)].symbol() == "z")
+        .collect::<Vec<_>>();
+    let prompt_center = f32::from(prompt_columns[0] + prompt_columns[prompt_columns.len() - 1]) / 2.0;
+    let screen_center = f32::from(buffer.area.width - 1) / 2.0;
+    assert!(
+        (prompt_center - screen_center).abs() <= 1.0,
+        "prompt center={prompt_center}, screen center={screen_center}"
+    );
+}
+
+#[test]
+fn short_play_screens_hide_the_keyboard_first_and_keep_prompt_and_footer() {
+    let mut config = Config::default();
+    config.ui.animation_enabled = false;
+    let mut app = test_app(config);
+    let now = Instant::now();
+    app.handle_key_at(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+    app.handle_key_at(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+    app.on_tick_at(Duration::from_secs(3), now).unwrap();
+    app.on_tick_at(Duration::from_millis(1), now).unwrap();
+    let word = app.game.as_ref().unwrap().session.current_text().to_owned();
+
+    for (height, keyboard_expected) in [(24, true), (20, false), (16, false)] {
+        let mut terminal = Terminal::new(TestBackend::new(80, height)).unwrap();
+        terminal.draw(|frame| ui::render(frame, &app)).unwrap();
+        let output = buffer_text(&terminal);
+        let rows = buffer_rows(&terminal);
+        let keyboard_present = rows.iter().any(|row| compact_row(row).contains("asdf"));
+        assert_eq!(keyboard_present, keyboard_expected, "80x{height}: {output}");
+        assert!(output.contains("Word timer"), "80x{height}: {output}");
+        assert!(output.contains("Combo"), "80x{height}: {output}");
+        assert!(compact_row(&output).contains(&compact_row(&word)), "80x{height}: {output}");
+        assert!(output.contains("[ESC] Abort"), "80x{height}: {output}");
+    }
+
+    app.config.keyboard.show = "hidden".to_owned();
+    let mut hidden = Terminal::new(TestBackend::new(80, 24)).unwrap();
+    hidden.draw(|frame| ui::render(frame, &app)).unwrap();
+    assert!(!buffer_rows(&hidden).iter().any(|row| compact_row(row).contains("asdf")));
+    assert_eq!(row_containing(&hidden, "Word timer"), 3, "hidden keyboard space should collapse");
 }
 
 #[test]

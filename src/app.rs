@@ -132,6 +132,7 @@ pub struct App {
     pub layouts: BTreeMap<String, KeyboardLayout>,
     pub release_events_supported: bool,
     pub config_path: Option<PathBuf>,
+    pub title_selected: usize,
     pub settings_selected: usize,
     pub settings_save_error: Option<String>,
     pub mode_selected: usize,
@@ -141,6 +142,7 @@ pub struct App {
     pub practice_theme: WeeklyTheme,
     pub home_dir: PathBuf,
     pub bench_include_d: bool,
+    pub bench_selected: usize,
     pub active_bench_id: Option<String>,
     pub bench_comparison: Option<crate::bench::BenchComparison>,
     pub bench_results: Vec<BenchResultSummary>,
@@ -259,6 +261,7 @@ impl App {
             layouts,
             release_events_supported: false,
             config_path: None,
+            title_selected: 0,
             settings_selected: 0,
             settings_save_error: None,
             mode_selected,
@@ -268,6 +271,7 @@ impl App {
             practice_theme,
             home_dir,
             bench_include_d: false,
+            bench_selected: 0,
             active_bench_id: None,
             bench_comparison: None,
             bench_results: Vec::new(),
@@ -611,13 +615,14 @@ impl App {
 
     fn handle_title_key(&mut self, key: KeyEvent, action: InputAction) {
         match key.code {
-            KeyCode::Char(' ') | KeyCode::Enter => {
-                self.mode_selected = mode_index(self.config.mode.kind);
-                self.screen = Screen::ModeSelect;
-            }
+            KeyCode::Up | KeyCode::Char('k') => self.title_selected = self.title_selected.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') => self.title_selected = (self.title_selected + 1).min(5),
+            KeyCode::Enter => self.activate_title_selection(),
+            KeyCode::Char(' ') => self.open_mode_select(),
             KeyCode::Char('h') | KeyCode::Char('H') => self.open_history(),
             KeyCode::Char('b') | KeyCode::Char('B') => {
                 self.bench_include_d = false;
+                self.bench_selected = 0;
                 self.screen = Screen::BenchSelect;
             }
             KeyCode::Char('a') | KeyCode::Char('A') => self.open_analysis(),
@@ -633,6 +638,32 @@ impl App {
         }
         if matches!(action, InputAction::Abort) {
             self.should_quit = true;
+        }
+    }
+
+    fn open_mode_select(&mut self) {
+        self.mode_selected = mode_index(self.config.mode.kind);
+        self.screen = Screen::ModeSelect;
+    }
+
+    fn activate_title_selection(&mut self) {
+        match self.title_selected {
+            0 => self.open_mode_select(),
+            1 => {
+                self.bench_include_d = false;
+                self.bench_selected = 0;
+                self.screen = Screen::BenchSelect;
+            }
+            2 => self.open_analysis(),
+            3 => self.open_history(),
+            4 => {
+                self.settings_selected = 0;
+                self.settings_save_error = None;
+                self.settings_original = Some((self.config.keyboard.clone(), self.config.general.lang, self.config.session.error_mode));
+                self.screen = Screen::Settings;
+            }
+            5 => self.should_quit = true,
+            _ => {}
         }
     }
 
@@ -705,8 +736,12 @@ impl App {
 
     fn handle_bench_select_key(&mut self, key: KeyEvent, action: InputAction) {
         match key.code {
+            KeyCode::Up | KeyCode::Char('k') => self.bench_selected = self.bench_selected.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') => self.bench_selected = (self.bench_selected + 1).min(1),
             KeyCode::Char('d') | KeyCode::Char('D') => self.bench_include_d = !self.bench_include_d,
-            KeyCode::Enter | KeyCode::Char(' ') => self.start_benchmark(),
+            KeyCode::Enter if self.bench_selected == 0 => self.start_benchmark(),
+            KeyCode::Enter => self.bench_include_d = !self.bench_include_d,
+            KeyCode::Char(' ') => self.start_benchmark(),
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => self.screen = Screen::Title,
             _ => {}
         }

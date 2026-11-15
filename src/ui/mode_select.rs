@@ -1,7 +1,7 @@
 //! Training-mode selection screen.
 
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Constraint, Direction, Layout};
+use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
@@ -9,7 +9,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use crate::app::App;
 use crate::config::ModeKind;
 use crate::i18n::Lang;
-use crate::ui::theme::Theme;
+use crate::ui::{left_inset, theme::Theme};
 
 const MODES: [(ModeKind, &str, &str); 10] = [
     (ModeKind::Random, "random — random character groups", "random — ランダム文字列"),
@@ -59,7 +59,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             ])
         })
         .collect::<Vec<_>>();
-    frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), chunks[1]);
+    frame.render_widget(Paragraph::new(lines), left_inset(chunks[1]));
     let selected_mode = MODES[app.mode_selected].0;
     let pacer_available = matches!(selected_mode, ModeKind::Words | ModeKind::Sentence | ModeKind::Adaptive);
     let pacer = if pacer_available {
@@ -86,16 +86,13 @@ pub fn render(frame: &mut Frame, app: &App) {
     };
     let hint = match app.config.general.lang {
         Lang::En => format!(
-            "{}\n{pacer}  {adaptive_language}  {preview}\n[↑/↓] Select    [ENTER] Continue    [ESC] Back",
+            "{}\n{pacer}  {adaptive_language}  {preview}\n[↑/↓/k/j] Select  [ENTER] Continue  [ESC] Back",
             app.practice_theme.label(app.config.general.lang),
         ),
         Lang::Ja => format!(
-            "{}\n{pacer}  {adaptive_language}  {preview}\n[↑/↓] 選択    [ENTER] 次へ    [ESC] 戻る",
+            "{}\n{pacer}  {adaptive_language}  {preview}\n[↑/↓/k/j] 選択  [ENTER] 次へ  [ESC] 戻る",
             app.practice_theme.label(app.config.general.lang),
         ),
     };
-    frame.render_widget(
-        Paragraph::new(hint).alignment(Alignment::Center).style(Style::default().fg(theme.accent)),
-        chunks[2],
-    );
+    frame.render_widget(Paragraph::new(hint).style(Style::default().fg(theme.accent)), left_inset(chunks[2]));
 }
