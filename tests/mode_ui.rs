@@ -899,3 +899,112 @@ fn every_mode_orders_keyboard_timer_metrics_prompt_and_footer() {
         }
     }
 }
+
+const BORDER_SYMBOLS: [&str; 6] = ["│", "┌", "┐", "└", "┘", "─"];
+
+#[test]
+fn large_sentence_windows_stay_inside_the_outer_border() {
+    let directory = TempDir::new().unwrap();
+    let english = directory.path().join("sentences.tsv");
+    fs::write(
+        &english,
+        "\"Do you believe him?\" \"Not really!\" A patient typist follows the winding trail and keeps a calm steady rhythm.\n",
+    )
+    .unwrap();
+    let japanese = directory.path().join("sentences_ja.tsv");
+    fs::write(
+        &japanese,
+        "そして両手に赤と青の旗をもってそらを見上げて信号しているのでした。\tそしてりょうてにあかとあおのはたをもってそらをみあげてしんごうしているのでした。\n",
+    )
+    .unwrap();
+
+    for lang in [Lang::En, Lang::Ja] {
+        let english = english.clone();
+        let japanese = japanese.clone();
+        let template = mode_app(ModeKind::Sentence, lang, |config| {
+            config.data.sentences_en = Some(english.clone());
+            config.data.sentences_ja = Some(japanese.clone());
+        });
+        let length = template.game.as_ref().unwrap().session.current_guide().chars().count();
+        drop(template);
+        for typed in [0, length / 2, length - 1] {
+            let mut app = mode_app(ModeKind::Sentence, lang, |config| {
+                config.data.sentences_en = Some(english.clone());
+                config.data.sentences_ja = Some(japanese.clone());
+            });
+            let now = Instant::now();
+            for step in 0..typed {
+                let game = app.game.as_ref().unwrap();
+                let next = game.session.current_guide().chars().nth(game.typed_index).unwrap();
+                app.handle_key_at(key(KeyCode::Char(next)), now + Duration::from_millis(step as u64 * 40 + 40));
+            }
+            assert_eq!(app.game.as_ref().unwrap().typed_index, typed, "{lang:?}");
+            for (width, height) in [(80, 24), (100, 30), (120, 40)] {
+                let label = format!("{lang:?} typed={typed} {width}x{height}");
+                let layout = resolve_playing_layout(&app, Rect::new(1, 1, width - 2, height - 2));
+                assert!(layout.bigtext.is_some(), "{label}: {layout:?}");
+                let terminal = render(&app, width, height);
+                let buffer = terminal.backend().buffer();
+                for y in 1..height - 1 {
+                    for x in [0, width - 1] {
+                        let symbol = buffer[(x, y)].symbol();
+                        assert!(
+                            BORDER_SYMBOLS.contains(&symbol),
+                            "{label}: border cell ({x}, {y}) was overwritten by {symbol:?}: {}",
+                            text(&terminal)
+                        );
+                    }
+                    // One blank column inside the border on each side.
+                    for x in [1, width - 2] {
+                        let symbol = buffer[(x, y)].symbol();
+                        assert!(
+                            !QUADRANT_SYMBOLS.contains(&symbol),
+                            "{label}: large glyph touches the border at ({x}, {y}): {}",
+                            text(&terminal)
+                        );
+                    }
+                }
+                let output = text(&terminal);
+                assert!(output.contains('▔'), "{label}: cursor missing: {output}");
+            }
+        }
+    }
+}
+
+#[test]
+fn large_word_and_romaji_prompts_stay_inside_the_outer_border() {
+    let directory = TempDir::new().unwrap();
+    let words = directory.path().join("words.tsv");
+    fs::write(&words, "internationalization\n").unwrap();
+    let cases = [
+        mode_app(ModeKind::Words, Lang::En, |config| config.data.words_en = Some(words.clone())),
+        mode_app(ModeKind::Romaji, Lang::Ja, |_| {}),
+    ];
+    for app in &cases {
+        for (width, height) in [(80, 24), (100, 30), (120, 40)] {
+            let terminal = render(app, width, height);
+            let buffer = terminal.backend().buffer();
+            for y in 1..height - 1 {
+                for x in [0, width - 1] {
+                    assert!(BORDER_SYMBOLS.contains(&buffer[(x, y)].symbol()), "{width}x{height}: {}", text(&terminal));
+                }
+                let row = (0..width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+                    .chars()
+                    .filter(|character| !character.is_whitespace())
+                    .collect::<String>();
+                if row.contains("Wordtimer") || row.contains("単語タイマー") {
+                    continue; // the timer gauge legitimately spans the inner width
+                }
+                for x in [1, width - 2] {
+                    assert!(
+                        !QUADRANT_SYMBOLS.contains(&buffer[(x, y)].symbol()),
+                        "{width}x{height}: {}",
+                        text(&terminal)
+                    );
+                }
+            }
+        }
+    }
+}

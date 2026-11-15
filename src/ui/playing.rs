@@ -457,6 +457,10 @@ fn render_word(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, bigtext:
     if let Some(size) = bigtext
         && let Ok(bitmap_font) = font(size)
     {
+        // Keep one blank column on each side so a window that fills the whole
+        // width never touches the outer border. Every large window is sized
+        // from this inset width, so no glyph is drawn outside it.
+        let area = Rect::new(area.x.saturating_add(1), area.y, area.width.saturating_sub(2), area.height);
         match app.config.mode.kind {
             crate::config::ModeKind::Romaji => render_big_japanese(frame, app, theme, area, bitmap_font, false),
             crate::config::ModeKind::Adaptive if game.current_prompt.reading.is_some() => {
