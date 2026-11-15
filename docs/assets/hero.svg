@@ -1,0 +1,129 @@
+<svg width="100%" viewBox="0 0 1200 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="hero-title hero-desc">
+  <title id="hero-title">rs-typing-trainer — deliberate typing practice in the terminal</title>
+  <desc id="hero-desc">A Dvorak keyboard below a partly typed prompt, with the next O key highlighted and compact WPM, accuracy, and transition heat metrics beside it.</desc>
+
+  <style>
+    .title, .subtitle, .eyebrow, .label, .small, .tiny, .key, .metric {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+    .title { font-size: 39px; font-weight: 700; letter-spacing: -1.2px; fill: #2C2C2A; }
+    .subtitle { font-size: 16px; fill: #5F5E5A; }
+    .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 2.4px; fill: #0F6E56; }
+    .label { font-size: 10.5px; font-weight: 700; letter-spacing: 1.1px; fill: #5F5E5A; }
+    .small { font-size: 12px; font-weight: 600; fill: #5F5E5A; }
+    .tiny { font-size: 9.5px; font-weight: 600; fill: #5F5E5A; }
+    .prompt { font-size: 21px; font-weight: 650; fill: #2C2C2A; }
+    .prompt-done { fill: #0F6E56; }
+    .prompt-next { fill: #534AB7; text-decoration: underline; }
+    .metric { font-size: 27px; font-weight: 750; fill: #534AB7; }
+    .key { font-size: 13px; font-weight: 700; fill: #2C2C2A; }
+    .key-next-text { fill: #FFFFFF; }
+    .terminal { fill: #F8F7F3; stroke: #5F5E5A; stroke-width: 1.2; }
+    .panel { fill: #F1EFE8; stroke: #C7C5BD; stroke-width: 0.8; }
+    .keycap { fill: #F8F7F3; stroke: #C7C5BD; stroke-width: 0.85; }
+    .keycap-warm { fill: #E1F5EE; stroke: #0F6E56; stroke-width: 0.85; }
+    .keycap-next { fill: #534AB7; stroke: #534AB7; stroke-width: 2; }
+    .divider { stroke: #C7C5BD; stroke-width: 0.8; }
+    .rule { stroke: #0F6E56; stroke-width: 2; stroke-linecap: round; }
+    .dot { fill: #5F5E5A; opacity: 0.5; }
+    .heat-cool { fill: #CFE8E1; }
+    .heat-mid { fill: #72B6A3; }
+    .heat-hot { fill: #0F6E56; }
+    .accent-line { stroke: #534AB7; stroke-width: 1.5; stroke-linecap: round; }
+
+    @media (prefers-color-scheme: dark) {
+      .title, .prompt, .key { fill: #E5E5E2; }
+      .subtitle, .label, .small, .tiny { fill: #B4B2A9; }
+      .eyebrow, .prompt-done { fill: #5DCAA5; }
+      .prompt-next, .metric { fill: #AFA9EC; }
+      .terminal { fill: #20201E; stroke: #B4B2A9; }
+      .panel { fill: #3A3A37; stroke: #5F5E5A; }
+      .keycap { fill: #282826; stroke: #5F5E5A; }
+      .keycap-warm { fill: #085041; stroke: #5DCAA5; }
+      .keycap-next { fill: #3C3489; stroke: #AFA9EC; }
+      .key-next-text { fill: #FFFFFF; }
+      .divider { stroke: #5F5E5A; }
+      .rule { stroke: #5DCAA5; }
+      .dot { fill: #B4B2A9; }
+      .heat-cool { fill: #164D40; }
+      .heat-mid { fill: #2D806B; }
+      .heat-hot { fill: #5DCAA5; }
+      .accent-line { stroke: #AFA9EC; }
+    }
+  </style>
+
+  <text class="eyebrow" x="50" y="100">TERMINAL TYPING PRACTICE</text>
+  <text class="title" x="46" y="163">rs-typing-trainer</text>
+  <text class="subtitle" x="50" y="207">Measure, understand, and train each transition</text>
+  <path class="rule" d="M50 236 H388"/>
+
+  <rect class="terminal" x="420" y="28" width="740" height="304" rx="14"/>
+  <path class="divider" d="M420 74 H1160"/>
+  <circle class="dot" cx="444" cy="51" r="4"/>
+  <circle class="dot" cx="460" cy="51" r="4"/>
+  <circle class="dot" cx="476" cy="51" r="4"/>
+  <text class="label" x="505" y="55">RS-TYPING-TRAINER · DVORAK</text>
+  <text class="small mono" x="1138" y="55" text-anchor="end">Pace 60 WPM</text>
+
+  <rect class="panel" x="440" y="88" width="700" height="64" rx="8"/>
+  <text class="label" x="456" y="108">PROMPT · NEXT KEY</text>
+  <text class="prompt mono" x="456" y="137"><tspan class="prompt-done">the quick br</tspan><tspan class="prompt-next">o</tspan><tspan>wn fox</tspan></text>
+  <path class="accent-line" d="M613 143 H625"/>
+
+  <rect class="panel" x="440" y="166" width="493" height="146" rx="8"/>
+  <text class="label" x="456" y="186">DVORAK KEYBOARD</text>
+
+  <g transform="translate(456 198)">
+    <g>
+      <rect class="keycap" x="0" y="0" width="37" height="27" rx="5"/><text class="key mono" x="18.5" y="19" text-anchor="middle">'</text>
+      <rect class="keycap-warm" x="41" y="0" width="37" height="27" rx="5"/><text class="key mono" x="59.5" y="19" text-anchor="middle">,</text>
+      <rect class="keycap" x="82" y="0" width="37" height="27" rx="5"/><text class="key mono" x="100.5" y="19" text-anchor="middle">.</text>
+      <rect class="keycap-warm" x="123" y="0" width="37" height="27" rx="5"/><text class="key mono" x="141.5" y="19" text-anchor="middle">p</text>
+      <rect class="keycap" x="164" y="0" width="37" height="27" rx="5"/><text class="key mono" x="182.5" y="19" text-anchor="middle">y</text>
+      <rect class="keycap" x="205" y="0" width="37" height="27" rx="5"/><text class="key mono" x="223.5" y="19" text-anchor="middle">f</text>
+      <rect class="keycap-warm" x="246" y="0" width="37" height="27" rx="5"/><text class="key mono" x="264.5" y="19" text-anchor="middle">g</text>
+      <rect class="keycap" x="287" y="0" width="37" height="27" rx="5"/><text class="key mono" x="305.5" y="19" text-anchor="middle">c</text>
+      <rect class="keycap-warm" x="328" y="0" width="37" height="27" rx="5"/><text class="key mono" x="346.5" y="19" text-anchor="middle">r</text>
+      <rect class="keycap" x="369" y="0" width="37" height="27" rx="5"/><text class="key mono" x="387.5" y="19" text-anchor="middle">l</text>
+      <rect class="keycap" x="410" y="0" width="37" height="27" rx="5"/><text class="key mono" x="428.5" y="19" text-anchor="middle">/</text>
+    </g>
+    <g transform="translate(12 33)">
+      <rect class="keycap-warm" x="0" y="0" width="37" height="27" rx="5"/><text class="key mono" x="18.5" y="19" text-anchor="middle">a</text>
+      <rect class="keycap-next" x="41" y="0" width="37" height="27" rx="5"/><text class="key key-next-text mono" x="59.5" y="19" text-anchor="middle">o</text>
+      <rect class="keycap-warm" x="82" y="0" width="37" height="27" rx="5"/><text class="key mono" x="100.5" y="19" text-anchor="middle">e</text>
+      <rect class="keycap" x="123" y="0" width="37" height="27" rx="5"/><text class="key mono" x="141.5" y="19" text-anchor="middle">u</text>
+      <rect class="keycap-warm" x="164" y="0" width="37" height="27" rx="5"/><text class="key mono" x="182.5" y="19" text-anchor="middle">i</text>
+      <rect class="keycap" x="205" y="0" width="37" height="27" rx="5"/><text class="key mono" x="223.5" y="19" text-anchor="middle">d</text>
+      <rect class="keycap" x="246" y="0" width="37" height="27" rx="5"/><text class="key mono" x="264.5" y="19" text-anchor="middle">h</text>
+      <rect class="keycap-warm" x="287" y="0" width="37" height="27" rx="5"/><text class="key mono" x="305.5" y="19" text-anchor="middle">t</text>
+      <rect class="keycap" x="328" y="0" width="37" height="27" rx="5"/><text class="key mono" x="346.5" y="19" text-anchor="middle">n</text>
+      <rect class="keycap-warm" x="369" y="0" width="37" height="27" rx="5"/><text class="key mono" x="387.5" y="19" text-anchor="middle">s</text>
+    </g>
+    <g transform="translate(27 66)">
+      <rect class="keycap" x="0" y="0" width="37" height="27" rx="5"/><text class="key mono" x="18.5" y="19" text-anchor="middle">;</text>
+      <rect class="keycap" x="41" y="0" width="37" height="27" rx="5"/><text class="key mono" x="59.5" y="19" text-anchor="middle">q</text>
+      <rect class="keycap-warm" x="82" y="0" width="37" height="27" rx="5"/><text class="key mono" x="100.5" y="19" text-anchor="middle">j</text>
+      <rect class="keycap" x="123" y="0" width="37" height="27" rx="5"/><text class="key mono" x="141.5" y="19" text-anchor="middle">k</text>
+      <rect class="keycap" x="164" y="0" width="37" height="27" rx="5"/><text class="key mono" x="182.5" y="19" text-anchor="middle">x</text>
+      <rect class="keycap-warm" x="205" y="0" width="37" height="27" rx="5"/><text class="key mono" x="223.5" y="19" text-anchor="middle">b</text>
+      <rect class="keycap" x="246" y="0" width="37" height="27" rx="5"/><text class="key mono" x="264.5" y="19" text-anchor="middle">m</text>
+      <rect class="keycap" x="287" y="0" width="37" height="27" rx="5"/><text class="key mono" x="305.5" y="19" text-anchor="middle">w</text>
+      <rect class="keycap-warm" x="328" y="0" width="37" height="27" rx="5"/><text class="key mono" x="346.5" y="19" text-anchor="middle">v</text>
+      <rect class="keycap" x="369" y="0" width="37" height="27" rx="5"/><text class="key mono" x="387.5" y="19" text-anchor="middle">z</text>
+    </g>
+  </g>
+
+  <rect class="panel" x="947" y="166" width="193" height="146" rx="8"/>
+  <text class="label" x="963" y="186">LIVE METRICS</text>
+  <text class="metric mono" x="963" y="219">59</text>
+  <text class="tiny" x="1010" y="215">WPM</text>
+  <text class="metric mono" x="963" y="251">97.8%</text>
+  <text class="tiny" x="1060" y="247">ACCURACY</text>
+  <path class="divider" d="M963 263 H1124"/>
+  <text class="tiny" x="963" y="279">TRANSITION HEAT</text>
+  <rect class="heat-cool" x="963" y="287" width="29" height="8" rx="4"/>
+  <rect class="heat-mid" x="997" y="287" width="38" height="8" rx="4"/>
+  <rect class="heat-hot" x="1040" y="287" width="63" height="8" rx="4"/>
+  <text class="tiny mono" x="1124" y="307" text-anchor="end">ao · br · ow</text>
+</svg>

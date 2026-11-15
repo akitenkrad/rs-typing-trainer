@@ -1,0 +1,52 @@
+# Primary source: https://gitlab.freedesktop.org/xkeyboard-config/xkeyboard-config/-/blob/master/symbols/us
+# The unshifted number row follows this project's required test vector.
+name = "dvorak"
+
+[keys]
+Backquote = { normal = "`", shift = "~" }
+Digit1 = { normal = "1", shift = "!" }
+Digit2 = { normal = "2", shift = "@" }
+Digit3 = { normal = "3", shift = "#" }
+Digit4 = { normal = "4", shift = "$" }
+Digit5 = { normal = "5", shift = "%" }
+Digit6 = { normal = "6", shift = "^" }
+Digit7 = { normal = "7", shift = "&" }
+Digit8 = { normal = "8", shift = "*" }
+Digit9 = { normal = "9", shift = "(" }
+Digit0 = { normal = "0", shift = ")" }
+Minus = { normal = "[", shift = "{" }
+Equal = { normal = "]", shift = "}" }
+KeyQ = { normal = "'", shift = '"' }
+KeyW = { normal = ",", shift = "<" }
+KeyE = { normal = ".", shift = ">" }
+KeyR = { normal = "p", shift = "P" }
+KeyT = { normal = "y", shift = "Y" }
+KeyY = { normal = "f", shift = "F" }
+KeyU = { normal = "g", shift = "G" }
+KeyI = { normal = "c", shift = "C" }
+KeyO = { normal = "r", shift = "R" }
+KeyP = { normal = "l", shift = "L" }
+BracketLeft = { normal = "/", shift = "?" }
+BracketRight = { normal = "=", shift = "+" }
+Backslash = { normal = "\\", shift = "|" }
+KeyA = { normal = "a", shift = "A" }
+KeyS = { normal = "o", shift = "O" }
+KeyD = { normal = "e", shift = "E" }
+KeyF = { normal = "u", shift = "U" }
+KeyG = { normal = "i", shift = "I" }
+KeyH = { normal = "d", shift = "D" }
+KeyJ = { normal = "h", shift = "H" }
+KeyK = { normal = "t", shift = "T" }
+KeyL = { normal = "n", shift = "N" }
+Semicolon = { normal = "s", shift = "S" }
+Quote = { normal = "-", shift = "_" }
+KeyZ = { normal = ";", shift = ":" }
+KeyX = { normal = "q", shift = "Q" }
+KeyC = { normal = "j", shift = "J" }
+KeyV = { normal = "k", shift = "K" }
+KeyB = { normal = "x", shift = "X" }
+KeyN = { normal = "b", shift = "B" }
+KeyM = { normal = "m", shift = "M" }
+Comma = { normal = "w", shift = "W" }
+Period = { normal = "v", shift = "V" }
+Slash = { normal = "z", shift = "Z" }

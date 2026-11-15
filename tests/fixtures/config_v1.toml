@@ -1,0 +1,17 @@
+[game]
+duration_seconds = 45
+word_timeout_seconds = 5
+word_length = 3
+
+[characters]
+charset = "bmwvz"
+allow_repeat = true
+allow_consecutive_same_word = false
+
+[ui]
+animation_enabled = true
+animation_speed = 1.0
+theme = "default"
+show_next_preview = true
+
+[metrics]

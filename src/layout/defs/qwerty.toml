@@ -1,0 +1,51 @@
+# Primary source: https://www.w3.org/TR/uievents-code/
+name = "qwerty"
+
+[keys]
+Backquote = { normal = "`", shift = "~" }
+Digit1 = { normal = "1", shift = "!" }
+Digit2 = { normal = "2", shift = "@" }
+Digit3 = { normal = "3", shift = "#" }
+Digit4 = { normal = "4", shift = "$" }
+Digit5 = { normal = "5", shift = "%" }
+Digit6 = { normal = "6", shift = "^" }
+Digit7 = { normal = "7", shift = "&" }
+Digit8 = { normal = "8", shift = "*" }
+Digit9 = { normal = "9", shift = "(" }
+Digit0 = { normal = "0", shift = ")" }
+Minus = { normal = "-", shift = "_" }
+Equal = { normal = "=", shift = "+" }
+KeyQ = { normal = "q", shift = "Q" }
+KeyW = { normal = "w", shift = "W" }
+KeyE = { normal = "e", shift = "E" }
+KeyR = { normal = "r", shift = "R" }
+KeyT = { normal = "t", shift = "T" }
+KeyY = { normal = "y", shift = "Y" }
+KeyU = { normal = "u", shift = "U" }
+KeyI = { normal = "i", shift = "I" }
+KeyO = { normal = "o", shift = "O" }
+KeyP = { normal = "p", shift = "P" }
+BracketLeft = { normal = "[", shift = "{" }
+BracketRight = { normal = "]", shift = "}" }
+Backslash = { normal = "\\", shift = "|" }
+KeyA = { normal = "a", shift = "A" }
+KeyS = { normal = "s", shift = "S" }
+KeyD = { normal = "d", shift = "D" }
+KeyF = { normal = "f", shift = "F" }
+KeyG = { normal = "g", shift = "G" }
+KeyH = { normal = "h", shift = "H" }
+KeyJ = { normal = "j", shift = "J" }
+KeyK = { normal = "k", shift = "K" }
+KeyL = { normal = "l", shift = "L" }
+Semicolon = { normal = ";", shift = ":" }
+Quote = { normal = "'", shift = '"' }
+KeyZ = { normal = "z", shift = "Z" }
+KeyX = { normal = "x", shift = "X" }
+KeyC = { normal = "c", shift = "C" }
+KeyV = { normal = "v", shift = "V" }
+KeyB = { normal = "b", shift = "B" }
+KeyN = { normal = "n", shift = "N" }
+KeyM = { normal = "m", shift = "M" }
+Comma = { normal = ",", shift = "<" }
+Period = { normal = ".", shift = ">" }
+Slash = { normal = "/", shift = "?" }

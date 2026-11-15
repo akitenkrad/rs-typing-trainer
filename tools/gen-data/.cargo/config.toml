@@ -1,0 +1,2 @@
+[env]
+LINDERA_BUILD_DICTIONARY_CACHE_DIR = { value = "target/lindera-cache", relative = true }

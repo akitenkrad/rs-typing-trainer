@@ -1,0 +1,51 @@
+# Primary source: https://github.com/workman-layout/Workman
+name = "workman"
+
+[keys]
+Backquote = { normal = "`", shift = "~" }
+Digit1 = { normal = "1", shift = "!" }
+Digit2 = { normal = "2", shift = "@" }
+Digit3 = { normal = "3", shift = "#" }
+Digit4 = { normal = "4", shift = "$" }
+Digit5 = { normal = "5", shift = "%" }
+Digit6 = { normal = "6", shift = "^" }
+Digit7 = { normal = "7", shift = "&" }
+Digit8 = { normal = "8", shift = "*" }
+Digit9 = { normal = "9", shift = "(" }
+Digit0 = { normal = "0", shift = ")" }
+Minus = { normal = "-", shift = "_" }
+Equal = { normal = "=", shift = "+" }
+KeyQ = { normal = "q", shift = "Q" }
+KeyW = { normal = "d", shift = "D" }
+KeyE = { normal = "r", shift = "R" }
+KeyR = { normal = "w", shift = "W" }
+KeyT = { normal = "b", shift = "B" }
+KeyY = { normal = "j", shift = "J" }
+KeyU = { normal = "f", shift = "F" }
+KeyI = { normal = "u", shift = "U" }
+KeyO = { normal = "p", shift = "P" }
+KeyP = { normal = ";", shift = ":" }
+BracketLeft = { normal = "[", shift = "{" }
+BracketRight = { normal = "]", shift = "}" }
+Backslash = { normal = "\\", shift = "|" }
+KeyA = { normal = "a", shift = "A" }
+KeyS = { normal = "s", shift = "S" }
+KeyD = { normal = "h", shift = "H" }
+KeyF = { normal = "t", shift = "T" }
+KeyG = { normal = "g", shift = "G" }
+KeyH = { normal = "y", shift = "Y" }
+KeyJ = { normal = "n", shift = "N" }
+KeyK = { normal = "e", shift = "E" }
+KeyL = { normal = "o", shift = "O" }
+Semicolon = { normal = "i", shift = "I" }
+Quote = { normal = "'", shift = '"' }
+KeyZ = { normal = "z", shift = "Z" }
+KeyX = { normal = "x", shift = "X" }
+KeyC = { normal = "m", shift = "M" }
+KeyV = { normal = "c", shift = "C" }
+KeyB = { normal = "v", shift = "V" }
+KeyN = { normal = "k", shift = "K" }
+KeyM = { normal = "l", shift = "L" }
+Comma = { normal = ",", shift = "<" }
+Period = { normal = ".", shift = ">" }
+Slash = { normal = "/", shift = "?" }

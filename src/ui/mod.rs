@@ -1,0 +1,38 @@
+//! TUI rendering. The top-level `render` function dispatches to per-screen
+//! renderers based on the current `Screen` value.
+
+pub mod analysis;
+pub mod animation;
+pub mod bench_select;
+pub mod bench_summary;
+pub mod countdown;
+pub mod history;
+pub mod key_picker;
+pub mod keyboard;
+pub mod mode_select;
+pub mod playing;
+pub mod replay;
+pub mod result;
+pub mod settings;
+pub mod theme;
+pub mod title;
+
+use ratatui::Frame;
+
+use crate::app::{App, Screen};
+
+pub fn render(frame: &mut Frame, app: &App) {
+    match app.screen {
+        Screen::Title => title::render(frame, app),
+        Screen::ModeSelect => mode_select::render(frame, app),
+        Screen::KeyPicker => key_picker::render(frame, app),
+        Screen::Countdown { remaining } => countdown::render(frame, app, remaining),
+        Screen::Playing => playing::render(frame, app),
+        Screen::Result | Screen::HistoryDetail => result::render(frame, app),
+        Screen::History => history::render(frame, app),
+        Screen::Settings => settings::render(frame, app),
+        Screen::BenchSelect => bench_select::render(frame, app),
+        Screen::BenchSummary => bench_summary::render(frame, app),
+        Screen::Analysis => analysis::render(frame, app),
+    }
+}

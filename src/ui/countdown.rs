@@ -1,0 +1,68 @@
+//! Countdown screen.
+
+use ratatui::Frame;
+use ratatui::layout::{Alignment, Constraint, Direction, Layout};
+use ratatui::style::{Modifier, Style};
+use ratatui::text::Line;
+use ratatui::widgets::{Block, Borders, Paragraph};
+
+use crate::app::App;
+use crate::i18n::Msg;
+use crate::ui::theme::Theme;
+
+/// `remaining` is in seconds, counting down from 3.0 to 0.0.
+pub fn render(frame: &mut Frame, app: &App, remaining: f32) {
+    let theme = Theme::from_name(&app.config.ui.theme);
+    let lang = app.config.general.lang;
+    let area = frame.area();
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" {} ", Msg::CountdownTitle.text(lang)))
+        .style(Style::default().fg(theme.fg));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(0),
+            Constraint::Length(7),
+            Constraint::Length(2),
+            Constraint::Length(1),
+            Constraint::Min(0),
+        ])
+        .split(inner);
+
+    let label = if remaining > 2.0 {
+        "3"
+    } else if remaining > 1.0 {
+        "2"
+    } else if remaining > 0.0 {
+        "1"
+    } else {
+        Msg::CountdownGo.text(lang)
+    };
+
+    let big = render_big_number(label);
+    let big_lines: Vec<Line> = big
+        .lines()
+        .map(|l| Line::styled(l.to_string(), Style::default().fg(theme.accent).add_modifier(Modifier::BOLD)))
+        .collect();
+    let para = Paragraph::new(big_lines).alignment(Alignment::Center);
+    frame.render_widget(para, chunks[1]);
+
+    let hint = Paragraph::new(Msg::CountdownHint.text(lang))
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(theme.muted));
+    frame.render_widget(hint, chunks[3]);
+}
+
+fn render_big_number(s: &str) -> String {
+    match s {
+        "3" => ["  ┌───────┐  ", "  │       │  ", "  │   3   │  ", "  │       │  ", "  └───────┘  "].join("\n"),
+        "2" => ["  ┌───────┐  ", "  │       │  ", "  │   2   │  ", "  │       │  ", "  └───────┘  "].join("\n"),
+        "1" => ["  ┌───────┐  ", "  │       │  ", "  │   1   │  ", "  │       │  ", "  └───────┘  "].join("\n"),
+        _ => format!("  ╔═══════╗  \n  ║       ║  \n  ║{:^7}║  \n  ║       ║  \n  ╚═══════╝  ", s),
+    }
+}

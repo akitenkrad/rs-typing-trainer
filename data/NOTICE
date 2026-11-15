@@ -1,0 +1,935 @@
+rs-typing-trainer bundled data notices
+
+SCOWL
+=====
+
+The collective work is Copyright 2000-2018 by Kevin Atkinson as well
+as any of the copyrights mentioned below:
+
+  Copyright 2000-2018 by Kevin Atkinson
+
+  Permission to use, copy, modify, distribute and sell these word
+  lists, the associated scripts, the output created from the scripts,
+  and its documentation for any purpose is hereby granted without fee,
+  provided that the above copyright notice appears in all copies and
+  that both that copyright notice and this permission notice appear in
+  supporting documentation. Kevin Atkinson makes no representations
+  about the suitability of this array for any purpose. It is provided
+  "as is" without express or implied warranty.
+
+Alan Beale <biljir@pobox.com> also deserves special credit as he has,
+in addition to providing the 12Dicts package and being a major
+contributor to the ENABLE word list, given me an incredible amount of
+feedback and created a number of special lists (those found in the
+Supplement) in order to help improve the overall quality of SCOWL.
+
+The 10 level includes the 1000 most common English words (according to
+the Moby (TM) Words II [MWords] package), a subset of the 1000 most
+common words on the Internet (again, according to Moby Words II), and
+frequently class 16 from Brian Kelk's "UK English Wordlist
+with Frequency Classification".
+
+The MWords package was explicitly placed in the public domain:
+
+    The Moby lexicon project is complete and has
+    been place into the public domain. Use, sell,
+    rework, excerpt and use in any way on any platform.
+
+    Placing this material on internal or public servers is
+    also encouraged. The compiler is not aware of any
+    export restrictions so freely distribute world-wide.
+
+    You can verify the public domain status by contacting
+
+    Grady Ward
+    3449 Martha Ct.
+    Arcata, CA  95521-4884
+
+    grady@netcom.com
+    grady@northcoast.com
+
+The "UK English Wordlist With Frequency Classification" is also in the
+Public Domain:
+
+  Date: Sat, 08 Jul 2000 20:27:21 +0100
+  From: Brian Kelk <Brian.Kelk@cl.cam.ac.uk>
+
+  > I was wondering what the copyright status of your "UK English
+  > Wordlist With Frequency Classification" word list as it seems to
+  > be lacking any copyright notice.
+
+  There were many many sources in total, but any text marked
+  "copyright" was avoided. Locally-written documentation was one
+  source. An earlier version of the list resided in a filespace called
+  PUBLIC on the University mainframe, because it was considered public
+  domain.
+
+  Date: Tue, 11 Jul 2000 19:31:34 +0100
+
+  > So are you saying your word list is also in the public domain?
+
+  That is the intention.
+
+The 20 level includes frequency classes 7-15 from Brian's word list.
+
+The 35 level includes frequency classes 2-6 and words appearing in at
+least 11 of 12 dictionaries as indicated in the 12Dicts package.  All
+words from the 12Dicts package have had likely inflections added via
+my inflection database.
+
+The 12Dicts package and Supplement is in the Public Domain.
+
+The WordNet database, which was used in the creation of the
+Inflections database, is under the following copyright:
+
+  This software and database is being provided to you, the LICENSEE,
+  by Princeton University under the following license.  By obtaining,
+  using and/or copying this software and database, you agree that you
+  have read, understood, and will comply with these terms and
+  conditions.:
+
+  Permission to use, copy, modify and distribute this software and
+  database and its documentation for any purpose and without fee or
+  royalty is hereby granted, provided that you agree to comply with
+  the following copyright notice and statements, including the
+  disclaimer, and that the same appear on ALL copies of the software,
+  database and documentation, including modifications that you make
+  for internal use or for distribution.
+
+  WordNet 1.6 Copyright 1997 by Princeton University.  All rights
+  reserved.
+
+  THIS SOFTWARE AND DATABASE IS PROVIDED "AS IS" AND PRINCETON
+  UNIVERSITY MAKES NO REPRESENTATIONS OR WARRANTIES, EXPRESS OR
+  IMPLIED.  BY WAY OF EXAMPLE, BUT NOT LIMITATION, PRINCETON
+  UNIVERSITY MAKES NO REPRESENTATIONS OR WARRANTIES OF MERCHANT-
+  ABILITY OR FITNESS FOR ANY PARTICULAR PURPOSE OR THAT THE USE OF THE
+  LICENSED SOFTWARE, DATABASE OR DOCUMENTATION WILL NOT INFRINGE ANY
+  THIRD PARTY PATENTS, COPYRIGHTS, TRADEMARKS OR OTHER RIGHTS.
+
+  The name of Princeton University or Princeton may not be used in
+  advertising or publicity pertaining to distribution of the software
+  and/or database.  Title to copyright in this software, database and
+  any associated documentation shall at all times remain with
+  Princeton University and LICENSEE agrees to preserve same.
+
+The 40 level includes words from Alan's 3esl list found in version 4.0
+of his 12dicts package.  Like his other stuff the 3esl list is also in the
+public domain.
+
+The 50 level includes Brian's frequency class 1, words appearing
+in at least 5 of 12 of the dictionaries as indicated in the 12Dicts
+package, and uppercase words in at least 4 of the previous 12
+dictionaries.  A decent number of proper names is also included: The
+top 1000 male, female, and Last names from the 1990 Census report; a
+list of names sent to me by Alan Beale; and a few names that I added
+myself.  Finally a small list of abbreviations not commonly found in
+other word lists is included.
+
+The name files form the Census report is a government document which I
+don't think can be copyrighted.
+
+The file special-jargon.50 uses common.lst and word.lst from the
+"Unofficial Jargon File Word Lists" which is derived from "The Jargon
+File".  All of which is in the Public Domain.  This file also contain
+a few extra UNIX terms which are found in the file "unix-terms" in the
+special/ directory.
+
+The 55 level includes words from Alan's 2of4brif list found in version
+4.0 of his 12dicts package.  Like his other stuff the 2of4brif is also
+in the public domain.
+
+The 60 level includes all words appearing in at least 2 of the 12
+dictionaries as indicated by the 12Dicts package.
+
+The 70 level includes Brian's frequency class 0 and the 74,550 common
+dictionary words from the MWords package.  The common dictionary words,
+like those from the 12Dicts package, have had all likely inflections
+added.  The 70 level also included the 5desk list from version 4.0 of
+the 12Dics package which is in the public domain.
+
+The 80 level includes the ENABLE word list, all the lists in the
+ENABLE supplement package (except for ABLE), the "UK Advanced Cryptics
+Dictionary" (UKACD), the list of signature words from the YAWL package,
+and the 10,196 places list from the MWords package.
+
+The ENABLE package, mainted by M\Cooper <thegrendel@theriver.com>,
+is in the Public Domain:
+
+  The ENABLE master word list, WORD.LST, is herewith formally released
+  into the Public Domain. Anyone is free to use it or distribute it in
+  any manner they see fit. No fee or registration is required for its
+  use nor are "contributions" solicited (if you feel you absolutely
+  must contribute something for your own peace of mind, the authors of
+  the ENABLE list ask that you make a donation on their behalf to your
+  favorite charity). This word list is our gift to the Scrabble
+  community, as an alternate to "official" word lists. Game designers
+  may feel free to incorporate the WORD.LST into their games. Please
+  mention the source and credit us as originators of the list. Note
+  that if you, as a game designer, use the WORD.LST in your product,
+  you may still copyright and protect your product, but you may *not*
+  legally copyright or in any way restrict redistribution of the
+  WORD.LST portion of your product. This *may* under law restrict your
+  rights to restrict your users' rights, but that is only fair.
+
+UKACD, by J Ross Beresford <ross@bryson.demon.co.uk>, is under the
+following copyright:
+
+  Copyright (c) J Ross Beresford 1993-1999. All Rights Reserved.
+
+  The following restriction is placed on the use of this publication:
+  if The UK Advanced Cryptics Dictionary is used in a software package
+  or redistributed in any form, the copyright notice must be
+  prominently displayed and the text of this document must be included
+  verbatim.
+
+  There are no other restrictions: I would like to see the list
+  distributed as widely as possible.
+
+The 95 level includes the 354,984 single words, 256,772 compound
+words, 4,946 female names and the 3,897 male names, and 21,986 names
+from the MWords package, ABLE.LST from the ENABLE Supplement, and some
+additional words found in my part-of-speech database that were not
+found anywhere else.
+
+Accent information was taken from UKACD.
+
+The VarCon package was used to create the American, British, Canadian,
+and Australian word list.  It is under the following copyright:
+
+  Copyright 2000-2016 by Kevin Atkinson
+
+  Permission to use, copy, modify, distribute and sell this array, the
+  associated software, and its documentation for any purpose is hereby
+  granted without fee, provided that the above copyright notice appears
+  in all copies and that both that copyright notice and this permission
+  notice appear in supporting documentation. Kevin Atkinson makes no
+  representations about the suitability of this array for any
+  purpose. It is provided "as is" without express or implied warranty.
+
+  Copyright 2016 by Benjamin Titze
+
+  Permission to use, copy, modify, distribute and sell this array, the
+  associated software, and its documentation for any purpose is hereby
+  granted without fee, provided that the above copyright notice appears
+  in all copies and that both that copyright notice and this permission
+  notice appear in supporting documentation. Benjamin Titze makes no
+  representations about the suitability of this array for any
+  purpose. It is provided "as is" without express or implied warranty.
+
+  Since the original words lists come from the Ispell distribution:
+
+  Copyright 1993, Geoff Kuenning, Granada Hills, CA
+  All rights reserved.
+
+  Redistribution and use in source and binary forms, with or without
+  modification, are permitted provided that the following conditions
+  are met:
+
+  1. Redistributions of source code must retain the above copyright
+     notice, this list of conditions and the following disclaimer.
+  2. Redistributions in binary form must reproduce the above copyright
+     notice, this list of conditions and the following disclaimer in the
+     documentation and/or other materials provided with the distribution.
+  3. All modifications to the source code must be clearly marked as
+     such.  Binary redistributions based on modified source code
+     must be clearly marked as modified versions in the documentation
+     and/or other materials provided with the distribution.
+  (clause 4 removed with permission from Geoff Kuenning)
+  5. The name of Geoff Kuenning may not be used to endorse or promote
+     products derived from this software without specific prior
+     written permission.
+
+  THIS SOFTWARE IS PROVIDED BY GEOFF KUENNING AND CONTRIBUTORS ``AS IS'' AND
+  ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+  ARE DISCLAIMED.  IN NO EVENT SHALL GEOFF KUENNING OR CONTRIBUTORS BE LIABLE
+  FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+  DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+  OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+  HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+  OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+  SUCH DAMAGE.
+
+
+IPADIC
+======
+
+Copyright 2000, 2001, 2002, 2003 Nara Institute of Science
+and Technology.  All Rights Reserved.
+
+Use, reproduction, and distribution of this software is permitted.
+Any copy of this software, whether in its original form or modified,
+must include both the above copyright notice and the following
+paragraphs.
+
+Nara Institute of Science and Technology (NAIST),
+the copyright holders, disclaims all warranties with regard to this
+software, including all implied warranties of merchantability and
+fitness, in no event shall NAIST be liable for
+any special, indirect or consequential damages or any damages
+whatsoever resulting from loss of use, data or profits, whether in an
+action of contract, negligence or other tortuous action, arising out
+of or in connection with the use or performance of this software.
+
+A large portion of the dictionary entries
+originate from ICOT Free Software.  The following conditions for ICOT
+Free Software applies to the current dictionary as well.
+
+Each User may also freely distribute the Program, whether in its
+original form or modified, to any third party or parties, PROVIDED
+that the provisions of Section 3 ("NO WARRANTY") will ALWAYS appear
+on, or be attached to, the Program, which is distributed substantially
+in the same form as set out herein and that such intended
+distribution, if actually made, will neither violate or otherwise
+contravene any of the laws and regulations of the countries having
+jurisdiction over the User or the intended distribution itself.
+
+NO WARRANTY
+
+The program was produced on an experimental basis in the course of the
+research and development conducted during the project and is provided
+to users as so produced on an experimental basis.  Accordingly, the
+program is provided without any warranty whatsoever, whether express,
+implied, statutory or otherwise.  The term "warranty" used herein
+includes, but is not limited to, any warranty of the quality,
+performance, merchantability and fitness for a particular purpose of
+the program and the nonexistence of any infringement or violation of
+any right of any third party.
+
+Each user of the program will agree and understand, and be deemed to
+have agreed and understood, that there is no warranty whatsoever for
+the program and, accordingly, the entire risk arising from or
+otherwise connected with the program is assumed by the user.
+
+Therefore, neither ICOT, the copyright holder, or any other
+organization that participated in or was otherwise related to the
+development of the program and their respective officials, directors,
+officers and other employees shall be held liable for any and all
+damages, including, without limitation, general, special, incidental
+and consequential damages, arising out of or otherwise in connection
+with the use or inability to use the program or any product, material
+or result produced or otherwise obtained by using the program,
+regardless of whether they have been advised of, or otherwise had
+knowledge of, the possibility of such damages at any time during the
+project or thereafter.  Each user will be deemed to have agreed to the
+foregoing by his or her commencement of use of the program.  The term
+"use" as used herein includes, but is not limited to, the use,
+modification, copying and distribution of the program and the
+production of secondary products from the program.
+
+In the case where the program, whether in its original form or
+modified, was distributed or delivered to or received by a user from
+any person, organization or entity other than ICOT, unless it makes or
+grants independently of ICOT any specific warranty to the user in
+writing, such person, organization or entity, will also be exempted
+from and not be held liable to the user for any such damages as noted
+above as far as the program is concerned.
+÷÷
+
+
+Japanese public-domain works
+============================
+
+Title	Author	Input by
+羅生門の後に	芥川竜之介	j.utiyama
+冬	芥川竜之介	j.utiyama
+犬と笛	芥川竜之介	j.utiyama
+影	芥川竜之介	j.utiyama
+彼　第二	芥川竜之介	j.utiyama
+或恋愛小説	芥川竜之介	j.utiyama
+道祖問答	芥川竜之介	j.utiyama
+寒さ	芥川竜之介	j.utiyama
+白	芥川竜之介	j.utiyama
+保吉の手帳から	芥川竜之介	j.utiyama
+広津氏に答う	有島武郎	鈴木厚司
+二十世紀旗手	太宰治	柴田卓治
+八十八夜	太宰治	柴田卓治
+ア、秋	太宰治	柴田卓治
+小さいアルバム	太宰治	柴田卓治
+老ハイデルベルヒ	太宰治	柴田卓治
+兄たち	太宰治	柴田卓治
+あさましきもの	太宰治	柴田卓治
+美男子と煙草	太宰治	柴田卓治
+盲人独笑	太宰治	柴田卓治
+フォスフォレッスセンス	太宰治	柴田卓治
+映画時代	寺田寅彦	野村裕介
+愛撫	梶井基次郎	j.utiyama
+ある崖上の感情	梶井基次郎	j.utiyama
+ある心の風景	梶井基次郎	j.utiyama
+泥濘	梶井基次郎	j.utiyama
+闇の絵巻	梶井基次郎	j.utiyama
+冬の蠅	梶井基次郎	j.utiyama
+冬の日	梶井基次郎	j.utiyama
+闇の書	梶井基次郎	j.utiyama
+城のある町にて	梶井基次郎	j.utiyama
+蒼穹	梶井基次郎	j.utiyama
+毒もみのすきな署長さん	宮沢賢治	古村充
+ガドルフの百合	宮沢賢治	浜野智
+銀河鉄道の夜	宮沢賢治	野口英司、中村隆生
+双子の星	宮沢賢治	野口英司
+インドラの網	宮沢賢治	浜野智
+雁の童子	宮沢賢治	浜野智
+風の又三郎	宮沢賢治	柴田卓治
+マグノリアの木	宮沢賢治	浜野智
+玉藻の前	岡本綺堂	tatsuki
+半七捕物帳	岡本綺堂	tatsuki
+身投げ救助業	菊池寛	真先芳秋
+勝負事	菊池寛	真先芳秋
+後世への最大遺物	内村鑑三	ゆうき
+右門捕物帖	佐々木味津三	tatsuki
+右門捕物帖	佐々木味津三	tatsuki
+右門捕物帖	佐々木味津三	tatsuki
+右門捕物帖	佐々木味津三	tatsuki
+悟浄歎異	中島敦	佐野良二
+南島譚	中島敦	ちょも
+名人伝	中島敦	大内章
+文字禍	中島敦	野口英司
+山月記	中島敦	平松大樹
+赤い蝋燭	新美南吉	浜野智
+ごん狐	新美南吉	林裕司
+ごんごろ鐘	新美南吉	田浦亜矢子
+花のき村と盗人たち	新美南吉	田浦亜矢子
+川	新美南吉	もりみつじゅんじ
+狐	新美南吉	浜野智
+張紅倫	新美南吉	もりみつじゅんじ
+久助君の話	新美南吉	もりみつじゅんじ
+阿部一族	森鴎外	真先芳秋
+二人の友	森鴎外	柿澤早苗
+百物語	森鴎外	砂場清隆
+かのように	森鴎外	高橋真也
+カズイスチカ	森鴎外	砂場清隆
+サフラン	森鴎外	柿澤早苗
+佐橋甚五郎	森鴎外	薦田佳子
+杯	森鴎外	砂場清隆
+さようなら	田中英光	寺澤昌子
+少女	渡辺温	森下祐行
+二百十日	夏目漱石	柴田卓治
+坊っちゃん	夏目漱石	真先芳秋
+文鳥	夏目漱石	柴田卓治
+文芸委員は何をするか	夏目漱石	柴田卓治
+文芸の哲学的基礎	夏目漱石	柴田卓治
+文芸と道徳	夏目漱石	柴田卓治
+道楽と職業	夏目漱石	柴田卓治
+永日小品	夏目漱石	柴田卓治
+幻影の盾	夏目漱石	藤本篤子
+道草	夏目漱石	らんむろ・さてぃ
+作物の批評	夏目漱石	柴田卓治
+どんぐり	寺田寅彦	田辺浩昭
+恐竜艇の冒険	海野十三	海美
+忘れ形見	若松賤子	浜野智
+雪の白峰	小島烏水	大野晋
+半七捕物帳	岡本綺堂	tatsuki
+半七捕物帳	岡本綺堂	tatsuki
+半七捕物帳	岡本綺堂	tatsuki
+半七捕物帳	岡本綺堂	tatsuki
+語られざる哲学	三木清	大野晋
+科学者と芸術家	寺田寅彦	（株）モモ
+悠々荘	芥川竜之介	j.utiyama
+宇宙の始まり	アレニウススヴァンテ	手嶋善成
+一つの世界	伊丹万作	土屋隆
+紅黄録	伊藤左千夫	大野晋
+遊星植民説	海野十三	tatsuki
+赤外線男	海野十三	tatsuki
+蠅男	海野十三	tatsuki
+死の快走船	大阪圭吉	大野晋
+寒の夜晴れ	大阪圭吉	大野晋
+単独行	加藤文太郎	田　一木
+小説家たらんとする青年に与う	菊池寛	大野晋
+メデューサの首	小酒井不木	大野晋
+工場細胞	小林多喜二	細見祐司
+旗本退屈男	佐々木味津三	tatsuki
+東京八景	太宰治	土屋隆
+一歩前進二歩退却	太宰治	土屋隆
+天狗	太宰治	土屋隆
+義猴記	田中貢太郎	Hiroshi_O
+旅日記から	寺田寅彦	田辺浩昭
+柿の種	寺田寅彦	山口美佐
+相撲	寺田寅彦	富田倫生
+俳諧瑣談	寺田寅彦	門田裕志
+野球時代	寺田寅彦	もりみつじゅんじ
+小説　不如帰　	徳冨蘆花	鈴木伸吾
+思想と風俗	戸坂潤	矢野正人
+相馬の仇討	直木三十五	atom
+李陵	中島敦	佐野良二
+弟子	中島敦	大内章
+斗南先生	中島敦	川向直樹
+殺された天一坊	浜尾四郎	大野晋
+清貧の書	林芙美子	土屋隆
+苦しく美しき夏	原民喜	tatsuki
+小説総論	二葉亭四迷	長住由生
+心の河	宮本百合子	柴田卓治
+爆弾太平記	夢野久作	柴田卓治
+創作人物の名前について	夢野久作	柴田卓治
+謡曲黒白談	夢野久作	柴田卓治
+新感覚派とコンミニズム文学	横光利一	早津順子
+バルザックの寝巻姿	吉行エイスケ	田辺浩昭
+魔像	蘭郁二郎	門田裕志
+やんぬる哉	太宰治	柴田卓治
+五題	山中貞雄	野村裕介
+気まま者の日記	山中貞雄	野村裕介
+学者と名誉	夏目漱石	柴田卓治
+文芸の主義	森鴎外	関和広
+浮世絵の曲線	寺田寅彦	（株）モモ
+Liber Studiorum	寺田寅彦	（株）モモ
+「手首」の問題	寺田寅彦	（株）モモ
+試験管	寺田寅彦	（株）モモ
+糸車	寺田寅彦	（株）モモ
+十二支考	南方熊楠	小林繁雄
+四月馬鹿	渡辺温	森下祐行
+日本脱出記	大杉栄	山根鋭二、kompass
+獄中記	大杉栄	kompass
+続獄中記	大杉栄	kompass
+木精	森鴎外	鈴木修一
+岡本一平著並画『探訪画趣』序	夏目漱石	Nana ohbe
+とも喰い	本庄陸男	林幸雄
+暗号の役割	海野十三	tatsuki
+地の塩文学の塩	宮本百合子	柴田卓治
+御萩と七種粥	河上肇	林幸雄
+あられ笹	宮本百合子	柴田卓治
+労働者の居ない船	葉山嘉樹	林幸雄
+婦人の生活と文学	宮本百合子	柴田卓治
+五〇年代の文学とそこにある問題	宮本百合子	柴田卓治
+洪水大陸を呑む	海野十三	tatsuki
+密林荘事件	海野十三	tatsuki
+千早館の迷路	海野十三	tatsuki
+十月革命と婦人の解放	野呂栄太郎	山田剛
+映画の恋愛	宮本百合子	柴田卓治
+草藪	鷹野つぎ	林幸雄
+泣虫小僧	林芙美子	林幸雄
+大菩薩峠	中里介山	（株）モモ
+私の貞操観	与謝野晶子	Nana ohbe
+大空魔艦	海野十三	tatsuki
+幽霊船の秘密	海野十三	tatsuki
+若き僚友に	宮本百合子	柴田卓治
+浮かぶ飛行島	海野十三	tatsuki
+木の子説法	泉鏡花	門田裕志
+雪たたき	幸田露伴	kompass
+ああ玉杯に花うけて	佐藤紅緑	kazuishi、林幸雄
+現代唯物論講話	戸坂潤	矢野正人
+選挙に対する婦人の希望	与謝野晶子	Nana ohbe
+食糧騒動について	与謝野晶子	Nana ohbe
+開扉一妖帖	泉鏡花	門田裕志
+映画芸術と映画	戸坂潤	矢野正人
+雨の小やみ	宮本百合子	柴田卓治
+この初冬	宮本百合子	柴田卓治
+健康な美術のために	宮本百合子	柴田卓治
+「うどんくい」	宮本百合子	柴田卓治
+贋紙幣事件	甲賀三郎	阿部良子
+青草	十一谷義三郎	土屋隆
+太郎坊	幸田露伴	林幸雄
+形	菊池寛	菅野朋子
+踊る地平線	谷譲次	tatsuki
+土淵村にての日記	水野葉舟	林幸雄
+浪漫趣味者として	渡辺温	森下祐行
+大菩薩峠	中里介山	tatsuki
+売春婦リゼット	岡本かの子	門田裕志
+晩夏	堀辰雄	kompass
+フランダースの犬	ド・ラ・ラメーマリー・ルイーズ	大久保ゆう
+母への追慕	上村松園	門田裕志
+武州喜多院	中里介山	門田裕志
+寺内の奇人団	淡島寒月	小林繁雄
+小翠	蒲 松齢	門田裕志
+円朝の牡丹灯籠	田中貢太郎	Hiroshi_O
+我が宗教観	淡島寒月	小林繁雄
+華々しき瞬間	久坂葉子	kompass
+源氏物語	紫式部	上田英代
+源氏物語	紫式部	上田英代
+源氏物語	紫式部	上田英代
+源氏物語	紫式部	上田英代
+源氏物語	紫式部	上田英代
+源氏物語	紫式部	上田英代
+源氏物語	紫式部	kompass
+源氏物語	紫式部	上田英代
+つぼみ	宮本百合子	柴田卓治
+猫の草紙	楠山正雄	鈴木厚司
+鬼六	楠山正雄	鈴木厚司
+追憶の医師達	寺田寅彦	Nana ohbe
+鷹を貰い損なった話	寺田寅彦	Nana ohbe
+古典竜頭蛇尾	太宰治	土屋隆
+白い鳥	楠山正雄	鈴木厚司
+最近日本の科学論	戸坂潤	矢野正人
+人の言葉――自分の言葉	寺田寅彦	Cyobirin
+浅間山麓より	寺田寅彦	Nana ohbe
+沼田の蚊帳	田中貢太郎	Hiroshi_O
+杜松の樹	グリムヴィルヘルム・カール	大久保ゆう
+雁	田中貢太郎	Hiroshi_O
+寄席と芝居と	岡本綺堂	門田裕志
+「グッド・バイ」作者の言葉	太宰治	蒋龍
+葉桜と魔笛	太宰治	小林繁雄
+囚われ	豊島与志雄	tatsuki
+特殊部落の犯罪	豊島与志雄	tatsuki
+道連	豊島与志雄	tatsuki
+狐火	豊島与志雄	tatsuki
+二等車に乗る男	豊島与志雄	tatsuki
+不肖の兄	豊島与志雄	tatsuki
+大自然を讃う	豊島与志雄	tatsuki
+表現論随筆	豊島与志雄	tatsuki
+ジャン・クリストフ	ロランロマン	tatsuki
+ジャン・クリストフ	ロランロマン	tatsuki
+レ・ミゼラブル	ユゴーヴィクトル	tatsuki
+どぶろく幻想	豊島与志雄	tatsuki
+言語と道具	寺田寅彦	Nana ohbe
+白蛾	豊島与志雄	tatsuki
+土地に還る	豊島与志雄	tatsuki
+探偵小説とは	坂口安吾	tatsuki
+敬語論	坂口安吾	tatsuki
+故郷	魯迅	京都大学電子テクスト研究会入力班
+ヒノエウマの話	坂口安吾	tatsuki
+新女大学	福沢諭吉	片瀬しろ
+炎天汗談	太宰治	青空文庫
+話に聞いた近藤勇	三田村鳶魚	大久保ゆう
+学生と生活	倉田百三	ゆうき
+真相かくの如し	坂口安吾	tatsuki
+深夜は睡るに限ること	坂口安吾	tatsuki
+安吾巷談	坂口安吾	tatsuki
+明治開化　安吾捕物	坂口安吾	tatsuki
+議会の印象	寺田寅彦	Nana ohbe
+物理的空間の成立まで	戸坂潤	矢野正人
+幾何学と空間	戸坂潤	矢野正人
+空間概念の分析	戸坂潤	矢野正人
+夏目先生と滝田さん	芥川竜之介	向井樹里
+孤独	蘭郁二郎	門田裕志
+古傷	蘭郁二郎	門田裕志
+世界怪談名作集	フランスアナトール	小林繁雄、門田裕志
+入院患者	ドイルアーサー・コナン	京都大学電子テクスト研究会入力班
+私の小売商道	相馬愛蔵	小林繁雄、門田裕志
+天草四郎の妖術	国枝史郎	阿和泉拓
+十二神貝十郎手柄話	国枝史郎	阿和泉拓
+最小人間の怪	海野十三	田中哲郎
+独房	小林多喜二	細見祐司
+大捕物仙人壺	国枝史郎	阿和泉拓
+科学的新聞記者	桐生悠々	門田裕志
+梟啼く	杉田久女	杉田弘晃
+女坑主	夢野久作	うてな
+挿頭花	津村信夫	浅葱
+戦争について	黒島伝治	Nana ohbe
+鰻に呪われた男	岡本綺堂	小林繁雄、門田裕志
+死体を喫う学生	田中貢太郎	Hiroshi_O
+偶人物語	田中貢太郎	Hiroshi_O
+竈の中の顔	田中貢太郎	Hiroshi_O
+世界的	太宰治	増山一光
+砂子屋	太宰治	増山一光
+良夜	饗庭篁村	高田農業高校生産技術科流通経済コース
+新春・日本の空を飛ぶ	坂口安吾	tatsuki
+安吾人生案内	坂口安吾	tatsuki
+南京虫殺人事件	坂口安吾	tatsuki
+湖水と彼等	豊島与志雄	tatsuki
+海豹島	久生十蘭	tatsuki
+玉取物語	久生十蘭	門田裕志
+一の倉沢	久生十蘭	門田裕志
+だいこん	久生十蘭	門田裕志
+顎十郎捕物帳	久生十蘭	tatsuki
+顎十郎捕物帳	久生十蘭	tatsuki
+顎十郎捕物帳	久生十蘭	tatsuki
+金狼	久生十蘭	tatsuki
+狂馬	佐左木俊郎	田中敬三
+大阪の可能性	織田作之助	桃沢まり
+僕の読書法	織田作之助	桃沢まり
+役者の一生	折口信夫	門田裕志
+都会の類人猿	牧逸馬	A子
+あのころ	上村松園	鈴木厚司
+楢ノ木大学士の野宿	宮沢賢治	蒋龍
+幕末維新懐古談	高村光雲	網迫、土屋隆
+空家	宮崎湖処子	川山隆
+医者と病人	香倶土三鳥	川山隆
+二人の男と荷車曳き	香倶土三鳥	川山隆
+森の神	香倶土三鳥	川山隆
+わが童心	佐藤垢石	門田裕志
+幕末維新懐古談	高村光雲	網迫、土屋隆
+春	岡本かの子	門田裕志
+幕末維新懐古談	高村光雲	網迫、土屋隆
+幕末維新懐古談	高村光雲	網迫、土屋隆
+幕末維新懐古談	高村光雲	網迫、土屋隆
+音の世界に生きる	宮城道雄	貝波明美
+瘤	犬田卯	林幸雄
+探偵小説を作って貰い度い人々	国枝史郎	門田裕志
+中支遊記	上村松園	川山隆
+死の復讐	国枝史郎	門田裕志
+木乃伊の耳飾	国枝史郎	門田裕志
+物凄き人喰い花の怪	国枝史郎	門田裕志
+随筆　寄席囃子	正岡容	門田裕志
+円太郎馬車	正岡容	門田裕志
+旅客機事件	大庭武年	川山隆
+歩くこと	三好十郎	伊藤時也
+猫と村正	小酒井不木	川山隆
+乱歩氏の諸作	平林初之輔	川山隆
+祭の夜	平林初之輔	川山隆
+探偵小説の世界的流行	平林初之輔	川山隆
+雑信（二）	種田山頭火	門田裕志
+鉄鉢と魚籃と	種田山頭火	門田裕志
+遍路の正月	種田山頭火	門田裕志
+烈婦	高田保	浦山敦子
+卵塔場の天女	泉鏡花	門田裕志
+「ああしんど」	池田蕉園	門田裕志
+白い光と上野の鐘	沼田一雅	門田裕志
+こんにゃく売り	徳永直	門田裕志
+我楽多玩具	岡本綺堂	川山隆
+かたき討雑感	岡本綺堂	川山隆
+温泉雑記	岡本綺堂	川山隆
+四十年前	内田魯庵	川山隆
+梅雨晴	永井荷風	門田裕志
+伝通院	永井荷風	門田裕志
+深川の散歩	永井荷風	門田裕志
+将来の日本	中江兆民	田部井　荘舟
+三味線の胴	上村松園	川山隆
+「日本民族」とは何ぞや	喜田貞吉	川山隆
+火夫	カフカフランツ	kompass
+蒲団	橘外男	門田裕志
+生きること作ること	和辻哲郎	門田裕志
+埋もれた日本	和辻哲郎	門田裕志
+寺田さんに最後に逢った時	和辻哲郎	門田裕志
+松風の音	和辻哲郎	門田裕志
+残肴の処理	北大路魯山人	門田裕志
+雑煮	北大路魯山人	門田裕志
+伝不習乎	北大路魯山人	門田裕志
+味覚馬鹿	北大路魯山人	門田裕志
+棚田裁判長の怪死	橘外男	門田裕志
+挿話	徳田秋声	岡本ゆみ子
+鬼桃太郎	尾崎紅葉	田中哲郎
+咸臨丸その他	服部之総	ゆうき
+黒船前後	服部之総	ゆうき
+くだもの	正岡子規	ゆうき
+我が教育の欠陥	新渡戸稲造	田中哲郎
+世界漫遊	ダビットヤーコプ・ユリウス	門田裕志
+赤い船	小川未明	ぷろぼの青空工作員チーム入力班
+海の少年	小川未明	ぷろぼの青空工作員チーム入力班
+電信柱と妙な男	小川未明	ぷろぼの青空工作員チーム入力班
+つばめと乞食の子	小川未明	ぷろぼの青空工作員チーム入力班
+星の世界から	小川未明	ぷろぼの青空工作員チーム入力班
+海へ	小川未明	ぷろぼの青空工作員チーム入力班
+黒い旗物語	小川未明	ぷろぼの青空工作員チーム入力班
+青い時計台	小川未明	ぷろぼの青空工作員チーム入力班
+葉と幹	小川未明	ぷろぼの青空工作員チーム入力班
+ゲテ魚好き	火野葦平	門田裕志
+夢幻泡影	外村繁	kompass
+小波瀾	チェーホフアントン	米田
+きつねをおがんだ人たち	小川未明	特定非営利活動法人はるかぜ
+クラリネットを吹く男	小川未明	特定非営利活動法人はるかぜ
+名もなき草	小川未明	Nana ohbe
+地底獣国	久生十蘭	冬木立
+濹東綺譚	永井荷風	米田
+子うぐいすと母うぐいす	小川未明	特定非営利活動法人はるかぜ
+ちょうせんぶなと美しい小箱	小川未明	特定非営利活動法人はるかぜ
+隣村の子	小川未明	特定非営利活動法人はるかぜ
+友だちどうし	小川未明	特定非営利活動法人はるかぜ
+麺くひ	桂三木助	門田裕志
+港の妖婦	田中貢太郎	川山隆
+指環	田中貢太郎	川山隆
+男の顔	田中貢太郎	川山隆
+神仙河野久	田中貢太郎	川山隆
+女の姿	田中貢太郎	川山隆
+富士屋ホテル	古川緑波	門田裕志
+鳴門秘帖	吉川英治	門田裕志
+鳴門秘帖	吉川英治	門田裕志
+八寒道中	吉川英治	門田裕志
+野槌の百	吉川英治	門田裕志
+山の人生	柳田国男	Nana ohbe
+熊さんの笛	小川未明	特定非営利活動法人はるかぜ
+月とあざらし	小川未明	特定非営利活動法人はるかぜ
+貸間を探がしたとき	小川未明	門田裕志
+暗い空	小川未明	門田裕志
+由布院行	中谷宇吉郎	門田裕志
+線香の火	中谷宇吉郎	門田裕志
+ひとりすまう	織田作之助	いとうたかし
+森山啓に	槙村浩	坂本真一
+餅の歌	槙村浩	坂本真一
+誤って健康を伝えられた同志たちに	槙村浩	坂本真一
+リップ・ヴァン・ウィンクル	アーヴィングワシントン	砂場清隆
+〔『支那思想と日本』初版〕まえがき	津田左右吉	門田裕志
+境界なき差別	丘浅次郎	川山隆
+言語と文化史	知里真志保	川山隆
+仏法僧鳥	斎藤茂吉	川山隆
+雪と血と煙草の進軍	三好十郎	坂本真一
+作業機械	細井和喜蔵	坂本真一
+運勢	波立一	坂本真一
+ねむの花咲く家	今野大力	坂本真一
+花に送られる	今野大力	坂本真一
+百姓仁平	今野大力	坂本真一
+工女の歌	丹沢明	坂本真一
+休日に	藪田忠夫	坂本真一
+森の生活――ウォールデン――	ソローヘンリー・デイビッド	Cavediver
+深夜の客	大倉燁子	kompass
+最初の印象	大倉燁子	kompass
+所有	今野大力	坂本真一
+おもちゃの汽車	竹内浩三	坂本真一
+行軍二	竹内浩三	坂本真一
+夜汽車の中で	竹内浩三	坂本真一
+冬に死す	竹内浩三	坂本真一
+歳棚に祭る神	柳田国男	門田裕志
+随筆銭形平次	江戸川乱歩	ばっちゃん
+濫僧考	喜田貞吉	川山隆
+紫式部	長谷川時雨	kompass
+筍の美味さは第一席	北大路魯山人	門田裕志
+民芸四十年	柳宗悦	Nana ohbe
+西園寺公の食道楽	北大路魯山人	門田裕志
+すき焼きと鴨料理――洋食雑感――	北大路魯山人	門田裕志
+料理一夕話	北大路魯山人	門田裕志
+覚々斎原叟の書	北大路魯山人	門田裕志
+南浦紹明墨蹟	北大路魯山人	門田裕志
+志野焼の価値	北大路魯山人	門田裕志
+猿の演説	山本宣治	sogo
+ダルマ船日記	山之口貘	kompass
+落日の荘厳に似る	吉川英治	川山隆
+学生の技能と勤労大衆	戸坂潤	矢野正人
+名曲決定盤	野村あらえびす	kompass
+オスカー・ブロズキー事件	フリーマンリチャード・オースティン	sogo
+やるせなさ	今野大力	坂本真一
+友と二人の夜	今野大力	坂本真一
+聖の行くべき道	今野大力	坂本真一
+徒弟	今野大力	坂本真一
+俳句への道	高浜虚子	kompass
+色盲検査表の話	石原忍	sogo
+閣下	佐々木邦	特定非営利活動法人はるかぜ
+身の上や	長谷川伸	門田裕志
+苦心の学友	佐々木邦	橋本泰平
+マカーガー峡谷の秘密	ビアスアンブローズ	sogo
+牢獄の花嫁	吉川英治	川山隆
+奇談クラブ〔戦後版〕	野村胡堂	門田裕志
+奇談クラブ〔戦後版〕	野村胡堂	門田裕志
+蕗の下の神様	宇野浩二	sogo
+銭形平次捕物控	野村胡堂	山口瑠美
+銭形平次捕物控	野村胡堂	山口瑠美
+天皇	蜷川新	Democrat
+銭形平次捕物控	野村胡堂	特定非営利活動法人はるかぜ
+動物物語　狼の王ロボ	シートンアーネスト・トンプソン	sogo
+銭形平次捕物控	野村胡堂	特定非営利活動法人はるかぜ
+銭形平次捕物控	野村胡堂	特定非営利活動法人はるかぜ
+日本名婦伝	吉川英治	川山隆
+餅を買う女	岡本綺堂	江村秀之
+告げ人	伊藤左千夫	高瀬竜一
+山と村	木暮理太郎	栗原晶子
+私が張作霖を殺した	河本大作	sogo
+身体検査	ソログープフョードル	sogo
+罪と罰	ドストエフスキーフィヨードル・ミハイロヴィチ	高柳典子
+酒友列伝	山之口貘	門田裕志
+妖怪博士	江戸川乱歩	sogo
+死の予告	野村胡堂	門田裕志
+地方の民芸	柳宗悦	門田裕志
+Ｓの背中	梅崎春生	kompass
+黄色い日日	梅崎春生	kompass
+凡人凡語	梅崎春生	kompass
+ボロ家の春秋	梅崎春生	kompass
+安吾史譚	坂口安吾	辻賢晃
+二人のセルヴィヤ人	辰野隆	門田裕志
+妻	斎藤茂吉	秋谷春恵
+恐ろしき錯誤	江戸川乱歩	門田裕志
+一人二役	江戸川乱歩	門田裕志
+百面相役者	江戸川乱歩	門田裕志
+銭形平次捕物控	野村胡堂	特定非営利活動法人はるかぜ
+銭形平次捕物控	野村胡堂	特定非営利活動法人はるかぜ
+北国の春	中谷宇吉郎	kompass
+南極・北極・熱帯の雪	中谷宇吉郎	kompass
+俳句上の京と江戸	正岡子規	酒井和郎
+青べか物語	山本周五郎	富田晶子
+鬼	江戸川乱歩	金城学院大学　電子書籍制作
+目羅博士の不思議な犯罪	江戸川乱歩	金城学院大学　電子書籍制作
+金五十両	山本周五郎	特定非営利活動法人はるかぜ
+薯粥	山本周五郎	特定非営利活動法人はるかぜ
+三年目	山本周五郎	特定非営利活動法人はるかぜ
+日本婦道記	山本周五郎	特定非営利活動法人はるかぜ
+赤ひげ診療譚	山本周五郎	特定非営利活動法人はるかぜ
+清々しさの研究の話	中谷宇吉郎	kompass
+歌の潤い	伊藤左千夫	高瀬竜一
+狸とムジナ	柳田国男	フクポー
+一寸法師	江戸川乱歩	nami
+福翁自伝	石河幹明	田中哲郎
+結婚	中勘助	岡村和彦
+蝙蝠	岡本かの子	門田裕志
+井伏鱒二によせて	小山清	kompass
+好い手紙	岡本かの子	門田裕志
+花子	岡本かの子	門田裕志
+ある日の蓮月尼	岡本かの子	門田裕志
+雪の日	岡本かの子	門田裕志
+影男	江戸川乱歩	入江幹夫
+みにくいアヒルの子	アンデルセンハンス・クリスチャン	チエコ
+母を恋うる記	谷崎潤一郎	砂場清隆
+年の瀬の音	山本周五郎	大久保ゆう
+遺愛集	島秋人	大久保ゆう
+お前は此の頃よくねむる	中野鈴子	津村田悟
+スペインの女	中野鈴子	津村田悟
+「寺田寅彦の追想」後書	中谷宇吉郎	砂場清隆
+実験室の思い出	中谷宇吉郎	砂場清隆
+とびくらべ	アンデルセンハンス・クリスチャン	チエコ
+穂高岳	幸田露伴	富田晶子
+スウィス日記	辻村伊助	富田晶子
+「古琉球」自序	伊波普猷	砂場清隆
+流血船西へ行く	山本周五郎	特定非営利活動法人はるかぜ
+見開いた眼	ルヴェルモーリス	ノワール
+麦畑	ルヴェルモーリス	ノワール
+「春夏秋冬　料理王国」序にかえて	北大路魯山人	江村秀之
+あすへの話題	中谷宇吉郎	砂場清隆
+大阪人と科学精神	中谷宇吉郎	砂場清隆
+科学ブームへの苦言	中谷宇吉郎	砂場清隆
+雷神	中谷宇吉郎	砂場清隆
+私の読書遍歴	中谷宇吉郎	砂場清隆
+文壇昔ばなし	谷崎潤一郎	きりんの手紙
+カナリヤと少女	山川方夫	かな　とよみ
+飢えは最善のソースか	石川欣一	砂場清隆
+ドミノのお告げ	久坂葉子	kompass
+写況雑記	永井荷風	きりんの手紙
+イーダちゃんのお花	アンデルセンハンス・クリスチャン	チエコ
+おくさま狐の御婚礼	グリムヴィルヘルム・カール	かな　とよみ
+死神の名づけ親（第二話）	グリムヴィルヘルム・カール	かな　とよみ
+酒・杯・徳利	山本周五郎	特定非営利活動法人はるかぜ
+日録	山本周五郎	特定非営利活動法人はるかぜ
+飛躍にも表と蔭	山本周五郎	特定非営利活動法人はるかぜ
+横浜伊勢佐木町	山本周五郎	特定非営利活動法人はるかぜ
+木犀の花	永井荷風	きりんの手紙
+国民性の問題	永井荷風	入江幹夫
+もぐらとコスモス	原民喜	竹井真
+或夜	永井荷風	入江幹夫
+近代美の研究	中井正一	kompass
+心づくし	永井荷風	入江幹夫
+現代語訳　平家物語	作者不詳	砂場清隆
+爪	大下宇陀児	羽田洋一
+神	寺田寅彦	砂場清隆
+おとろえ　２	中野鈴子	津村田悟
+今日はよく晴れ上がって	中野鈴子	津村田悟
+私は地下へもぐらない	坂口安吾	持田和踏
+片男波	小栗風葉	持田和踏
+偽悪病患者	大下宇陀児	羽田洋一
+みつばちの　女王	グリムヴィルヘルム・カール	sogo
+ガチョウノ　タンジョウビ	新美南吉	かな　とよみ
+『鉄砲左平次』序にも一つ	佐藤春夫	持田和踏
+
+Public-domain English books
+===========================
+
+Title	Author
+Alice's Adventures in Wonderland	Lewis Carroll
+Peter Pan	J. M. Barrie
+The Time Machine	H. G. Wells
+The war of the worlds	H. G. Wells
+The strange case of Dr. Jekyll and Mr. Hyde	Robert Louis Stevenson
+A Christmas Carol in Prose; Being a Ghost Story of Christmas	Charles Dickens
+The Wonderful Wizard of Oz	L. Frank Baum
+The Adventures of Tom Sawyer, Complete	Mark Twain
+Adventures of Huckleberry Finn	Mark Twain
+Frankenstein; or, The modern Prometheus	Mary Wollstonecraft Shelley
+A Tale of Two Cities	Charles Dickens
+Treasure Island	Robert Louis Stevenson
+Emma	Jane Austen
+Sense and Sensibility	Jane Austen
+The Picture of Dorian Gray	Oscar Wilde
+Walden, and On The Duty Of Civil Disobedience	Henry David Thoreau
+Heart of Darkness	Joseph Conrad
+Dracula	Bram Stoker
+Wuthering Heights	Emily Brontë
+A Modest Proposal	Jonathan Swift
+The Count of Monte Cristo	Alexandre Dumas
+Jane Eyre: An Autobiography	Charlotte Brontë
+Pride and Prejudice	Jane Austen
+Great Expectations	Charles Dickens
+The Adventures of Sherlock Holmes	Arthur Conan Doyle
+The Yellow Wallpaper	Charlotte Perkins Gilman
+Crime and Punishment	Fyodor Dostoyevsky
+War and Peace	graf Leo Tolstoy
+Moby Dick; Or, The Whale	Herman Melville
+Metamorphosis	Franz Kafka
+
+Tatoeba
+=======
+
+English sentences were selected from the CC0 export from tatoeba.org.
