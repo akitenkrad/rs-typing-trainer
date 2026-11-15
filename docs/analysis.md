@@ -52,13 +52,16 @@ The benchmark tab reports sustained speed, accuracy, rhythm, transitions, reach,
 
 ## Analysis screen
 
-Press `A` on the title screen. `Tab` or `←/→` changes tabs. `P` cycles all time, 30 days and 7 days; `M` cycles the mode filter.
+Press `A` on the title screen. `Tab` or `←/→` changes tabs. `P` cycles all time, 30 days and 7 days; `M` cycles the mode filter. Every tab, including Summary, uses the records left by these filters.
 
+- Summary: a deterministic, rule-based assessment; use `↑`/`↓` to scroll when it does not fit. It reports current seven-day medians by the one or two most frequent modes, the latest benchmark and its previous-result delta, the slope of weekly medians over four weeks, the strongest and weakest available benchmark axes, three weak transitions and keys, one to three practice recommendations, and data coverage. Sparse key or transition results with fewer than 10 samples are marked preliminary. A benchmark at least seven days old triggers a reminder.
 - Trend: daily medians for net WPM, accuracy and median IKI, separated by mode or benchmark part. Charts show endpoint dates and value bounds after two valid days have accumulated; before that they show the current value.
 - Keyboard: error-rate and median-IKI heatmaps; press `Enter` to switch.
 - Transitions: the 20 slowest and 20 most error-prone shrunk estimates. Select a slow transition and press `Enter` to prepare two-key `ngram` practice.
 - Fingers/Hands: finger accuracy/IKI and same-finger versus alternating-hand timing.
 - Bench: latest part results, comparisons and the eight axes.
+
+The four-week slope uses benchmark A when it is available, then another available benchmark part; without a benchmark it uses practice records and explicitly warns that practice WPM is not evidence of improvement. Slopes above `+0.5 WPM/week` are upward, below `-0.5 WPM/week` are downward, and values in between are flat. Recommendations follow fixed rules: low accuracy selects a 95% accuracy gate with the pacer off; a slow transition selects `adaptive` and names the pair; weak reach selects `unlock` or `ngram`; weak reaction increases look-ahead; weak rhythm selects `rhythm`; second-half endurance deterioration selects `endurance` plus a break; and weak Japanese selects `romaji`.
 
 ## CLI and CSV columns
 
@@ -69,7 +72,10 @@ rs-typing-trainer stats --csv sessions
 rs-typing-trainer stats --csv keys --since 2026-10-01 --mode words
 rs-typing-trainer stats --csv bigrams
 rs-typing-trainer stats --csv fingers
+rs-typing-trainer stats --summary --since 2026-10-01 --mode words
 ```
+
+`stats --summary` prints the same rule-based content as the Summary tab and follows `--lang`. It cannot be combined with `--csv`.
 
 | CSV | Columns |
 |---|---|

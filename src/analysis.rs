@@ -10,6 +10,7 @@ use crate::metrics::stats::{LiveMetrics, percentile};
 
 pub mod metrics;
 pub mod stats;
+pub mod summary;
 
 pub const METRICS_VERSION: i64 = 2;
 pub const IKI_PAUSE_THRESHOLD: Duration = Duration::from_secs(2);

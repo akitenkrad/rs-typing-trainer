@@ -2437,6 +2437,34 @@ sha256 = "8922ac79ea926ae876d68f178fcb1107bbdf1b90996086f63ffc3e97da55427f"
 path = "tatoeba/eng_sentences_CC0.tsv.bz2"
 sha256 = "c2e2edd063a31cbbc8e416a4858225e934bbb0afff485031821e59f230ccf1ca"
 
+[[inputs]]
+path = "shinonome/shinonome-0.9.11p1.tar.bz2"
+sha256 = "95663c95c92ba5765f63ccbdf033eb93b707be01812a989c548db943479c838f"
+
+[[inputs]]
+path = "shinonome/shinonome-0.9.11/bdf/shnmk12.bdf"
+sha256 = "17b0fa218105027f1d6615af3e5e46c2d0fbb2a6ac2fa2f7e5d39dff92d2116f"
+
+[[inputs]]
+path = "shinonome/shinonome-0.9.11/bdf/shnm6x12r.bdf"
+sha256 = "bd54dc33f9caa588183c161a23f374def17be24d28417040cd277c264e4a07e4"
+
+[[inputs]]
+path = "shinonome/shinonome-0.9.11/bdf/shnmk16.bdf"
+sha256 = "9965accd5bdbe03bf9395b8dd26dfa4465f4ffa6e9f447c5cb8258644fa1f468"
+
+[[inputs]]
+path = "shinonome/shinonome-0.9.11/bdf/shnm8x16r.bdf"
+sha256 = "26eae5a2a057c5756b26f6343f235c0967996e6c1316eff38b94ccc31396d078"
+
+[[inputs]]
+path = "shinonome/shinonome-0.9.11/LICENSE"
+sha256 = "86fbc28a39b01c4c0368e60b5234508353e860aeb10786057bf8ceb9b280afda"
+
+[[inputs]]
+path = "shinonome/shinonome-0.9.11/AUTHORS"
+sha256 = "91d7736899f9683aaf47aa33a7ceb78f62316a2316fb95ba44e4a7e0902fae1e"
+
 [[outputs]]
 path = "en_words.tsv.gz"
 count = 20000
@@ -2460,4 +2488,14 @@ sha256 = "17e706d91b028a8462440617df858b0f8b2914a2e0bda17e3734636e2b9e0587"
 [[outputs]]
 path = "NOTICE"
 count = 1
-sha256 = "5632652f0d47008d8ce1cd90cfc7dfcfeb4416ddaaaa511f7fa645fb2c11939c"
+sha256 = "5bfc245fb64710b0517af6c8e67a52b7344fe469496318bfeca3812fb02128b7"
+
+[[outputs]]
+path = "font/shinonome12.bin.gz"
+count = 7037
+sha256 = "c6e68da57473ff184fe98cd437867e4bca7038e727387249170740292b008c3d"
+
+[[outputs]]
+path = "font/shinonome16.bin.gz"
+count = 7037
+sha256 = "e92005dc7675271ab77a4b4513d51b2b3d70f85c6a0a3c2abc265c11d41462aa"

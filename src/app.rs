@@ -151,6 +151,8 @@ pub struct App {
     pub analysis_mode_filter: Option<String>,
     pub analysis_records: Vec<SessionRecord>,
     pub analysis_details: DetailedMetrics,
+    pub analysis_summary: crate::analysis::summary::SummaryReport,
+    pub analysis_summary_scroll: u16,
     pub analysis_transition_selected: usize,
     pub analysis_keyboard_latency: bool,
     pub adaptive_focus: Vec<TransitionCost>,
@@ -167,8 +169,9 @@ pub struct App {
     pub recovery_metrics: RecoveryMetrics,
     pub recommend_preview: bool,
     pub recommend_rhythm: bool,
+    analysis_as_of: chrono::NaiveDate,
     bench_run: Option<BenchRun>,
-    settings_original: Option<(KeyboardConfig, Lang, crate::config::ErrorMode)>,
+    settings_original: Option<(KeyboardConfig, String, Lang, crate::config::ErrorMode)>,
 }
 
 pub struct GameState {
@@ -280,6 +283,8 @@ impl App {
             analysis_mode_filter: None,
             analysis_records: Vec::new(),
             analysis_details: DetailedMetrics::default(),
+            analysis_summary: crate::analysis::summary::SummaryReport::default(),
+            analysis_summary_scroll: 0,
             analysis_transition_selected: 0,
             analysis_keyboard_latency: false,
             adaptive_focus: Vec::new(),
@@ -296,6 +301,7 @@ impl App {
             recovery_metrics: RecoveryMetrics::default(),
             recommend_preview: false,
             recommend_rhythm: false,
+            analysis_as_of: date,
             bench_run: None,
             settings_original: None,
         }
@@ -629,7 +635,12 @@ impl App {
             KeyCode::Char('s') | KeyCode::Char('S') => {
                 self.settings_selected = 0;
                 self.settings_save_error = None;
-                self.settings_original = Some((self.config.keyboard.clone(), self.config.general.lang, self.config.session.error_mode));
+                self.settings_original = Some((
+                    self.config.keyboard.clone(),
+                    self.config.display.prompt_size.clone(),
+                    self.config.general.lang,
+                    self.config.session.error_mode,
+                ));
                 self.screen = Screen::Settings;
             }
             KeyCode::Char('q') | KeyCode::Char('Q') => self.should_quit = true,
@@ -659,7 +670,12 @@ impl App {
             4 => {
                 self.settings_selected = 0;
                 self.settings_save_error = None;
-                self.settings_original = Some((self.config.keyboard.clone(), self.config.general.lang, self.config.session.error_mode));
+                self.settings_original = Some((
+                    self.config.keyboard.clone(),
+                    self.config.display.prompt_size.clone(),
+                    self.config.general.lang,
+                    self.config.session.error_mode,
+                ));
                 self.screen = Screen::Settings;
             }
             5 => self.should_quit = true,
@@ -752,17 +768,24 @@ impl App {
 
     fn handle_analysis_key(&mut self, key: KeyEvent, action: InputAction) {
         match key.code {
-            KeyCode::Tab | KeyCode::Right => self.analysis_tab = (self.analysis_tab + 1) % 5,
-            KeyCode::BackTab | KeyCode::Left => self.analysis_tab = (self.analysis_tab + 4) % 5,
-            KeyCode::Up | KeyCode::Char('k') if self.analysis_tab == 2 => {
+            KeyCode::Tab | KeyCode::Right => self.analysis_tab = (self.analysis_tab + 1) % 6,
+            KeyCode::BackTab | KeyCode::Left => self.analysis_tab = (self.analysis_tab + 5) % 6,
+            KeyCode::Up | KeyCode::Char('k') if self.analysis_tab == 0 => {
+                self.analysis_summary_scroll = self.analysis_summary_scroll.saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') if self.analysis_tab == 0 => {
+                let maximum = self.analysis_summary.lines.len().saturating_sub(1).min(u16::MAX as usize) as u16;
+                self.analysis_summary_scroll = (self.analysis_summary_scroll + 1).min(maximum);
+            }
+            KeyCode::Up | KeyCode::Char('k') if self.analysis_tab == 3 => {
                 self.analysis_transition_selected = self.analysis_transition_selected.saturating_sub(1);
             }
-            KeyCode::Down | KeyCode::Char('j') if self.analysis_tab == 2 => {
+            KeyCode::Down | KeyCode::Char('j') if self.analysis_tab == 3 => {
                 self.analysis_transition_selected =
                     (self.analysis_transition_selected + 1).min(self.analysis_details.bigrams.len().saturating_sub(1));
             }
-            KeyCode::Enter if self.analysis_tab == 2 => self.practice_selected_transition(),
-            KeyCode::Enter if self.analysis_tab == 1 => {
+            KeyCode::Enter if self.analysis_tab == 3 => self.practice_selected_transition(),
+            KeyCode::Enter if self.analysis_tab == 2 => {
                 self.analysis_keyboard_latency = !self.analysis_keyboard_latency;
             }
             KeyCode::Char('p') | KeyCode::Char('P') => {
@@ -806,12 +829,13 @@ impl App {
         self.analysis_mode_filter = None;
         self.analysis_transition_selected = 0;
         self.analysis_keyboard_latency = false;
+        self.analysis_summary_scroll = 0;
         self.reload_analysis();
         self.screen = Screen::Analysis;
     }
 
     fn reload_analysis(&mut self) {
-        let today = chrono::Local::now().date_naive();
+        let today = self.analysis_as_of;
         let since = match self.analysis_period {
             AnalysisPeriod::All => None,
             AnalysisPeriod::Days30 => Some(today - chrono::Duration::days(29)),
@@ -830,6 +854,15 @@ impl App {
                 shrinkage_k: self.config.analysis.shrinkage_k,
             },
         );
+        self.analysis_summary = crate::analysis::summary::generate_with_metrics(
+            &self.analysis_records,
+            &self.config,
+            self.practice_layout(),
+            &self.analysis_details,
+            today,
+            self.config.general.lang,
+        );
+        self.analysis_summary_scroll = 0;
         self.analysis_transition_selected = self
             .analysis_transition_selected
             .min(self.analysis_details.bigrams.len().saturating_sub(1));
@@ -1039,7 +1072,7 @@ impl App {
                 self.settings_selected = self.settings_selected.saturating_sub(1);
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.settings_selected = (self.settings_selected + 1).min(5);
+                self.settings_selected = (self.settings_selected + 1).min(7);
             }
             KeyCode::Left | KeyCode::Char('h') => self.cycle_setting(-1),
             KeyCode::Right | KeyCode::Char('l') => self.cycle_setting(1),
@@ -1067,8 +1100,9 @@ impl App {
     }
 
     fn cancel_settings(&mut self) {
-        if let Some((keyboard, language, error_mode)) = self.settings_original.take() {
+        if let Some((keyboard, prompt_size, language, error_mode)) = self.settings_original.take() {
             self.config.keyboard = keyboard;
+            self.config.display.prompt_size = prompt_size;
             self.config.general.lang = language;
             self.config.session.error_mode = error_mode;
         }
@@ -1093,13 +1127,23 @@ impl App {
                 &["full".to_owned(), "dim".to_owned(), "hidden".to_owned(), "auto".to_owned()],
                 direction,
             ),
-            4 => {
+            4 => cycle_string(
+                &mut self.config.keyboard.style,
+                &["keycap".to_owned(), "raised".to_owned(), "plain".to_owned()],
+                direction,
+            ),
+            5 => cycle_string(
+                &mut self.config.display.prompt_size,
+                &["auto".to_owned(), "normal".to_owned(), "large".to_owned(), "xlarge".to_owned()],
+                direction,
+            ),
+            6 => {
                 self.config.general.lang = match self.config.general.lang {
                     Lang::En => Lang::Ja,
                     Lang::Ja => Lang::En,
                 };
             }
-            5 => {
+            7 => {
                 self.config.session.error_mode = match self.config.session.error_mode {
                     crate::config::ErrorMode::Stop => crate::config::ErrorMode::Advance,
                     crate::config::ErrorMode::Advance => crate::config::ErrorMode::Stop,

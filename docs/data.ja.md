@@ -4,6 +4,8 @@
 
 rs-typing-trainer は，決定的に生成した4種類の gzip 圧縮 TSV を同梱します．`include_bytes!` で組み込み，起動時に1回だけ展開してキャッシュします．入力の SHA-256，生成日，フィルタ条件，出力の SHA-256，lindera と辞書の版は [`data/manifest.toml`](../data/manifest.toml) に記録しています．著作権表示と出典は [`data/NOTICE`](../data/NOTICE) にあります．
 
+パブリックドメインの東雲フォント0.9.11も，12ドットと16ドットで同梱します．どちらも JIS X 0208 の全角6,879字，印字可能な ASCII 95字，JIS X 0201 の半角カナ63字を Unicode コードポイントで引けます．`data/NOTICE` には，UTF-8 に変換した `LICENSE` と `AUTHORS` の全文，配布元 URL を収録しています．
+
 ## 同梱ファイル
 
 | ファイル | 行数 | 列 |
@@ -12,6 +14,10 @@ rs-typing-trainer は，決定的に生成した4種類の gzip 圧縮 TSV を�
 | `data/ja_words.tsv.gz` | 12,000 | `surface`，`reading`，`rank`，`tier` |
 | `data/en_sentences.tsv.gz` | 19,696 | `text`，`tatoeba_id`，`tier` |
 | `data/ja_sentences.tsv.gz` | 7,394 | `text`，`reading`，`source_id`，`author`，`tier` |
+| `data/font/shinonome12.bin.gz` | 7,037字形 | 固定長バイナリレコード |
+| `data/font/shinonome16.bin.gz` | 7,037字形 | 固定長バイナリレコード |
+
+展開後のフォントは，20バイトのヘッダから始まります．内容は `SHNFONT\0`，形式版，ドットの高さ，半角・全角のピクセル幅，リトルエンディアンの字形数，予約4バイトです．続く固定長レコードはコードポイント順で，Unicode の `u32`，幅1バイト，高さ分の `u16` 行をすべてリトルエンディアンで格納します．x 座標の画素は `15-x` ビットです．gzip の時刻は0です．圧縮後の大きさは，12ドットが113,046バイト，16ドットが150,545バイトです．
 
 読みは，ひらがなと `、。「」` からなります．長音記号は，出題文の表記にも長音記号がある場合だけ現れます．日本語短文の出典 ID は，`tools/gen-data/sources/aozora_selection.tsv` にある6桁の作品 ID です．`tier=core` は英単語2,000語，英文2,070文，人手で点検した日本語の単語561語と和文537文で，それ以外は `tier=ext` です．
 
@@ -21,6 +27,7 @@ rs-typing-trainer は，決定的に生成した4種類の gzip 圧縮 TSV を�
 - 日本語の単語と短文は，著作権の切れた日本語作品560編から作っています．各作品の作品名，著者名，入力者名は `data/NOTICE` に残しています．
 - 日本語の読みには lindera 6.2.0 と，組み込みの IPADIC `mecab-ipadic-2.7.0-20250920` 辞書を使っています．NAIST の許諾文と無保証条項，ICOT 条項を含む全文を `data/NOTICE` に残しています．
 - 英語短文は Tatoeba の CC0 英文エクスポートから選んでいます．CC0 に表示義務はありませんが，`tatoeba.org` を出典として記載しています．
+- 大きな出題文字の字形は，`http://openlab.ring.gr.jp/efont/shinonome/` の東雲フォント0.9.11です．配布物はフォントデータ・文書・スクリプトをパブリックドメインとして提供しています．条件と作者一覧の全文は `data/NOTICE` にあります．
 
 パブリックドメインの扱いは法域によって異なる場合があります．異なる保護期間の地域で配布する場合は，原作品の状態を確認してください．
 
@@ -50,9 +57,14 @@ CC0 の英文は30〜90文字の印字可能 ASCII に絞り，重複と除外�
 tools/gen-data/sources/fetch.sh /path/to/p4in
 cargo run --release --manifest-path tools/gen-data/Cargo.toml -- \
   --input /path/to/p4in --extra-aozora /path/to/extra/aozora --out data/
+cargo run --release --manifest-path tools/gen-data/Cargo.toml -- \
+  --font-source /path/to/p4in/shinonome/shinonome-0.9.11 --out data/font \
+  --font-notice data/NOTICE --font-manifest data/manifest.toml
 ```
 
-辞書キャッシュ，点検ファイル，override の形式，決定的な生成日の扱いは [`tools/gen-data/README.md`](../tools/gen-data/README.md) にあります．
+フォントのコマンドは2番目に実行します．データのコマンドは `data/NOTICE` と `data/manifest.toml` を作り直し，フォントのコマンドがフォントの NOTICE，入力の SHA-256（配布物と，そこから読む各ファイル），フォントの出力を書き戻します．`fetch.sh` は配布物を SHA-256 `95663c95c92ba5765f63ccbdf033eb93b707be01812a989c548db943479c838f` と照合し，展開先の隣に配布物があればフォントのコマンドも同じ照合をします．両方のコマンドを2回実行しても `data/` は変わりません．
+
+フォントファイルの形式，辞書キャッシュ，点検ファイル，override の形式，決定的な生成日の扱いは [`tools/gen-data/README.md`](../tools/gen-data/README.md) にあります．
 
 ## 利用者ファイル
 

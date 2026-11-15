@@ -66,6 +66,17 @@ fn buffer_text(buffer: &Buffer) -> String {
     buffer.content().iter().map(|cell| cell.symbol()).collect()
 }
 
+fn buffer_has_ordered_row(buffer: &Buffer, keys: &[char]) -> bool {
+    (0..buffer.area.height).any(|y| {
+        let row = (0..buffer.area.width).map(|x| buffer[(x, y)].symbol()).collect::<String>();
+        let positions = keys
+            .iter()
+            .filter_map(|key| row.chars().position(|character| character == *key))
+            .collect::<Vec<_>>();
+        positions.len() == keys.len() && positions.windows(2).all(|pair| pair[0] < pair[1])
+    })
+}
+
 #[test]
 fn replay_arguments_match_the_public_cli_contract() {
     let cli = Cli::try_parse_from([
@@ -213,19 +224,21 @@ fn replay_renderer_matches_the_playing_screen_except_for_its_status_row() {
 
     let replay_buffer = replay_terminal.backend().buffer();
     let text = buffer_text(replay_buffer);
-    assert!(text.contains("▲"), "cursor missing: {text}");
+    assert!(text.contains("▔"), "cursor missing: {text}");
     assert!(
-        replay_buffer
-            .content()
-            .iter()
-            .any(|cell| cell.symbol() == "a" && cell.style().fg == Some(Color::LightGreen)),
+        replay_buffer.content().iter().any(|cell| {
+            matches!(
+                cell.symbol(),
+                "▘" | "▝" | "▖" | "▗" | "▀" | "▄" | "▌" | "▐" | "▚" | "▞" | "▛" | "▜" | "▙" | "▟" | "█"
+            ) && cell.style().fg == Some(Color::LightGreen)
+        }),
         "completed prompt color missing"
     );
     assert!(
         replay_buffer
             .content()
             .iter()
-            .any(|cell| cell.symbol() == "a" && cell.style().add_modifier.contains(Modifier::UNDERLINED)),
+            .any(|cell| cell.symbol() == "▔" && cell.style().add_modifier.contains(Modifier::BOLD)),
         "prompt cursor style missing"
     );
     assert!(
@@ -250,9 +263,15 @@ fn finished_replay_keeps_the_last_playing_frame() {
     let output = buffer_text(terminal.backend().buffer());
 
     assert!(output.contains("Time:"), "normal playing header missing: {output}");
-    assert!(output.contains("▲"), "last prompt cursor missing: {output}");
-    let compact = output.chars().filter(|character| !character.is_whitespace()).collect::<String>();
-    assert!(compact.contains("asdf"), "keyboard missing: {output}");
+    assert!(output.contains("✓ Correct"), "last prompt result missing: {output}");
+    assert!(output.chars().any(|character| matches!(
+        character,
+        '▘' | '▝' | '▖' | '▗' | '▀' | '▄' | '▌' | '▐' | '▚' | '▞' | '▛' | '▜' | '▙' | '▟' | '█'
+    )));
+    assert!(
+        buffer_has_ordered_row(terminal.backend().buffer(), &['a', 's', 'd', 'f']),
+        "keyboard missing: {output}"
+    );
     assert!(output.contains("Replay finished · WPM 24.0 · Accuracy 100.0% · [Esc/Q] quit"), "{output}");
     assert!(!output.contains("Replay Result"), "result screen must not be rendered: {output}");
 
@@ -290,7 +309,8 @@ fn replay_switches_items_and_keeps_the_last_item_after_finishing() {
         .draw(|frame| rs_typing_trainer::ui::replay::render(frame, &replay, Lang::En))
         .unwrap();
     let switched = buffer_text(terminal.backend().buffer());
-    assert!(switched.contains(" c  d "), "second item was not shown: {switched}");
+    assert_eq!(replay.app().game.as_ref().unwrap().current_prompt.target, "cd");
+    assert!(switched.contains('▔'), "second item cursor was not shown: {switched}");
     assert!(switched.contains("Replay · 3/4"), "{switched}");
 
     replay.advance_to(Duration::from_secs(2));
@@ -298,7 +318,8 @@ fn replay_switches_items_and_keeps_the_last_item_after_finishing() {
         .draw(|frame| rs_typing_trainer::ui::replay::render(frame, &replay, Lang::En))
         .unwrap();
     let finished = buffer_text(terminal.backend().buffer());
-    assert!(finished.contains(" c  d "), "last item was not retained: {finished}");
+    assert_eq!(replay.app().game.as_ref().unwrap().current_prompt.target, "cd");
+    assert!(finished.contains("✓ Correct"), "last item was not retained: {finished}");
     assert!(finished.contains("Replay finished"), "{finished}");
     assert!(!finished.contains("Replay Result"), "{finished}");
 }
@@ -316,10 +337,12 @@ fn dvorak_words_sample_finishes_on_its_last_item() {
         .draw(|frame| rs_typing_trainer::ui::replay::render(frame, &replay, Lang::En))
         .unwrap();
     let output = buffer_text(terminal.backend().buffer());
-    let compact = output.chars().filter(|character| !character.is_whitespace()).collect::<String>();
-
-    assert!(compact.contains("stone"), "last item missing: {output}");
-    assert!(compact.contains("aoeu"), "Dvorak keyboard missing: {output}");
+    assert_eq!(replay.app().game.as_ref().unwrap().current_prompt.target, "stone");
+    assert!(output.contains("✓ Correct"), "last item missing: {output}");
+    assert!(
+        buffer_has_ordered_row(terminal.backend().buffer(), &['a', 'o', 'e', 'u']),
+        "Dvorak keyboard missing: {output}"
+    );
     assert!(output.contains("Replay finished · WPM 59.0 · Accuracy 97.8%"), "{output}");
 }
 
@@ -335,16 +358,7 @@ fn sentence_replay_shows_colored_progress_cursor_and_mistype_feedback() {
         .draw(|frame| rs_typing_trainer::ui::replay::render(frame, &replay, Lang::En))
         .unwrap();
     let buffer = terminal.backend().buffer();
-    let central_cells = buffer
-        .content()
-        .iter()
-        .enumerate()
-        .filter(|(index, _)| {
-            let y = *index as u16 / buffer.area.width;
-            (3..19).contains(&y)
-        })
-        .map(|(_, cell)| cell)
-        .collect::<Vec<_>>();
+    let central_cells = buffer.content().iter().collect::<Vec<_>>();
     let output = buffer_text(buffer);
 
     assert!(

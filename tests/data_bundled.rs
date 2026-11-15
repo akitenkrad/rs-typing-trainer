@@ -2,6 +2,7 @@ use rs_typing_trainer::config::DataConfig;
 use rs_typing_trainer::data::{DataCatalog, DataKind, Tier, TrainingDataSource};
 use rs_typing_trainer::engine::judge::{Judge, JudgeResult};
 use rs_typing_trainer::engine::romaji::RomajiJudge;
+use rs_typing_trainer::ui::bigtext::{BigTextSize, font};
 use tempfile::TempDir;
 
 const BLOCKLIST_EN: &str = include_str!("../tools/gen-data/blocklist_en.txt");
@@ -108,6 +109,34 @@ fn public_docs_and_bundled_data_do_not_name_the_english_distributor() {
         let text = String::from_utf8_lossy(&std::fs::read(&path).unwrap()).to_ascii_lowercase();
         assert!(!text.contains("gutenberg"), "forbidden name in {}", path.display());
     }
+}
+
+#[test]
+fn bundled_fonts_have_the_expected_character_sets_and_japanese_coverage() {
+    let dot12 = font(BigTextSize::Dot12).unwrap();
+    let dot16 = font(BigTextSize::Dot16).unwrap();
+    for bundled in [dot12, dot16] {
+        assert_eq!(bundled.fullwidth_glyph_count(), 6_879);
+        assert_eq!(bundled.halfwidth_glyph_count(), 95 + 63);
+        assert!((0x20_u32..=0x7e).all(|codepoint| bundled.contains(char::from_u32(codepoint).unwrap())));
+        assert!((0xff61_u32..=0xff9f).all(|codepoint| bundled.contains(char::from_u32(codepoint).unwrap())));
+    }
+
+    let home = TempDir::new().unwrap();
+    let catalog = DataCatalog::load(&DataConfig::default(), home.path()).unwrap();
+    let coverage = |texts: Vec<&str>| {
+        let characters = texts.into_iter().flat_map(str::chars).collect::<BTreeSet<_>>();
+        let covered = characters.iter().filter(|character| dot12.contains(**character)).count();
+        (covered, characters.len(), covered as f64 * 100.0 / characters.len() as f64)
+    };
+    let words = coverage(catalog.words_ja().iter().map(|row| row.text.as_str()).collect());
+    let sentences = coverage(catalog.sentences_ja().iter().map(|row| row.text.as_str()).collect());
+    eprintln!(
+        "Shinonome coverage: Japanese words {}/{} ({:.3}%), Japanese sentences {}/{} ({:.3}%)",
+        words.0, words.1, words.2, sentences.0, sentences.1, sentences.2
+    );
+    assert!(words.2 >= 95.0, "word coverage is only {:.3}%", words.2);
+    assert!(sentences.2 >= 95.0, "sentence coverage is only {:.3}%", sentences.2);
 }
 
 use std::collections::BTreeSet;

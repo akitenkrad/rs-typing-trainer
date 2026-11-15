@@ -9,6 +9,7 @@ use rs_typing_trainer::engine::item::Item;
 use rs_typing_trainer::engine::session::Session;
 use rs_typing_trainer::practice::pacer::{cursor_position, next_target_wpm, target_wpm};
 use rs_typing_trainer::record::SessionRecord;
+use rs_typing_trainer::ui::bigtext::{BigTextSize, font};
 
 mod common;
 use common::test_app;
@@ -120,9 +121,25 @@ fn pacer_marker_is_directly_above_the_unicode_target_column_and_header_has_targe
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
     terminal.draw(|frame| rs_typing_trainer::ui::render(frame, &app)).unwrap();
     let marker = cell_position(&terminal, "▾");
-    let target = cell_position(&terminal, "界");
-    assert_eq!(marker.0, target.0, "marker={marker:?}, target={target:?}");
-    assert_eq!(marker.1 + 1, target.1);
+    let font = font(BigTextSize::Dot12).unwrap();
+    let expected_column = (80 - font.text_width("a界b")) / 2 + font.text_width("a");
+    assert_eq!(marker.0, expected_column, "marker={marker:?}");
+    let stats_row = terminal
+        .backend()
+        .buffer()
+        .content()
+        .chunks(80)
+        .position(|row| row.iter().map(|cell| cell.symbol()).collect::<String>().contains("Combo"))
+        .unwrap() as u16;
+    assert_eq!(marker.1, stats_row + 1, "marker must occupy the row above the bitmap: {marker:?}");
+    assert!((marker.1 + 1..=marker.1 + 6).any(|y| {
+        (expected_column..expected_column + font.text_width("界")).any(|x| {
+            matches!(
+                terminal.backend().buffer()[(x, y)].symbol(),
+                "▘" | "▝" | "▖" | "▗" | "▀" | "▄" | "▌" | "▐" | "▚" | "▞" | "▛" | "▜" | "▙" | "▟" | "█"
+            )
+        })
+    }));
     let output = terminal.backend().buffer().content().iter().map(|cell| cell.symbol()).collect::<String>();
     assert!(output.contains("Pace: 60 WPM"), "{output}");
 }

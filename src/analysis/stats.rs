@@ -7,16 +7,28 @@ use crate::analysis::metrics::{AnalysisSettings, analyze_records};
 use crate::cli::StatsCsv;
 use crate::config::Config;
 use crate::error::AppResult;
+use crate::i18n::Lang;
 use crate::layout::builtin_layout;
 use crate::layout::geometry::geometry;
 use crate::record::SessionRecord;
 use crate::record::db;
 
-pub fn render(path: &Path, config: &Config, csv: Option<StatsCsv>, since: Option<NaiveDate>, mode: Option<&str>) -> AppResult<String> {
+#[allow(clippy::too_many_arguments)]
+pub fn render(
+    path: &Path,
+    config: &Config,
+    csv: Option<StatsCsv>,
+    summary: bool,
+    since: Option<NaiveDate>,
+    mode: Option<&str>,
+    lang: Lang,
+    as_of: NaiveDate,
+) -> AppResult<String> {
     let records = db::load_records_filtered(path, since, mode)?;
     Ok(match csv {
         Some(StatsCsv::Sessions) => sessions_csv(&records),
         Some(kind) => detailed_csv(kind, &records, config),
+        None if summary => crate::analysis::summary::generate(&records, config, as_of, lang).to_text(),
         None => overview(&records),
     })
 }

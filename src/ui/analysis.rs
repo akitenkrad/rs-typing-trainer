@@ -6,7 +6,7 @@ use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Axis, Block, Borders, Chart, Dataset, GraphType, Paragraph};
+use ratatui::widgets::{Axis, Block, Borders, Chart, Dataset, GraphType, Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::{AnalysisPeriod, App};
@@ -30,10 +30,11 @@ pub fn render(frame: &mut Frame, app: &App) {
         .split(inner);
     render_tabs(frame, app, &theme, chunks[0]);
     match app.analysis_tab {
-        0 => render_trend(frame, app, chunks[1]),
-        1 => render_keyboard(frame, app, chunks[1]),
-        2 => render_transitions(frame, app, &theme, chunks[1]),
-        3 => render_fingers(frame, app, chunks[1]),
+        0 => render_summary(frame, app, chunks[1]),
+        1 => render_trend(frame, app, chunks[1]),
+        2 => render_keyboard(frame, app, chunks[1]),
+        3 => render_transitions(frame, app, &theme, chunks[1]),
+        4 => render_fingers(frame, app, chunks[1]),
         _ => render_bench(frame, app, chunks[1]),
     }
     let period = match app.analysis_period {
@@ -58,6 +59,10 @@ pub fn render(frame: &mut Frame, app: &App) {
 fn render_tabs(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let lang = app.config.general.lang;
     let labels = [
+        match lang {
+            Lang::En => "Summary",
+            Lang::Ja => "総評",
+        },
         Msg::AnalysisTrend.text(lang),
         Msg::AnalysisKeyboard.text(lang),
         Msg::AnalysisTransitions.text(lang),
@@ -83,6 +88,15 @@ fn render_tabs(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         })
         .collect::<Vec<_>>();
     frame.render_widget(Paragraph::new(Line::from(spans)).alignment(Alignment::Center), area);
+}
+
+fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
+    frame.render_widget(
+        Paragraph::new(app.analysis_summary.lines.iter().cloned().map(Line::from).collect::<Vec<_>>())
+            .wrap(Wrap { trim: false })
+            .scroll((app.analysis_summary_scroll, 0)),
+        area,
+    );
 }
 
 fn render_trend(frame: &mut Frame, app: &App, area: Rect) {
@@ -274,6 +288,7 @@ fn render_keyboard(frame: &mut Frame, app: &App, area: Rect) {
         &state,
         KeyboardView {
             show: "full",
+            style: &app.config.keyboard.style,
             finger_guide: true,
         },
     );
@@ -448,15 +463,13 @@ fn render_bench(frame: &mut Frame, app: &App, area: Rect) {
         )));
     }
     lines.push(Line::from(""));
-    for (axis, raw) in skill_axis_values(app) {
-        let name = pad_display(axis.label(lang), 16);
-        let Some(raw) = raw else {
+    for value in crate::analysis::summary::skill_axis_values(&app.analysis_records, app.practice_layout(), &app.config) {
+        let name = pad_display(value.axis.label(lang), 16);
+        let Some(raw) = value.raw else {
             lines.push(Line::from(format!("{name}{}", Msg::NoData.text(lang))));
             continue;
         };
-        let history = axis_history(app, axis);
-        let (bar, suffix) = if history.len() >= 3 {
-            let position = percentile_position(raw, &history, axis.higher_is_better());
+        let (bar, suffix) = if let Some(position) = value.percentile {
             (
                 "█".repeat((position / 5.0).round() as usize),
                 format!("{position:>5.1} {}", Msg::Percentile.text(lang)),
@@ -467,130 +480,6 @@ fn render_bench(frame: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(format!("{name}{raw:>10.2}  {}  {suffix}", pad_display(&bar, 20))));
     }
     frame.render_widget(Paragraph::new(lines).block(Block::default().title(Msg::BenchEightAxes.text(lang))), area);
-}
-
-#[derive(Clone, Copy)]
-enum SkillAxis {
-    SustainedSpeed,
-    Accuracy,
-    Rhythm,
-    Transitions,
-    Reach,
-    Reaction,
-    Correction,
-    Japanese,
-}
-
-impl SkillAxis {
-    const ALL: [Self; 8] = [
-        Self::SustainedSpeed,
-        Self::Accuracy,
-        Self::Rhythm,
-        Self::Transitions,
-        Self::Reach,
-        Self::Reaction,
-        Self::Correction,
-        Self::Japanese,
-    ];
-
-    fn label(self, lang: Lang) -> &'static str {
-        match self {
-            Self::SustainedSpeed => Msg::AxisSustainedSpeed.text(lang),
-            Self::Accuracy => Msg::AxisAccuracy.text(lang),
-            Self::Rhythm => Msg::AxisRhythm.text(lang),
-            Self::Transitions => Msg::AxisTransitions.text(lang),
-            Self::Reach => Msg::AxisReach.text(lang),
-            Self::Reaction => Msg::AxisReaction.text(lang),
-            Self::Correction => Msg::AxisCorrection.text(lang),
-            Self::Japanese => Msg::AxisJapanese.text(lang),
-        }
-    }
-
-    fn part(self) -> &'static str {
-        match self {
-            Self::SustainedSpeed | Self::Accuracy | Self::Rhythm | Self::Reaction | Self::Correction => "A",
-            Self::Transitions | Self::Reach => "B",
-            Self::Japanese => "C",
-        }
-    }
-
-    fn higher_is_better(self) -> bool {
-        matches!(self, Self::SustainedSpeed | Self::Accuracy | Self::Japanese)
-    }
-}
-
-fn skill_axis_values(app: &App) -> Vec<(SkillAxis, Option<f64>)> {
-    SkillAxis::ALL
-        .into_iter()
-        .map(|axis| {
-            let raw = app
-                .analysis_records
-                .iter()
-                .rev()
-                .find(|record| {
-                    record
-                        .header
-                        .bench_id
-                        .as_deref()
-                        .is_some_and(|id| id.starts_with(&format!("bench-v1/{}/", axis.part())))
-                })
-                .and_then(|record| axis_value(app, axis, record));
-            (axis, raw)
-        })
-        .collect()
-}
-
-fn axis_history(app: &App, axis: SkillAxis) -> Vec<f64> {
-    bench_values(app, axis.part(), |record| axis_value(app, axis, record))
-        .into_iter()
-        .flatten()
-        .collect()
-}
-
-fn axis_value(app: &App, axis: SkillAxis, record: &crate::record::SessionRecord) -> Option<f64> {
-    match axis {
-        SkillAxis::SustainedSpeed | SkillAxis::Japanese => Some(record.header.net_wpm),
-        SkillAxis::Accuracy => Some(record.header.accuracy * 100.0),
-        SkillAxis::Rhythm if record.header.metrics_version == 0 => None,
-        SkillAxis::Rhythm => Some(record.header.iki_cv),
-        SkillAxis::Transitions | SkillAxis::Reach | SkillAxis::Reaction | SkillAxis::Correction => {
-            let keyboard_geometry = geometry(&record.header.geometry).or_else(|| geometry("ansi"))?;
-            let details = crate::analysis::metrics::analyze_records(
-                std::slice::from_ref(record),
-                app.practice_layout(),
-                &keyboard_geometry,
-                crate::analysis::metrics::AnalysisSettings {
-                    pause_ms: app.config.analysis.pause_ms,
-                    shrinkage_k: app.config.analysis.shrinkage_k,
-                },
-            );
-            match axis {
-                SkillAxis::Transitions => {
-                    let mut values = details.bigrams.iter().map(|row| row.estimated_iki_ms).collect::<Vec<_>>();
-                    values.sort_by(|left, right| right.total_cmp(left));
-                    let top = values.iter().take(20).copied().collect::<Vec<_>>();
-                    (!top.is_empty()).then(|| top.iter().sum::<f64>() / top.len() as f64 - details.iki_median_ms)
-                }
-                SkillAxis::Reach => {
-                    let home = details
-                        .rows
-                        .iter()
-                        .find(|row| row.name == "home" && row.n > 0)
-                        .map(|row| row.iki_median_ms)?;
-                    let remote = details
-                        .rows
-                        .iter()
-                        .filter(|row| matches!(row.name.as_str(), "number" | "top" | "bottom") && row.n > 0)
-                        .map(|row| row.iki_median_ms)
-                        .collect::<Vec<_>>();
-                    (!remote.is_empty() && home > 0.0).then(|| (remote.iter().sum::<f64>() / remote.len() as f64) / home)
-                }
-                SkillAxis::Reaction => (details.reaction_median_ms > 0.0).then_some(details.reaction_median_ms),
-                SkillAxis::Correction => (details.correction_median_ms > 0.0).then_some(details.correction_median_ms),
-                _ => None,
-            }
-        }
-    }
 }
 
 fn bench_values<T>(app: &App, part: &str, value: impl Fn(&crate::record::SessionRecord) -> T) -> Vec<T> {
@@ -614,17 +503,6 @@ fn delta_label(value: Option<f64>, lang: Lang) -> String {
 fn pad_display(value: &str, width: usize) -> String {
     let padding = width.saturating_sub(value.width());
     format!("{value}{}", " ".repeat(padding))
-}
-
-fn percentile_position(value: f64, history: &[f64], higher_is_better: bool) -> f64 {
-    if history.is_empty() {
-        return 0.0;
-    }
-    let favorable = history
-        .iter()
-        .filter(|sample| if higher_is_better { **sample <= value } else { **sample >= value })
-        .count();
-    100.0 * favorable as f64 / history.len() as f64
 }
 
 fn median(values: &[f64]) -> f64 {

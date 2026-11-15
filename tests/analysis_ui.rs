@@ -39,7 +39,11 @@ fn save_record(path: &std::path::Path, mode: ModeKind, bench_id: Option<&str>, w
 }
 
 fn render(app: &rs_typing_trainer::app::App) -> String {
-    let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+    render_size(app, 120, 40)
+}
+
+fn render_size(app: &rs_typing_trainer::app::App, width: u16, height: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     terminal.draw(|frame| ui::render(frame, app)).unwrap();
     terminal
         .backend()
@@ -69,13 +73,13 @@ fn every_analysis_tab_renders_and_bench_shows_previous_delta() {
     app.handle_key(key(KeyCode::Char('a')));
     assert_eq!(app.screen, Screen::Analysis);
 
-    for expected in ["推移", "キーボード", "遷移", "指・手", "ベンチ"] {
+    for expected in ["総評", "推移", "キーボード", "遷移", "指・手", "ベンチ"] {
         let output = render(&app);
         let compact = output.chars().filter(|character| !character.is_whitespace()).collect::<String>();
         assert!(compact.contains(expected), "tab {expected}: {output}");
         app.handle_key(key(KeyCode::Tab));
     }
-    for _ in 0..4 {
+    for _ in 0..5 {
         app.handle_key(key(KeyCode::Tab));
     }
     let bench = render(&app);
@@ -93,6 +97,7 @@ fn selected_transition_creates_an_ngram_practice_configuration() {
     config.storage.db_path = Some(path);
     let mut app = test_app(config);
     app.handle_key(key(KeyCode::Char('a')));
+    app.handle_key(key(KeyCode::Tab));
     app.handle_key(key(KeyCode::Tab));
     app.handle_key(key(KeyCode::Tab));
     app.handle_key(key(KeyCode::Enter));
@@ -158,7 +163,7 @@ fn japanese_analysis_tabs_do_not_contain_english_ui_phrases() {
         "same-finger",
         "alternating hands",
     ];
-    for tab in 0..5 {
+    for tab in 0..6 {
         let output = render(&app);
         for phrase in forbidden {
             assert!(!output.contains(phrase), "tab {tab} contains {phrase:?}: {output}");
@@ -201,6 +206,7 @@ fn trend_needs_two_valid_days_and_shows_current_value() {
     config.storage.db_path = Some(path);
     let mut app = test_app(config);
     app.handle_key(key(KeyCode::Char('a')));
+    app.handle_key(key(KeyCode::Tab));
 
     let output = render(&app);
     assert!(compact(&output).contains("データが2日分たまると推移を表示します"), "{output}");
@@ -218,6 +224,7 @@ fn trend_labels_first_last_dates_and_value_range() {
     config.storage.db_path = Some(path);
     let mut app = test_app(config);
     app.handle_key(key(KeyCode::Char('a')));
+    app.handle_key(key(KeyCode::Tab));
 
     let output = render(&app);
     assert!(output.contains("2026-11-01"), "{output}");
@@ -244,6 +251,7 @@ fn legacy_sessions_are_excluded_from_iki_trend() {
     config.storage.db_path = Some(path);
     let mut app = test_app(config);
     app.handle_key(key(KeyCode::Char('a')));
+    app.handle_key(key(KeyCode::Tab));
 
     let output = render(&app);
     assert!(!output.contains("9876"), "{output}");
@@ -260,7 +268,7 @@ fn unavailable_skill_axes_show_no_data_in_aligned_columns() {
     config.storage.db_path = Some(path);
     let mut app = test_app(config);
     app.handle_key(key(KeyCode::Char('a')));
-    for _ in 0..4 {
+    for _ in 0..5 {
         app.handle_key(key(KeyCode::Tab));
     }
 
@@ -271,4 +279,26 @@ fn unavailable_skill_axes_show_no_data_in_aligned_columns() {
     assert!(!output.contains("遷移0.00"), "{output}");
     assert!(!output.contains("到達0.00"), "{output}");
     assert!(!output.contains("日本語0.00"), "{output}");
+}
+
+#[test]
+fn summary_is_the_first_tab_and_scrolls_in_an_80_by_24_terminal() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("sessions.db");
+    save_record(&path, ModeKind::Words, None, 30.0, 14);
+    let mut config = Config::default();
+    config.general.lang = Lang::Ja;
+    config.storage.db_path = Some(path);
+    let mut app = test_app(config);
+    app.handle_key(key(KeyCode::Char('a')));
+
+    let first = render_size(&app, 80, 24);
+    assert!(compact(&first).contains("総評"), "{first}");
+    assert!(compact(&first).contains("今の実力"), "{first}");
+    assert!(compact(&first).contains("[P]期間"), "{first}");
+
+    app.handle_key(key(KeyCode::Down));
+    assert_eq!(app.analysis_summary_scroll, 1);
+    let scrolled = render_size(&app, 80, 24);
+    assert_ne!(first, scrolled);
 }

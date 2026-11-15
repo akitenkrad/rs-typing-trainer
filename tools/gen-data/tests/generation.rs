@@ -1,7 +1,107 @@
 use std::collections::BTreeSet;
 
-use gen_data::{extract_aozora, extract_english_body, load_scowl_words, stable_sample};
+use gen_data::{
+    FontGenerationOptions, FontKind, extract_aozora, extract_english_body, generate_fonts, jis_x0208_to_char, load_scowl_words, parse_bdf,
+    stable_sample, update_shinonome_manifest, update_shinonome_notice,
+};
 use tempfile::TempDir;
+
+const HALF_12: &str = r#"STARTFONT 2.1
+FONTBOUNDINGBOX 6 12 0 -2
+CHARS 2
+STARTCHAR SPACE
+ENCODING 32
+BBX 6 12 0 -2
+BITMAP
+00
+00
+00
+00
+00
+00
+00
+00
+00
+00
+00
+00
+ENDCHAR
+STARTCHAR A
+ENCODING 65
+BBX 6 12 0 -2
+BITMAP
+00
+20
+50
+50
+88
+F8
+88
+88
+00
+00
+00
+00
+ENDCHAR
+ENDFONT
+"#;
+
+const FULL_12: &str = r#"STARTFONT 2.1
+FONTBOUNDINGBOX 12 12 0 -2
+CHARS 2
+STARTCHAR 2422
+ENCODING 9250
+BBX 12 12 0 -2
+BITMAP
+0000
+0400
+0400
+7FC0
+0440
+1C80
+2680
+4500
+4600
+3C00
+0000
+0000
+ENDCHAR
+STARTCHAR 3441
+ENCODING 13377
+BBX 12 12 0 -2
+BITMAP
+2440
+FFC0
+2440
+7FC0
+4440
+7FC0
+4440
+7FC0
+0440
+0840
+1040
+0000
+ENDCHAR
+ENDFONT
+"#;
+
+fn blank_bdf(width: u8, height: u8, encodings: &[u32]) -> String {
+    let row = "0".repeat(usize::from(width).div_ceil(8) * 2);
+    let glyphs = encodings
+        .iter()
+        .map(|encoding| {
+            format!(
+                "STARTCHAR {encoding:X}\nENCODING {encoding}\nBBX {width} {height} 0 -2\nBITMAP\n{}\nENDCHAR\n",
+                std::iter::repeat_n(row.as_str(), usize::from(height)).collect::<Vec<_>>().join("\n")
+            )
+        })
+        .collect::<String>();
+    format!(
+        "STARTFONT 2.1\nFONTBOUNDINGBOX {width} {height} 0 -2\nCHARS {}\n{glyphs}ENDFONT\n",
+        encodings.len()
+    )
+}
 
 #[test]
 fn english_body_is_bounded_by_distribution_markers() {
@@ -65,4 +165,148 @@ fn stable_sampling_is_repeatable_and_order_independent() {
 
     assert_eq!(stable_sample(&values_a, 3, 0x5eed), stable_sample(&values_a, 3, 0x5eed));
     assert_eq!(stable_sample(&values_a, 3, 0x5eed), stable_sample(&values_b, 3, 0x5eed));
+}
+
+#[test]
+fn bdf_parser_normalizes_rows_to_the_high_bits_of_u16() {
+    let glyphs = parse_bdf(HALF_12.as_bytes(), FontKind::JisX0201, 6, 12).unwrap();
+    let a = glyphs.get(&'A').unwrap();
+
+    assert_eq!(a.width, 6);
+    assert_eq!(a.rows.len(), 12);
+    assert_eq!(a.rows[1], 0x2000);
+    assert_eq!(a.rows[5], 0xf800);
+}
+
+#[test]
+fn jis_codes_map_to_the_expected_unicode_characters() {
+    assert_eq!(jis_x0208_to_char(0x2422), Some('あ'));
+    assert_eq!(jis_x0208_to_char(0x3441), Some('漢'));
+
+    let half = parse_bdf(HALF_12.as_bytes(), FontKind::JisX0201, 6, 12).unwrap();
+    assert!(half.contains_key(&'A'));
+}
+
+#[test]
+fn font_generation_is_byte_for_byte_deterministic() {
+    let source = TempDir::new().unwrap();
+    let bdf = source.path().join("bdf");
+    std::fs::create_dir(&bdf).unwrap();
+    std::fs::write(bdf.join("shnmk12.bdf"), FULL_12).unwrap();
+    std::fs::write(bdf.join("shnm6x12r.bdf"), HALF_12).unwrap();
+    std::fs::write(bdf.join("shnmk16.bdf"), blank_bdf(16, 16, &[9250, 13377])).unwrap();
+    std::fs::write(bdf.join("shnm8x16r.bdf"), blank_bdf(8, 16, &[32, 65])).unwrap();
+    std::fs::write(source.path().join("LICENSE"), b"license\n").unwrap();
+    std::fs::write(source.path().join("AUTHORS"), b"authors\n").unwrap();
+    let first = TempDir::new().unwrap();
+    let second = TempDir::new().unwrap();
+    let first_report = generate_fonts(&FontGenerationOptions {
+        source: source.path().to_owned(),
+        out: first.path().to_owned(),
+    })
+    .unwrap();
+    let second_report = generate_fonts(&FontGenerationOptions {
+        source: source.path().to_owned(),
+        out: second.path().to_owned(),
+    })
+    .unwrap();
+
+    assert_eq!(first_report, second_report);
+    assert_eq!(
+        std::fs::read(first.path().join("shinonome12.bin.gz")).unwrap(),
+        std::fs::read(second.path().join("shinonome12.bin.gz")).unwrap()
+    );
+    assert_eq!(
+        std::fs::read(first.path().join("shinonome16.bin.gz")).unwrap(),
+        std::fs::read(second.path().join("shinonome16.bin.gz")).unwrap()
+    );
+}
+
+#[test]
+fn font_generation_rejects_an_archive_with_the_wrong_sha256() {
+    let root = TempDir::new().unwrap();
+    let source = root.path().join("shinonome-0.9.11");
+    let bdf = source.join("bdf");
+    std::fs::create_dir_all(&bdf).unwrap();
+    std::fs::write(bdf.join("shnmk12.bdf"), FULL_12).unwrap();
+    std::fs::write(bdf.join("shnm6x12r.bdf"), HALF_12).unwrap();
+    std::fs::write(bdf.join("shnmk16.bdf"), blank_bdf(16, 16, &[9250, 13377])).unwrap();
+    std::fs::write(bdf.join("shnm8x16r.bdf"), blank_bdf(8, 16, &[32, 65])).unwrap();
+    std::fs::write(source.join("LICENSE"), b"license\n").unwrap();
+    std::fs::write(source.join("AUTHORS"), b"authors\n").unwrap();
+    std::fs::write(root.path().join(gen_data::SHINONOME_ARCHIVE), b"not the upstream archive").unwrap();
+    let out = TempDir::new().unwrap();
+
+    let error = generate_fonts(&FontGenerationOptions {
+        source: source.clone(),
+        out: out.path().to_owned(),
+    })
+    .unwrap_err();
+    assert!(error.to_string().contains(gen_data::SHINONOME_ARCHIVE_SHA256), "{error:#}");
+    assert!(!out.path().join("shinonome12.bin.gz").exists());
+
+    std::fs::remove_file(root.path().join(gen_data::SHINONOME_ARCHIVE)).unwrap();
+    let report = generate_fonts(&FontGenerationOptions {
+        source,
+        out: out.path().to_owned(),
+    })
+    .unwrap();
+    assert_eq!(report.input_hashes.len(), 6);
+    assert_eq!(report.input_hashes[4].0, "LICENSE");
+}
+
+#[test]
+fn shinonome_notice_update_is_utf8_and_idempotent() {
+    let source = TempDir::new().unwrap();
+    std::fs::write(source.path().join("LICENSE"), b"Public Domain license\n").unwrap();
+    std::fs::write(source.path().join("AUTHORS"), b"Font authors\n").unwrap();
+    let notice = source.path().join("NOTICE");
+    std::fs::write(&notice, "Existing notices\n").unwrap();
+
+    update_shinonome_notice(source.path(), &notice).unwrap();
+    let once = std::fs::read(&notice).unwrap();
+    update_shinonome_notice(source.path(), &notice).unwrap();
+    let twice = std::fs::read(&notice).unwrap();
+
+    assert_eq!(once, twice);
+    let text = String::from_utf8(twice).unwrap();
+    assert!(text.contains("http://openlab.ring.gr.jp/efont/shinonome/"));
+    assert!(text.contains("Public Domain license"));
+    assert!(text.contains("Font authors"));
+}
+
+#[test]
+fn shinonome_manifest_update_records_counts_hashes_and_is_idempotent() {
+    let directory = TempDir::new().unwrap();
+    let font_dir = directory.path().join("font");
+    std::fs::create_dir(&font_dir).unwrap();
+    std::fs::write(font_dir.join("shinonome12.bin.gz"), b"font12").unwrap();
+    std::fs::write(font_dir.join("shinonome16.bin.gz"), b"font16").unwrap();
+    std::fs::write(directory.path().join("NOTICE"), b"notice").unwrap();
+    let manifest = directory.path().join("manifest.toml");
+    std::fs::write(
+        &manifest,
+        "generated_date = \"2026-11-15\"\n\n[[outputs]]\npath = \"NOTICE\"\ncount = 1\nsha256 = \"old\"\n",
+    )
+    .unwrap();
+    let report = gen_data::FontGenerationReport {
+        dot12_glyphs: 7_037,
+        dot16_glyphs: 7_037,
+        fullwidth_glyphs: 6_879,
+        halfwidth_glyphs: 158,
+        input_hashes: vec![("bdf/shnmk12.bdf".to_owned(), "abc123".to_owned())],
+    };
+
+    update_shinonome_manifest(&manifest, &font_dir, &report).unwrap();
+    let once = std::fs::read(&manifest).unwrap();
+    update_shinonome_manifest(&manifest, &font_dir, &report).unwrap();
+    let twice = std::fs::read(&manifest).unwrap();
+
+    assert_eq!(once, twice);
+    let text = String::from_utf8(twice).unwrap();
+    assert!(text.contains("shinonome-0.9.11p1.tar.bz2"));
+    assert!(text.contains("font/shinonome12.bin.gz"));
+    assert!(text.contains("count = 7037"));
+    assert!(!text.contains("sha256 = \"old\""));
+    assert!(text.contains("path = \"shinonome/shinonome-0.9.11/bdf/shnmk12.bdf\"\nsha256 = \"abc123\""));
 }

@@ -6,7 +6,7 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Gauge, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Gauge, Paragraph};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -14,11 +14,30 @@ use crate::app::App;
 use crate::game::word::{ExitKind, WordState};
 use crate::i18n::Msg;
 use crate::layout::geometry::{Finger, geometry};
-use crate::ui::keyboard::{KeyFeedback, KeyboardState, KeyboardView, UnlockKeyboardState};
+use crate::ui::bigtext::{BigTextSize, StyledCharacter, font, window_by_widths, window_range};
+use crate::ui::keyboard::{KeyFeedback, KeyboardState, KeyboardStyle, KeyboardView, UnlockKeyboardState, resolve_style};
 use crate::ui::theme::Theme;
 
 /// How long the mistype flash effect lingers on screen.
 const MISTYPE_FLASH_DURATION: Duration = Duration::from_millis(250);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PromptLayoutStage {
+    XlargeSelected,
+    LargeSelected,
+    LargeSimplified,
+    LargeHidden,
+    NormalKeyboard,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PlayingLayout {
+    pub stage: PromptLayoutStage,
+    pub bigtext: Option<BigTextSize>,
+    pub keyboard_style: Option<KeyboardStyle>,
+    pub prompt_rows: u16,
+    pub show_timer: bool,
+}
 
 fn mistype_flash_active(app: &App) -> bool {
     let Some(game) = app.game.as_ref() else {
@@ -59,35 +78,13 @@ pub fn render_with_footer(frame: &mut Frame, app: &App, footer: Option<Line<'sta
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
 
-    let sentence = matches!(
-        app.config.mode.kind,
-        crate::config::ModeKind::Sentence | crate::config::ModeKind::Endurance
-    );
-    let mut show_keyboard = app.active_bench_id.is_some() || app.config.keyboard.show != "hidden";
-    let mut show_sub_stats = true;
-    let mut show_timer = !sentence && !app.config.session.item_timeout().is_zero();
-    let has_progress = app.config.pacer.target_wpm.is_some() || app.game.as_ref().is_some_and(|game| game.ghost.is_some());
-    let word_rows = if sentence { if has_progress { 4 } else { 3 } } else { 5 };
+    let layout = resolve_playing_layout(app, inner);
     let show_focus = app.config.mode.kind == crate::config::ModeKind::Adaptive && !app.adaptive_focus.is_empty();
     let show_rhythm = app.config.mode.kind == crate::config::ModeKind::Rhythm;
-    let keyboard_rows = if app.config.mode.kind == crate::config::ModeKind::Unlock { 8 } else { 6 };
-    let required_height = |keyboard: bool, sub_stats: bool, timer: bool| {
-        3 + word_rows
-            + u16::from(show_focus)
-            + u16::from(show_rhythm)
-            + u16::from(sub_stats) * 2
-            + u16::from(timer) * 2
-            + u16::from(keyboard) * (keyboard_rows + 1)
-    };
-    if required_height(show_keyboard, show_sub_stats, show_timer) > inner.height {
-        show_keyboard = false;
-    }
-    if required_height(show_keyboard, show_sub_stats, show_timer) > inner.height {
-        show_sub_stats = false;
-    }
-    if required_height(show_keyboard, show_sub_stats, show_timer) > inner.height {
-        show_timer = false;
-    }
+    let unlock_rows = u16::from(app.config.mode.kind == crate::config::ModeKind::Unlock) * 2;
+    let keyboard_rows = layout
+        .keyboard_style
+        .map_or(0, |style| style.height(app.config.keyboard.finger_guide) + unlock_rows);
 
     let mut constraints = vec![
         Constraint::Length(1), // top stats
@@ -98,17 +95,18 @@ pub fn render_with_footer(frame: &mut Frame, app: &App, footer: Option<Line<'sta
     if show_rhythm {
         constraints.push(Constraint::Length(1));
     }
-    constraints.push(Constraint::Length(1));
-    if show_keyboard {
+    // Order chosen by the user: keyboard on top, then the item timer, the
+    // metrics, and the prompt in the lower area. The prompt starts on the row
+    // right below the metrics and takes every spare row, so its content is
+    // top-aligned there rather than vertically centred.
+    if layout.keyboard_style.is_some() {
         constraints.push(Constraint::Length(keyboard_rows));
     }
-    if show_timer {
+    if layout.show_timer {
         constraints.push(Constraint::Length(1));
     }
-    if show_sub_stats {
-        constraints.push(Constraint::Length(1));
-    }
-    constraints.push(Constraint::Min(word_rows));
+    constraints.push(Constraint::Length(1)); // combo, errors, accuracy
+    constraints.push(Constraint::Min(layout.prompt_rows));
     constraints.push(Constraint::Length(1)); // footer
     let chunks = Layout::default().direction(Direction::Vertical).constraints(constraints).split(inner);
 
@@ -123,23 +121,19 @@ pub fn render_with_footer(frame: &mut Frame, app: &App, footer: Option<Line<'sta
         render_rhythm(frame, app, &theme, chunks[index]);
         index += 1;
     }
-    frame.render_widget(separator_line(), chunks[index]);
-    index += 1;
-    if show_keyboard {
-        render_keyboard(frame, app, chunks[index]);
+    if let Some(keyboard_style) = layout.keyboard_style {
+        render_keyboard(frame, app, chunks[index], keyboard_style);
         index += 1;
     }
-    if show_timer {
+    if layout.show_timer {
         render_word_timer(frame, app, &theme, chunks[index]);
         index += 1;
     }
-    if show_sub_stats {
-        if let Some(game) = app.game.as_ref() {
-            render_sub_stats(frame, game, &theme, chunks[index], lang);
-        }
-        index += 1;
+    if let Some(game) = app.game.as_ref() {
+        render_sub_stats(frame, game, &theme, chunks[index], lang);
     }
-    render_word(frame, app, &theme, chunks[index]);
+    index += 1;
+    render_word(frame, app, &theme, chunks[index], layout.bigtext);
     index += 1;
     let footer_index = index;
     if let Some(footer) = footer {
@@ -151,6 +145,109 @@ pub fn render_with_footer(frame: &mut Frame, app: &App, footer: Option<Line<'sta
         );
     } else {
         render_footer(frame, app, &theme, chunks[footer_index]);
+    }
+}
+
+pub fn resolve_playing_layout(app: &App, inner: Rect) -> PlayingLayout {
+    let show_focus = app.config.mode.kind == crate::config::ModeKind::Adaptive && !app.adaptive_focus.is_empty();
+    let show_rhythm = app.config.mode.kind == crate::config::ModeKind::Rhythm;
+    let base_rows = 3 + u16::from(show_focus) + u16::from(show_rhythm);
+    let keyboard_requested = app.active_bench_id.is_some() || app.config.keyboard.show != "hidden";
+    let requested_style = KeyboardStyle::parse(&app.config.keyboard.style);
+    let unlock_rows = u16::from(app.config.mode.kind == crate::config::ModeKind::Unlock) * 2;
+    let keyboard_height = |style: Option<KeyboardStyle>| style.map_or(0, |style| style.height(app.config.keyboard.finger_guide) + unlock_rows);
+    let fits = |size: Option<BigTextSize>, style: Option<KeyboardStyle>| {
+        let prompt_rows = prompt_rows(app, size, inner.width);
+        let width_ok = style.is_none_or(|style| style.width() <= inner.width);
+        width_ok && base_rows.saturating_add(prompt_rows).saturating_add(keyboard_height(style)) <= inner.height
+    };
+    let selected = keyboard_requested.then_some(requested_style);
+    let mut candidates = Vec::new();
+    if matches!(app.config.display.prompt_size.as_str(), "auto" | "xlarge") {
+        candidates.push((PromptLayoutStage::XlargeSelected, Some(BigTextSize::Dot16), selected));
+    }
+    if app.config.display.prompt_size != "normal" {
+        candidates.push((PromptLayoutStage::LargeSelected, Some(BigTextSize::Dot12), selected));
+        if keyboard_requested {
+            let simpler: &[KeyboardStyle] = match requested_style {
+                KeyboardStyle::Keycap => &[KeyboardStyle::Raised, KeyboardStyle::Plain],
+                KeyboardStyle::Raised => &[KeyboardStyle::Plain],
+                KeyboardStyle::Plain => &[],
+            };
+            candidates.extend(
+                simpler
+                    .iter()
+                    .copied()
+                    .map(|style| (PromptLayoutStage::LargeSimplified, Some(BigTextSize::Dot12), Some(style))),
+            );
+        }
+        candidates.push((PromptLayoutStage::LargeHidden, Some(BigTextSize::Dot12), None));
+    }
+    for (stage, bigtext, keyboard_style) in candidates {
+        if fits(bigtext, keyboard_style) {
+            let used = base_rows + prompt_rows(app, bigtext, inner.width) + keyboard_height(keyboard_style);
+            return PlayingLayout {
+                stage,
+                bigtext,
+                keyboard_style,
+                prompt_rows: prompt_rows(app, bigtext, inner.width),
+                show_timer: timer_requested(app) && used < inner.height,
+            };
+        }
+    }
+
+    let normal_rows = prompt_rows(app, None, inner.width);
+    let keyboard_room = inner.height.saturating_sub(base_rows + normal_rows + unlock_rows);
+    let keyboard_style = keyboard_requested
+        .then(|| {
+            resolve_style(
+                &app.config.keyboard.style,
+                Rect::new(inner.x, inner.y, inner.width, keyboard_room),
+                app.config.keyboard.finger_guide,
+            )
+        })
+        .flatten();
+    let used = base_rows + normal_rows + keyboard_height(keyboard_style);
+    PlayingLayout {
+        stage: PromptLayoutStage::NormalKeyboard,
+        bigtext: None,
+        keyboard_style,
+        prompt_rows: normal_rows.min(inner.height.saturating_sub(base_rows)),
+        show_timer: timer_requested(app) && used < inner.height,
+    }
+}
+
+fn timer_requested(app: &App) -> bool {
+    !matches!(
+        app.config.mode.kind,
+        crate::config::ModeKind::Sentence | crate::config::ModeKind::Endurance
+    ) && !app.config.session.item_timeout().is_zero()
+}
+
+fn prompt_rows(app: &App, size: Option<BigTextSize>, _width: u16) -> u16 {
+    let has_progress = app.config.pacer.target_wpm.is_some() || app.game.as_ref().is_some_and(|game| game.ghost.is_some());
+    let japanese = app.game.as_ref().is_some_and(|game| game.current_prompt.reading.is_some());
+    let sentence = matches!(
+        app.config.mode.kind,
+        crate::config::ModeKind::Sentence | crate::config::ModeKind::Endurance
+    );
+    let romaji =
+        matches!(app.config.mode.kind, crate::config::ModeKind::Romaji) || app.config.mode.kind == crate::config::ModeKind::Adaptive && japanese;
+    let Some(size) = size else {
+        // Word: header, letters, caret. Romaji: surface, kana, romaji.
+        // Sentence: at least one text row, its caret and one more row; the
+        // prompt area also takes every spare row (see `render_with_footer`).
+        return 3 + u16::from(has_progress);
+    };
+    let height = size.cell_height();
+    if romaji {
+        2 * height + 4 + u16::from(has_progress)
+    } else if sentence && japanese {
+        2 * height + 7 + u16::from(has_progress)
+    } else if sentence {
+        height + 4 + u16::from(has_progress)
+    } else {
+        height + 1 + u16::from(has_progress)
     }
 }
 
@@ -196,7 +293,7 @@ fn render_adaptive_focus(frame: &mut Frame, app: &App, theme: &Theme, area: Rect
     );
 }
 
-fn render_keyboard(frame: &mut Frame, app: &App, area: Rect) {
+fn render_keyboard(frame: &mut Frame, app: &App, area: Rect, keyboard_style: KeyboardStyle) {
     let Some(game) = app.game.as_ref() else { return };
     let Some(mut geometry) = geometry(&app.config.keyboard.geometry) else {
         return;
@@ -238,8 +335,8 @@ fn render_keyboard(frame: &mut Frame, app: &App, area: Rect) {
             UnlockKeyboardState { unlocked_codes, next_code }
         }),
     };
-    let keyboard_area = if app.config.mode.kind == crate::config::ModeKind::Unlock && area.height >= 8 {
-        Rect::new(area.x, area.y, area.width, 6)
+    let keyboard_area = if app.config.mode.kind == crate::config::ModeKind::Unlock && area.height >= 3 {
+        Rect::new(area.x, area.y, area.width, area.height - 2)
     } else {
         area
     };
@@ -255,10 +352,11 @@ fn render_keyboard(frame: &mut Frame, app: &App, area: Rect) {
             } else {
                 &app.config.keyboard.show
             },
+            style: keyboard_style.as_str(),
             finger_guide: app.config.keyboard.finger_guide,
         },
     );
-    if app.config.mode.kind == crate::config::ModeKind::Unlock && area.height >= 8 {
+    if app.config.mode.kind == crate::config::ModeKind::Unlock && area.height >= 3 {
         let streak = app.unlock_state.as_ref().map_or(0, |state| state.streak);
         let labels = match app.config.general.lang {
             crate::i18n::Lang::En => (" Unlocked  ", " Next  ", " Locked"),
@@ -281,17 +379,13 @@ fn render_keyboard(frame: &mut Frame, app: &App, area: Rect) {
         };
         frame.render_widget(
             Paragraph::new(legend).alignment(Alignment::Center),
-            Rect::new(area.x, area.y + 6, area.width, 1),
+            Rect::new(area.x, area.bottom() - 2, area.width, 1),
         );
         frame.render_widget(
             Paragraph::new(progress).alignment(Alignment::Center),
-            Rect::new(area.x, area.y + 7, area.width, 1),
+            Rect::new(area.x, area.bottom() - 1, area.width, 1),
         );
     }
-}
-
-fn separator_line() -> Paragraph<'static> {
-    Paragraph::new("─".repeat(200))
 }
 
 fn render_top_bar(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
@@ -344,7 +438,7 @@ fn render_top_bar(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-fn render_word(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+fn render_word(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, bigtext: Option<BigTextSize>) {
     let Some(game) = app.game.as_ref() else { return };
 
     if game.ime_warning {
@@ -356,8 +450,24 @@ fn render_word(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             Paragraph::new(warning)
                 .alignment(Alignment::Center)
                 .style(Style::default().fg(theme.mistype).add_modifier(Modifier::BOLD)),
-            vertically_centered(area, 1),
+            top_aligned(area, 1),
         );
+        return;
+    }
+    if let Some(size) = bigtext
+        && let Ok(bitmap_font) = font(size)
+    {
+        match app.config.mode.kind {
+            crate::config::ModeKind::Romaji => render_big_japanese(frame, app, theme, area, bitmap_font, false),
+            crate::config::ModeKind::Adaptive if game.current_prompt.reading.is_some() => {
+                render_big_japanese(frame, app, theme, area, bitmap_font, false)
+            }
+            crate::config::ModeKind::Sentence | crate::config::ModeKind::Endurance if game.current_prompt.reading.is_some() => {
+                render_big_japanese(frame, app, theme, area, bitmap_font, true)
+            }
+            crate::config::ModeKind::Sentence | crate::config::ModeKind::Endurance => render_big_sentence(frame, app, theme, area, bitmap_font),
+            _ => render_big_word(frame, app, theme, area, bitmap_font),
+        }
         return;
     }
     match app.config.mode.kind {
@@ -480,9 +590,297 @@ fn render_word(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 .add_modifier(if flashing { Modifier::BOLD } else { Modifier::empty() }),
         )),
     ]);
-    let content_area = vertically_centered(area, lines.len() as u16);
+    let content_area = top_aligned(area, lines.len() as u16);
     let para = Paragraph::new(lines).alignment(Alignment::Center);
     frame.render_widget(para, content_area);
+}
+
+fn progress_style(index: usize, current: usize, blind: bool, flashing: bool, theme: &Theme) -> (Style, bool) {
+    if index < current && blind {
+        (Style::default(), false)
+    } else if index < current {
+        (Style::default().fg(theme.correct).add_modifier(Modifier::BOLD), true)
+    } else if index == current && flashing {
+        (
+            Style::default()
+                .fg(theme.fg)
+                .bg(theme.mistype)
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED),
+            true,
+        )
+    } else if index == current {
+        (Style::default().fg(theme.warning).add_modifier(Modifier::BOLD), true)
+    } else {
+        (Style::default().fg(theme.muted), true)
+    }
+}
+
+fn styled_window(text: &str, range: std::ops::Range<usize>, current: usize, blind: bool, flashing: bool, theme: &Theme) -> Vec<StyledCharacter> {
+    text.chars()
+        .enumerate()
+        .skip(range.start)
+        .take(range.len())
+        .map(|(index, character)| {
+            let (style, visible) = progress_style(index, current, blind, flashing, theme);
+            if visible {
+                StyledCharacter::new(character, style)
+            } else {
+                StyledCharacter::hidden(character, style)
+            }
+        })
+        .collect()
+}
+
+fn render_centered_line(frame: &mut Frame, area: Rect, y: u16, line: Line<'static>) {
+    if y < area.height {
+        frame.render_widget(
+            Paragraph::new(line).alignment(Alignment::Center),
+            Rect::new(area.x, area.y + y, area.width, 1),
+        );
+    }
+}
+
+fn render_centered_lines(frame: &mut Frame, area: Rect, y: u16, lines: Vec<Line<'static>>) {
+    if y >= area.height {
+        return;
+    }
+    let height = (lines.len() as u16).min(area.height - y);
+    frame.render_widget(
+        Paragraph::new(lines).alignment(Alignment::Center),
+        Rect::new(area.x, area.y + y, area.width, height),
+    );
+}
+
+fn big_status_line(app: &App, theme: &Theme) -> Option<Line<'static>> {
+    let game = app.game.as_ref()?;
+    let WordState::Exiting { kind, .. } = &game.current_word.state else {
+        return None;
+    };
+    let (message, color) = match kind {
+        ExitKind::Correct => (format!("✓ {}", Msg::Correct.text(app.config.general.lang)), theme.correct),
+        ExitKind::Mistyped => (format!("✗ {}", Msg::CompletedWithMistypes.text(app.config.general.lang)), theme.warning),
+        ExitKind::Timeout => (format!("⌛ {}", Msg::Timeout.text(app.config.general.lang)), theme.mistype),
+    };
+    Some(Line::from(Span::styled(message, Style::default().fg(color).add_modifier(Modifier::BOLD))))
+}
+
+fn big_marker_line(
+    app: &App,
+    theme: &Theme,
+    rendered: &crate::ui::bigtext::RenderedBigText,
+    range: &std::ops::Range<usize>,
+) -> Option<Line<'static>> {
+    let (pacer, ghost) = progress_positions(app)?;
+    let mut markers = Vec::new();
+    if let Some(position) = pacer
+        && range.start <= position
+        && position <= range.end
+    {
+        markers.push((
+            position.saturating_sub(range.start).min(range.len()),
+            '▾',
+            Style::default().fg(theme.warning),
+        ));
+    }
+    if let Some(position) = ghost
+        && range.start <= position
+        && position <= range.end
+    {
+        let relative = position.saturating_sub(range.start).min(range.len());
+        if let Some(marker) = markers.iter_mut().find(|marker| marker.0 == relative) {
+            marker.1 = '◇';
+        } else {
+            markers.push((relative, '◆', Style::default().fg(theme.accent)));
+        }
+    }
+    Some(rendered.marker_line(&markers))
+}
+
+fn render_big_word(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, bitmap_font: &crate::ui::bigtext::BitmapFont) {
+    let Some(game) = app.game.as_ref() else { return };
+    let text = game.current_prompt.target.as_str();
+    let count = text.chars().count();
+    if count == 0 {
+        return;
+    }
+    let current = game.typed_index.min(count - 1);
+    let range = window_range(bitmap_font, text, current, area.width);
+    let blind = app.active_bench_id.is_none() && app.config.session.blind;
+    let flashing = !blind && mistype_flash_active(app);
+    let characters = styled_window(text, range.clone(), game.typed_index, blind, flashing, theme);
+    let rendered = bitmap_font.render(&characters);
+    let mut y = 0;
+    if let Some(markers) = big_marker_line(app, theme, &rendered, &range) {
+        render_centered_line(frame, area, y, markers);
+        y += 1;
+    }
+    render_centered_lines(frame, area, y, rendered.lines.clone());
+    y += rendered.lines.len() as u16;
+    let cursor = current.saturating_sub(range.start);
+    let cursor_style = Style::default()
+        .fg(if flashing { theme.mistype } else { theme.accent })
+        .add_modifier(Modifier::BOLD);
+    render_centered_line(
+        frame,
+        area,
+        y,
+        big_status_line(app, theme).unwrap_or_else(|| rendered.cursor_line(cursor, cursor_style)),
+    );
+}
+
+fn render_big_sentence(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, bitmap_font: &crate::ui::bigtext::BitmapFont) {
+    let Some(game) = app.game.as_ref() else { return };
+    let text = game.current_prompt.text.as_str();
+    let count = text.chars().count();
+    if count == 0 {
+        return;
+    }
+    let current = game.typed_index.min(count - 1);
+    let range = window_range(bitmap_font, text, current, area.width);
+    let blind = app.active_bench_id.is_none() && app.config.session.blind;
+    let flashing = !blind && mistype_flash_active(app);
+    let rendered = bitmap_font.render(&styled_window(text, range.clone(), game.typed_index, blind, flashing, theme));
+    let mut y = 0;
+    if let Some(markers) = big_marker_line(app, theme, &rendered, &range) {
+        render_centered_line(frame, area, y, markers);
+        y += 1;
+    }
+    render_centered_lines(frame, area, y, rendered.lines.clone());
+    y += rendered.lines.len() as u16;
+    render_centered_line(
+        frame,
+        area,
+        y,
+        big_status_line(app, theme).unwrap_or_else(|| {
+            rendered.cursor_line(
+                current.saturating_sub(range.start),
+                Style::default()
+                    .fg(if flashing { theme.mistype } else { theme.accent })
+                    .add_modifier(Modifier::BOLD),
+            )
+        }),
+    );
+    y += 1;
+    if y < area.height {
+        render_sentence(frame, app, theme, Rect::new(area.x, area.y + y, area.width, area.height - y));
+    }
+}
+
+fn render_big_japanese(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, bitmap_font: &crate::ui::bigtext::BitmapFont, sentence: bool) {
+    let Some(game) = app.game.as_ref() else { return };
+    let (surface_label, reading_label, romaji_label) = match app.config.general.lang {
+        crate::i18n::Lang::En => ("Surface", "Kana", "Romaji"),
+        crate::i18n::Lang::Ja => ("表記", "かな", "ローマ字"),
+    };
+    let surface = game.current_prompt.text.as_str();
+    let reading = game.current_prompt.reading.as_deref().unwrap_or_default();
+    let guide = game.session.current_guide();
+    let completed_reading = game.session.completed_reading_chars();
+    let surface_count = surface.chars().count();
+    let surface_current = if surface_count == 0 {
+        0
+    } else if sentence && !reading.is_empty() {
+        completed_reading.saturating_mul(surface_count) / reading.chars().count().max(1)
+    } else {
+        0
+    }
+    .min(surface_count.saturating_sub(1));
+    let surface_range = window_range(bitmap_font, surface, surface_current, area.width);
+    let surface_rendered = bitmap_font.render(
+        &surface
+            .chars()
+            .skip(surface_range.start)
+            .take(surface_range.len())
+            .map(|character| StyledCharacter::new(character, Style::default().fg(theme.fg).add_modifier(Modifier::BOLD)))
+            .collect::<Vec<_>>(),
+    );
+    let mut y = 0;
+    render_centered_line(
+        frame,
+        area,
+        y,
+        Line::from(Span::styled(format!("{surface_label}:"), Style::default().fg(theme.muted))),
+    );
+    y += 1;
+    let surface_height = surface_rendered.lines.len() as u16;
+    render_centered_lines(frame, area, y, surface_rendered.lines);
+    y += surface_height;
+    let blind = app.active_bench_id.is_none() && app.config.session.blind;
+    // A long reading does not fit on one row; show the part around the kana
+    // being typed, like the large windows above and below it.
+    let reading_widths = reading
+        .chars()
+        .map(|character| UnicodeWidthChar::width(character).unwrap_or(0) as u16)
+        .collect::<Vec<_>>();
+    let label_width = UnicodeWidthStr::width(format!("{reading_label}: ").as_str()) as u16;
+    let reading_range = window_by_widths(&reading_widths, completed_reading, area.width.saturating_sub(label_width));
+    let reading_spans = reading
+        .chars()
+        .enumerate()
+        .skip(reading_range.start)
+        .take(reading_range.len())
+        .map(|(index, character)| {
+            let color = if blind {
+                theme.muted
+            } else if index < completed_reading {
+                theme.correct
+            } else if index == completed_reading {
+                theme.warning
+            } else {
+                theme.muted
+            };
+            Span::styled(character.to_string(), Style::default().fg(color).add_modifier(Modifier::BOLD))
+        })
+        .collect::<Vec<_>>();
+    render_centered_line(
+        frame,
+        area,
+        y,
+        Line::from(
+            std::iter::once(Span::styled(format!("{reading_label}: "), Style::default().fg(theme.muted)))
+                .chain(reading_spans)
+                .collect::<Vec<_>>(),
+        ),
+    );
+    y += 1;
+    render_centered_line(
+        frame,
+        area,
+        y,
+        Line::from(Span::styled(format!("{romaji_label}:"), Style::default().fg(theme.muted))),
+    );
+    y += 1;
+
+    let guide_count = guide.chars().count();
+    if guide_count > 0 {
+        let current = game.typed_index.min(guide_count - 1);
+        let range = window_range(bitmap_font, &guide, current, area.width);
+        let flashing = !blind && mistype_flash_active(app);
+        let rendered = bitmap_font.render(&styled_window(&guide, range.clone(), game.typed_index, blind, flashing, theme));
+        if let Some(markers) = big_marker_line(app, theme, &rendered, &range) {
+            render_centered_line(frame, area, y, markers);
+            y += 1;
+        }
+        render_centered_lines(frame, area, y, rendered.lines.clone());
+        y += rendered.lines.len() as u16;
+        render_centered_line(
+            frame,
+            area,
+            y,
+            big_status_line(app, theme).unwrap_or_else(|| {
+                rendered.cursor_line(
+                    current.saturating_sub(range.start),
+                    Style::default()
+                        .fg(if flashing { theme.mistype } else { theme.accent })
+                        .add_modifier(Modifier::BOLD),
+                )
+            }),
+        );
+        y += 1;
+    }
+    if sentence && y < area.height {
+        render_japanese_prompt(frame, app, theme, Rect::new(area.x, area.y + y, area.width, area.height - y));
+    }
 }
 
 fn render_romaji_word(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
@@ -499,128 +897,151 @@ fn render_japanese_prompt(frame: &mut Frame, app: &App, theme: &Theme, area: Rec
     let completed_reading_chars = game.session.completed_reading_chars();
     let reading = game.current_prompt.reading.clone().unwrap_or_default();
     let blind = app.active_bench_id.is_none() && app.config.session.blind;
-    let reading_spans = reading
-        .chars()
-        .enumerate()
-        .map(|(index, character)| {
-            let style = if blind {
-                Style::default().fg(theme.muted)
-            } else if index < completed_reading_chars {
-                Style::default().fg(theme.correct).add_modifier(Modifier::BOLD)
-            } else if index == completed_reading_chars {
-                Style::default().fg(theme.warning).add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
-            } else {
-                Style::default().fg(theme.muted)
-            };
-            Span::styled(character.to_string(), style)
-        })
-        .collect::<Vec<_>>();
-    let guide_spans = guide
-        .chars()
-        .enumerate()
-        .map(|(index, character)| {
-            let style = if blind {
-                Style::default().fg(theme.muted)
-            } else if index < game.typed_index {
-                Style::default().fg(theme.correct).add_modifier(Modifier::BOLD)
-            } else if index == game.typed_index {
-                Style::default().fg(theme.warning).add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
-            } else {
-                Style::default().fg(theme.muted)
-            };
-            Span::styled(character.to_string(), style)
-        })
-        .collect::<Vec<_>>();
-    let mut surface_spans = vec![
-        Span::styled(format!("{surface_label}: "), Style::default().fg(theme.muted)),
-        Span::styled(game.current_prompt.text.clone(), Style::default().fg(theme.fg)),
-    ];
-    let mut surface_suffix = String::new();
+    let label_style = Style::default().fg(theme.muted);
+    let progress = |index: usize, current: usize| {
+        if blind {
+            Style::default().fg(theme.muted)
+        } else if index < current {
+            Style::default().fg(theme.correct).add_modifier(Modifier::BOLD)
+        } else if index == current {
+            Style::default().fg(theme.warning).add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+        } else {
+            Style::default().fg(theme.muted)
+        }
+    };
+
+    let mut surface = text_cells(&format!("{surface_label}: "), |_| label_style);
+    let surface_text = game.current_prompt.text.as_str();
+    let surface_count = surface_text.chars().count();
+    // The surface has no cursor of its own; follow the kana proportionally so
+    // a long wrapped sentence keeps the row that is being typed.
+    let surface_cursor = surface.len() + completed_reading_chars.saturating_mul(surface_count) / reading.chars().count().max(1);
+    surface.extend(text_cells(surface_text, |_| Style::default().fg(theme.fg)));
     if let WordState::Exiting { kind, .. } = &game.current_word.state {
         let (message, color) = match kind {
             ExitKind::Correct => (Msg::Correct.text(app.config.general.lang), theme.correct),
             ExitKind::Mistyped => (Msg::CompletedWithMistypes.text(app.config.general.lang), theme.warning),
             ExitKind::Timeout => (Msg::Timeout.text(app.config.general.lang), theme.mistype),
         };
-        surface_suffix = format!("    {message}");
-        surface_spans.push(Span::styled(surface_suffix.clone(), Style::default().fg(color)));
+        surface.extend(text_cells(&format!("    {message}"), |_| Style::default().fg(color)));
     }
-    let surface = Line::from(surface_spans);
-    let kana = Line::from(
-        std::iter::once(Span::styled(format!("{reading_label}: "), Style::default().fg(theme.muted)))
-            .chain(reading_spans)
-            .collect::<Vec<_>>(),
-    );
-    let romaji = Line::from(
-        std::iter::once(Span::styled(format!("{romaji_label}: "), Style::default().fg(theme.muted)))
-            .chain(guide_spans)
-            .collect::<Vec<_>>(),
-    );
+    let mut kana = text_cells(&format!("{reading_label}: "), |_| label_style);
+    let kana_cursor = kana.len() + completed_reading_chars;
+    kana.extend(text_cells(&reading, |index| progress(index, completed_reading_chars)));
+    let mut romaji = text_cells(&format!("{romaji_label}: "), |_| label_style);
+    let romaji_cursor = romaji.len() + game.typed_index;
+    romaji.extend(text_cells(&guide, |index| progress(index, game.typed_index)));
+
     let markers = progress_markers(app, 1);
-    let surface_width = UnicodeWidthStr::width(format!("{surface_label}: {}{surface_suffix}", game.current_prompt.text).as_str());
-    let kana_width = UnicodeWidthStr::width(format!("{reading_label}: {reading}").as_str());
-    let romaji_width = UnicodeWidthStr::width(format!("{romaji_label}: {guide}").as_str());
-    let content_width = surface_width.max(kana_width).max(romaji_width).clamp(1, usize::from(area.width.max(1))) as u16;
-    let row_heights = [surface_width, kana_width, romaji_width].map(|width| width.div_ceil(usize::from(content_width)).max(1) as u16);
-    let desired_height = row_heights.iter().sum::<u16>() + u16::from(markers.is_some());
-    let content_area = centered_rect(area, content_width, desired_height.min(area.height));
-    let constraints = if desired_height <= area.height {
-        let mut constraints = Vec::with_capacity(4);
-        if markers.is_some() {
-            constraints.push(Constraint::Length(1));
+    let width = usize::from(area.width.max(1));
+    let blocks = [(surface, surface_cursor), (kana, kana_cursor), (romaji, romaji_cursor)].map(|(cells, cursor)| {
+        let lines = wrap_cells(&cells, width);
+        let cursor_line = cursor_line_index(&lines, cursor);
+        (lines, cursor_line)
+    });
+    let room = usize::from(area.height).saturating_sub(usize::from(markers.is_some()));
+    let ranges = fit_blocks(&blocks.iter().map(|(lines, cursor)| (lines.len(), *cursor)).collect::<Vec<_>>(), room);
+    let mut lines = Vec::new();
+    let mut content_width = 1;
+    for ((block, _), range) in blocks.iter().zip(ranges) {
+        for line in &block[range] {
+            content_width = content_width.max(line.iter().map(|(text, _)| UnicodeWidthStr::width(text.as_str())).sum::<usize>());
+            lines.push(Line::from(
+                line.iter().map(|(text, style)| Span::styled(text.clone(), *style)).collect::<Vec<_>>(),
+            ));
         }
-        constraints.extend(row_heights.map(Constraint::Length));
-        constraints
-    } else if markers.is_some() {
-        vec![
-            Constraint::Length(1),
-            Constraint::Ratio(1, 3),
-            Constraint::Ratio(1, 3),
-            Constraint::Ratio(1, 3),
-        ]
-    } else {
-        vec![Constraint::Ratio(1, 3), Constraint::Ratio(1, 3), Constraint::Ratio(1, 3)]
-    };
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(constraints)
-        .split(content_area);
-    let offset = usize::from(markers.is_some());
-    if let Some(markers) = markers {
-        frame.render_widget(Paragraph::new(markers), rows[0]);
     }
-    render_wrapped_guide(frame, surface, rows[offset], 0);
-    render_wrapped_guide(
-        frame,
-        kana,
-        rows[offset + 1],
-        UnicodeWidthStr::width(format!("{reading_label}: ").as_str())
-            + reading
-                .chars()
-                .take(completed_reading_chars)
-                .map(|character| UnicodeWidthChar::width(character).unwrap_or(0))
-                .sum::<usize>(),
-    );
-    render_wrapped_guide(
-        frame,
-        romaji,
-        rows[offset + 2],
-        UnicodeWidthStr::width(format!("{romaji_label}: ").as_str()) + game.typed_index,
-    );
+    let desired_height = lines.len() as u16 + u16::from(markers.is_some());
+    let content_area = top_centered_rect(area, content_width as u16, desired_height);
+    let mut text_area = content_area;
+    if let Some(markers) = markers
+        && content_area.height > 0
+    {
+        frame.render_widget(Paragraph::new(markers), Rect::new(content_area.x, content_area.y, content_area.width, 1));
+        text_area = Rect::new(content_area.x, content_area.y + 1, content_area.width, content_area.height - 1);
+    }
+    frame.render_widget(Paragraph::new(lines), text_area);
 }
 
-fn render_wrapped_guide(frame: &mut Frame, line: Line<'static>, area: Rect, cursor_width: usize) {
-    let width = usize::from(area.width.max(1));
-    let cursor_row = cursor_width / width;
-    let visible_height = usize::from(area.height.max(1));
-    let scroll = cursor_row.saturating_sub(visible_height.saturating_sub(1)) as u16;
-    frame.render_widget(
-        Paragraph::new(line)
-            .alignment(Alignment::Left)
-            .wrap(Wrap { trim: false })
-            .scroll((scroll, 0)),
-        area,
-    );
+type StyledCell = (String, Style);
+
+fn text_cells(text: &str, style: impl Fn(usize) -> Style) -> Vec<StyledCell> {
+    text.chars()
+        .enumerate()
+        .map(|(index, character)| (character.to_string(), style(index)))
+        .collect()
+}
+
+/// Wraps cells by display width, character by character. Japanese has no
+/// spaces to break at, so word wrapping would push a whole sentence onto the
+/// next row and leave its label alone.
+fn wrap_cells(cells: &[StyledCell], width: usize) -> Vec<Vec<StyledCell>> {
+    let mut lines = vec![Vec::new()];
+    let mut used = 0;
+    for cell in cells {
+        let cell_width = UnicodeWidthStr::width(cell.0.as_str());
+        if used + cell_width > width && used > 0 {
+            lines.push(Vec::new());
+            used = 0;
+        }
+        lines.last_mut().expect("at least one line").push(cell.clone());
+        used += cell_width;
+    }
+    lines
+}
+
+fn cursor_line_index(lines: &[Vec<StyledCell>], cursor: usize) -> usize {
+    let mut seen = 0;
+    for (index, line) in lines.iter().enumerate() {
+        seen += line.len();
+        if cursor < seen {
+            return index;
+        }
+    }
+    lines.len().saturating_sub(1)
+}
+
+/// Chooses which wrapped rows of each block to show in `room` rows: every row
+/// when they fit, otherwise each block's cursor row first and then the rows
+/// around it, one block at a time.
+fn fit_blocks(blocks: &[(usize, usize)], room: usize) -> Vec<std::ops::Range<usize>> {
+    let total = blocks.iter().map(|(lines, _)| lines).sum::<usize>();
+    if total <= room {
+        return blocks.iter().map(|(lines, _)| 0..*lines).collect();
+    }
+    let mut budget = room;
+    let mut ranges = blocks
+        .iter()
+        .map(|(_, cursor)| {
+            if budget > 0 {
+                budget -= 1;
+                *cursor..*cursor + 1
+            } else {
+                *cursor..*cursor
+            }
+        })
+        .collect::<Vec<_>>();
+    while budget > 0 {
+        let mut changed = false;
+        for (range, (lines, _)) in ranges.iter_mut().zip(blocks) {
+            if budget == 0 {
+                break;
+            }
+            if range.end < *lines && range.start < range.end {
+                range.end += 1;
+            } else if range.start > 0 && range.start < range.end {
+                range.start -= 1;
+            } else {
+                continue;
+            }
+            budget -= 1;
+            changed = true;
+        }
+        if !changed {
+            break;
+        }
+    }
+    ranges
 }
 
 fn render_sentence(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
@@ -643,6 +1064,7 @@ fn render_sentence(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let flashing = mistype_flash_active(app);
     let ranges = wrap_graphemes(visible, width);
     let mut lines = Vec::with_capacity(ranges.len() + 1);
+    let mut caret_row = None;
     for (start, end) in ranges {
         let spans = visible[start..end]
             .iter()
@@ -674,6 +1096,7 @@ fn render_sentence(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 .map(|grapheme| UnicodeWidthStr::width(grapheme.as_str()))
                 .sum::<usize>();
             let glyph = if flashing { "✗" } else { "▲" };
+            caret_row = Some(lines.len());
             let line_width = visible[start..end]
                 .iter()
                 .map(|grapheme| UnicodeWidthStr::width(grapheme.as_str()))
@@ -686,8 +1109,16 @@ fn render_sentence(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             )));
         }
     }
+    // Keep the caret row visible when the wrapped sentence is taller than the
+    // area: drop whole leading rows rather than cutting off the current line.
+    let room = usize::from(area.height.saturating_sub(u16::from(markers.is_some())).max(1));
+    if let Some(caret_row) = caret_row
+        && caret_row >= room
+    {
+        lines.drain(..caret_row + 1 - room);
+    }
     let desired_height = lines.len() as u16 + u16::from(markers.is_some());
-    let content_area = centered_rect(area, content_width, desired_height.min(area.height));
+    let content_area = top_centered_rect(area, content_width, desired_height.min(area.height));
     let (marker_area, text_area) = if markers.is_some() && content_area.height > 1 {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -703,45 +1134,27 @@ fn render_sentence(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), text_area);
 }
 
-fn vertically_centered(area: Rect, desired_height: u16) -> Rect {
-    centered_rect(area, area.width, desired_height.min(area.height))
+fn top_aligned(area: Rect, desired_height: u16) -> Rect {
+    top_centered_rect(area, area.width, desired_height)
 }
 
-fn centered_rect(area: Rect, desired_width: u16, desired_height: u16) -> Rect {
+/// Horizontally centred, but anchored to the top of `area` so the prompt sits
+/// directly below the metrics row instead of drifting towards the keyboard.
+fn top_centered_rect(area: Rect, desired_width: u16, desired_height: u16) -> Rect {
     let width = desired_width.min(area.width);
-    let height = desired_height.min(area.height);
     Rect::new(
         area.x + area.width.saturating_sub(width) / 2,
-        area.y + area.height.saturating_sub(height) / 2,
+        area.y,
         width,
-        height,
+        desired_height.min(area.height),
     )
 }
 
 fn progress_markers(app: &App, cell_width: usize) -> Option<Line<'static>> {
+    let (pacer, ghost) = progress_positions(app)?;
     let game = app.game.as_ref()?;
-    let item = game.session.log().items.last()?;
-    let session_elapsed = game.elapsed;
-    let item_elapsed = game.elapsed.saturating_sub(Duration::from_micros(item.shown_us));
     let characters = game.current_prompt.target.chars().collect::<Vec<_>>();
     let length = characters.len();
-    let pacer = app
-        .config
-        .pacer
-        .target_wpm
-        .map(|target| crate::practice::pacer::cursor_position(target, item_elapsed, length));
-    let ghost = game.ghost.as_ref().and_then(|track| {
-        if app.active_bench_id.is_some() {
-            Some(track.position_for_item(session_elapsed, item.idx))
-        } else if track.applies_to_sentence(&game.current_prompt.text) {
-            Some(track.position_for_item(item_elapsed, 0))
-        } else {
-            None
-        }
-    });
-    if pacer.is_none() && ghost.is_none() {
-        return None;
-    }
     let prefix = if cell_width == 1 && game.current_prompt.reading.is_some() {
         let label = match app.config.general.lang {
             crate::i18n::Lang::En => "Romaji: ",
@@ -777,6 +1190,29 @@ fn progress_markers(app: &App, cell_width: usize) -> Option<Line<'static>> {
         cells[column] = if cells[column] == ' ' { '◆' } else { '◇' };
     }
     Some(Line::from(cells.into_iter().collect::<String>()))
+}
+
+fn progress_positions(app: &App) -> Option<(Option<usize>, Option<usize>)> {
+    let game = app.game.as_ref()?;
+    let item = game.session.log().items.last()?;
+    let session_elapsed = game.elapsed;
+    let item_elapsed = game.elapsed.saturating_sub(Duration::from_micros(item.shown_us));
+    let length = game.current_prompt.target.chars().count();
+    let pacer = app
+        .config
+        .pacer
+        .target_wpm
+        .map(|target| crate::practice::pacer::cursor_position(target, item_elapsed, length));
+    let ghost = game.ghost.as_ref().and_then(|track| {
+        if app.active_bench_id.is_some() {
+            Some(track.position_for_item(session_elapsed, item.idx))
+        } else if track.applies_to_sentence(&game.current_prompt.text) {
+            Some(track.position_for_item(item_elapsed, 0))
+        } else {
+            None
+        }
+    });
+    (pacer.is_some() || ghost.is_some()).then_some((pacer, ghost))
 }
 
 fn wrap_graphemes(graphemes: &[String], width: usize) -> Vec<(usize, usize)> {

@@ -5,6 +5,7 @@ pub mod analysis;
 pub mod animation;
 pub mod bench_select;
 pub mod bench_summary;
+pub mod bigtext;
 pub mod countdown;
 pub mod history;
 pub mod key_picker;

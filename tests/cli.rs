@@ -45,10 +45,26 @@ fn parses_stats_subcommand() {
         cli.command,
         Some(Command::Stats {
             csv: None,
+            summary: false,
             since: None,
             mode: None,
         })
     );
+}
+
+#[test]
+fn parses_stats_summary_and_rejects_csv_at_the_same_time() {
+    let cli = Cli::try_parse_from(["rs-typing-trainer", "stats", "--summary"]).unwrap();
+    assert_eq!(
+        cli.command,
+        Some(Command::Stats {
+            csv: None,
+            summary: true,
+            since: None,
+            mode: None,
+        })
+    );
+    assert!(Cli::try_parse_from(["rs-typing-trainer", "stats", "--summary", "--csv", "sessions"]).is_err());
 }
 
 #[test]
@@ -84,6 +100,21 @@ fn stats_without_arguments_prints_an_overview() {
 
     assert!(output.status.success());
     assert!(String::from_utf8(output.stdout).unwrap().contains("Sessions"));
+}
+
+#[test]
+fn stats_summary_honors_the_japanese_language_option() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("sessions.db");
+    let config_path = dir.path().join("config.toml");
+    std::fs::write(&config_path, format!("[storage]\ndb_path = {:?}\n", db_path)).unwrap();
+    let output = ProcessCommand::new(env!("CARGO_BIN_EXE_rs-typing-trainer"))
+        .args(["--lang", "ja", "--config", config_path.to_str().unwrap(), "stats", "--summary"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(String::from_utf8(output.stdout).unwrap().contains("まだ記録がありません"));
 }
 
 #[test]

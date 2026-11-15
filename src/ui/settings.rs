@@ -25,7 +25,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),
-            Constraint::Length(6),
+            Constraint::Length(8),
             Constraint::Length(1),
             Constraint::Length(5),
             Constraint::Min(0),
@@ -42,6 +42,8 @@ pub fn render(frame: &mut Frame, app: &App) {
         (Msg::SettingInputLayout, app.config.keyboard.input_layout.as_str()),
         (Msg::SettingGeometry, app.config.keyboard.geometry.as_str()),
         (Msg::SettingShow, app.config.keyboard.show.as_str()),
+        (Msg::SettingKeyboardStyle, app.config.keyboard.style.as_str()),
+        (Msg::SettingPromptSize, app.config.display.prompt_size.as_str()),
         (Msg::SettingLanguage, language),
         (
             Msg::SettingErrorMode,
@@ -122,15 +124,27 @@ fn setting_description(index: usize, lang: Lang) -> &'static str {
             "キーボード表示．full: 常に表示．auto: 慣れたキーから薄く・非表示にし，次に打つキーの強調は残します．dim: 全体を暗く．hidden: 表示しません．既定: full．"
         }
         (4, Lang::En) => {
-            "The interface language. Choose English or Japanese. This is separate from the practice language used by adaptive and sentence modes. Default: English."
+            "Keyboard appearance. keycap: shared outlines and physical key widths. raised: coloured faces with shadows. plain: labels only. Small terminals automatically switch to a simpler style. Default: keycap."
         }
         (4, Lang::Ja) => {
-            "画面の表示言語．English（英語）か Japanese（日本語）を選べます．adaptive や sentence で練習する言語とは別です．既定: English．"
+            "キーボードの見た目．keycap: 共有する罫線と実物に近いキー幅．raised: 色付きの面と影による立体表示．plain: 文字だけ．端末が小さいと自動で簡素なスタイルに切り替わります．既定: keycap．"
         }
         (5, Lang::En) => {
-            "How a mistyped character is handled. stop keeps the cursor in place until the correct key is typed. advance accepts the error and moves forward; Backspace can move back. Default: stop."
+            "Prompt size. auto chooses the largest text that fits. normal uses terminal text, large uses the 12-dot bitmap, and xlarge uses the 16-dot bitmap. If space is limited, the display steps down automatically. Default: auto."
         }
         (5, Lang::Ja) => {
+            "出題文字の大きさ．auto は収まる範囲で最大にします．normal は端末の通常文字，large は12ドット，xlarge は16ドットの字形です．場所が足りない場合は自動で段階を下げます．既定: auto．"
+        }
+        (6, Lang::En) => {
+            "The interface language. Choose English or Japanese. This is separate from the practice language used by adaptive and sentence modes. Default: English."
+        }
+        (6, Lang::Ja) => {
+            "画面の表示言語．English（英語）か Japanese（日本語）を選べます．adaptive や sentence で練習する言語とは別です．既定: English．"
+        }
+        (7, Lang::En) => {
+            "How a mistyped character is handled. stop keeps the cursor in place until the correct key is typed. advance accepts the error and moves forward; Backspace can move back. Default: stop."
+        }
+        (7, Lang::Ja) => {
             "誤入力した文字の扱い．stop は正しいキーを打つまでその位置で止まります．advance は誤入力を記録して先へ進み，Backspace で戻れます．既定: stop．"
         }
         _ => "",

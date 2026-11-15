@@ -69,3 +69,63 @@ fn sentence_ghost_ignores_ineligible_bests_and_does_not_apply_to_other_text() {
     assert!(ghost.applies_to_sentence("rust"));
     assert!(!ghost.applies_to_sentence("type"));
 }
+
+mod common;
+
+#[test]
+fn ghost_marker_sits_above_the_large_character_it_has_reached() {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::style::Style;
+    use rs_typing_trainer::ui::bigtext::{BigTextSize, StyledCharacter, font};
+
+    // The ghost typed "ru" almost at once and "st" seconds later, so while the
+    // screen below is drawn it has reached position 2 ('s').
+    let ghost = select_ghost(
+        &[record("rust", &[1, 2, 4_000, 4_500], 40.0, None, 1)],
+        &GhostCondition::Sentence { text: "rust".into() },
+    )
+    .unwrap();
+    let directory = tempfile::TempDir::new().unwrap();
+    let path = directory.path().join("sentences.tsv");
+    std::fs::write(&path, "rust\n").unwrap();
+    let mut config = Config::default();
+    config.mode.kind = ModeKind::Sentence;
+    config.mode.sentence.lang = "en".into();
+    config.data.sentences_en = Some(path);
+    config.ui.animation_enabled = false;
+    let mut app = common::test_app(config);
+    let start = std::time::Instant::now();
+    let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+    app.handle_key_at(enter, start);
+    app.handle_key_at(enter, start);
+    app.on_tick_at(Duration::from_secs(3), start).unwrap();
+    app.on_tick_at(Duration::ZERO, start + Duration::from_millis(200)).unwrap();
+    app.on_tick_at(Duration::ZERO, start + Duration::from_millis(400)).unwrap();
+    let game = app.game.as_mut().unwrap();
+    assert_eq!(game.current_prompt.text, "rust");
+    game.ghost = Some(ghost);
+
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+    terminal.draw(|frame| rs_typing_trainer::ui::render(frame, &app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let marker = buffer
+        .content()
+        .iter()
+        .position(|cell| cell.symbol() == "◆")
+        .map(|index| (index as u16 % buffer.area.width, index as u16 / buffer.area.width))
+        .expect("ghost marker missing");
+    let dot12 = font(BigTextSize::Dot12).unwrap();
+    let left = 1 + (78 - dot12.text_width("rust")) / 2;
+    assert_eq!(marker.0, left + dot12.text_width("ru"), "marker={marker:?}");
+
+    let raster = dot12.render(&[StyledCharacter::new('s', Style::default())]);
+    for (dy, line) in raster.lines.iter().enumerate() {
+        let expected = line.spans.iter().map(|span| span.content.as_ref()).collect::<String>();
+        let actual = (0..dot12.text_width("s"))
+            .map(|dx| buffer[(marker.0 + dx, marker.1 + 1 + dy as u16)].symbol())
+            .collect::<String>();
+        assert_eq!(actual, expected, "row {dy} below the marker must be the 's' glyph");
+    }
+}

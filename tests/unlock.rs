@@ -119,6 +119,7 @@ fn keyboard_distinguishes_unlocked_next_and_locked_keys() {
                 &state,
                 KeyboardView {
                     show: "full",
+                    style: "plain",
                     finger_guide: false,
                 },
             )

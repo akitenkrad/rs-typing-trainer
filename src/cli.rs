@@ -50,8 +50,11 @@ pub enum Command {
     /// Show typing statistics.
     Stats {
         /// Emit machine-readable CSV for one table.
-        #[arg(long, value_enum)]
+        #[arg(long, value_enum, conflicts_with = "summary")]
         csv: Option<StatsCsv>,
+        /// Print the same rule-based summary shown in the first analysis tab.
+        #[arg(long)]
+        summary: bool,
         /// Include sessions on or after this date (YYYY-MM-DD).
         #[arg(long)]
         since: Option<String>,

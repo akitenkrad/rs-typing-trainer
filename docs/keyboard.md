@@ -18,7 +18,19 @@ Set `keyboard.geometry` independently to `ansi` or `jis`. Geometry controls the 
 
 The legacy `colemak-dh` name retains the existing no-Angle-Mod bottom row `zxcdvkh,./`. The official ANSI variant follows the Colemak-DH [ANSI Angle(Z) placement](https://colemakmods.github.io/mod-dh/keyboards.html), whose bottom row is `xcdvzkh,./`: the left bottom-row letters move one key left and `z` moves to the centre key.
 
-The on-screen keyboard highlights the next key and Shift when needed. Its ANSI and JIS rows use the physical left-edge stagger, including the compact three-column-per-key view. A correct press flashes green for about 150 ms. A mistype flashes both the pressed key and the expected key red. Set `show = "dim"` to mute the labels or `show = "hidden"` to omit the keyboard. `show = "auto"` fades and then hides labels for keys whose shrinkage estimates reach 97% accuracy and the user's median IKI; the next key always remains visible. The initial default remains `full`, and benchmarks force the fixed full display. `finger_guide = false` hides the coloured finger band.
+The ANSI board uses physical quarter-unit widths: Backspace 2u, Tab 1.5u, Caps Lock 1.75u, Enter 2.25u, left Shift 2.25u, right Shift 2.75u, and Space 6.25u. Every row totals 15u. The JIS board approximates its distinct Enter shape and includes `IntlYen`, `IntlRo`, Muhenkan, Henkan, and Kana keys.
+
+Set `style` under `[keyboard]` to choose the preferred appearance:
+
+- `keycap` (default) draws shared box borders and physical key widths. It uses 76 columns by 11 rows. A pressed key changes to a heavy border for the 150 ms feedback frame.
+- `raised` draws coloured key faces and a `▀` shadow. It uses 60 columns by 10 rows. A pressed face moves down by one row and its shadow disappears.
+- `plain` keeps the compact labels-only display. It uses 45 columns by 5 rows, plus one row when the finger guide is enabled.
+
+The play, key-selection, and analysis screens use the same widget. When the available width or height is too small, it falls back only toward simpler appearances: `keycap` → `raised` → `plain` → hidden. The prompt and controls keep their space on the play screen.
+
+All appearances highlight the next key and Shift when needed. A correct press flashes green for about 150 ms. A mistype flashes both the pressed key and the expected key red. Heatmaps, unlock state, `auto` fading, and the finger guide also apply to every appearance. In `keycap`, the lower border carries the finger colour; in `raised`, the shadow carries it.
+
+Set `show = "dim"` to mute the labels or `show = "hidden"` to omit the keyboard. `show = "auto"` fades and then hides labels for keys whose shrinkage estimates reach 97% accuracy and the user's median IKI; the next key always remains visible. The initial default is `full`, and benchmarks force the fixed full display. `finger_guide = false` hides the coloured finger guide.
 
 ## Input-layout remapping
 

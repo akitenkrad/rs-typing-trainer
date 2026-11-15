@@ -4,6 +4,8 @@
 
 rs-typing-trainer bundles four deterministic gzip-compressed TSV datasets. They are embedded with `include_bytes!`, decompressed once at startup, and cached. Their exact input hashes, generation date, filters, output hashes, lindera version, and dictionary version are recorded in [`data/manifest.toml`](../data/manifest.toml). Copyright and attribution details are in [`data/NOTICE`](../data/NOTICE).
 
+The application also bundles the public-domain Shinonome 0.9.11 font at 12 and 16 dots. Both files contain 6,879 JIS X 0208 fullwidth glyphs, 95 printable ASCII glyphs, and 63 JIS X 0201 halfwidth-kana glyphs, keyed by Unicode code point. `data/NOTICE` includes the complete UTF-8-converted `LICENSE` and `AUTHORS` files and the upstream URL.
+
 ## Bundled files
 
 | File | Rows | Columns |
@@ -12,6 +14,10 @@ rs-typing-trainer bundles four deterministic gzip-compressed TSV datasets. They 
 | `data/ja_words.tsv.gz` | 12,000 | `surface`, `reading`, `rank`, `tier` |
 | `data/en_sentences.tsv.gz` | 19,696 | `text`, `tatoeba_id`, `tier` |
 | `data/ja_sentences.tsv.gz` | 7,394 | `text`, `reading`, `source_id`, `author`, `tier` |
+| `data/font/shinonome12.bin.gz` | 7,037 glyphs | fixed binary records |
+| `data/font/shinonome16.bin.gz` | 7,037 glyphs | fixed binary records |
+
+Each uncompressed font starts with a 20-byte header: `SHNFONT\0`, format version, dot height, halfwidth pixel width, fullwidth pixel width, a little-endian glyph count, and four reserved bytes. Code-point-sorted fixed records then contain a little-endian `u32` Unicode value, one width byte, and `height` little-endian `u16` rows. Pixel x is bit `15-x`. Gzip timestamps are zero. The compressed 12-dot and 16-dot files are 113,046 and 150,545 bytes respectively.
 
 Readings are hiragana with the punctuation `、。「」`. A long-vowel mark appears only when it is also present in the written prompt. The source ID for a Japanese sentence is the six-digit work ID in `tools/gen-data/sources/aozora_selection.tsv`. `tier=core` contains 2,000 English words, 2,070 English sentences, 561 hand-reviewed Japanese words, and 537 hand-reviewed Japanese sentences; all other rows use `tier=ext`.
 
@@ -21,6 +27,7 @@ Readings are hiragana with the punctuation `、。「」`. A long-vowel mark app
 - Japanese words and sentences come from 560 public-domain Japanese works. `data/NOTICE` retains each title, author, and input contributor.
 - Japanese readings are produced with lindera 6.2.0 and the embedded IPADIC `mecab-ipadic-2.7.0-20250920` dictionary. The complete NAIST permission and warranty disclaimer, including the ICOT terms, is retained in `data/NOTICE`.
 - English sentences come from Tatoeba's CC0 English export. The source is credited as `tatoeba.org` even though CC0 does not require attribution.
+- Large prompt glyphs come from Shinonome 0.9.11 at `http://openlab.ring.gr.jp/efont/shinonome/`. Its archive declares all included font data, documents, and scripts to be provided as public domain; the complete terms and author list are in `data/NOTICE`.
 
 Public-domain status can vary by jurisdiction. Check the original works if distributing the data where a different copyright term applies.
 
@@ -50,9 +57,14 @@ The generator is a separate Cargo project. Recreate the input tree if necessary,
 tools/gen-data/sources/fetch.sh /path/to/p4in
 cargo run --release --manifest-path tools/gen-data/Cargo.toml -- \
   --input /path/to/p4in --extra-aozora /path/to/extra/aozora --out data/
+cargo run --release --manifest-path tools/gen-data/Cargo.toml -- \
+  --font-source /path/to/p4in/shinonome/shinonome-0.9.11 --out data/font \
+  --font-notice data/NOTICE --font-manifest data/manifest.toml
 ```
 
-See [`tools/gen-data/README.md`](../tools/gen-data/README.md) for the dictionary cache, review files, override formats, and deterministic date handling.
+Run the font command second: the data command rewrites `data/NOTICE` and `data/manifest.toml`, and the font command adds the font notice, the input hashes (the archive and every file read from it), and the font outputs back. `fetch.sh` checks the archive against SHA-256 `95663c95c92ba5765f63ccbdf033eb93b707be01812a989c548db943479c838f`, and the font command repeats that check when the archive sits next to the extracted directory. Running both commands twice leaves `data/` unchanged.
+
+See [`tools/gen-data/README.md`](../tools/gen-data/README.md) for the font file format, the dictionary cache, review files, override formats, and deterministic date handling.
 
 ## User files
 

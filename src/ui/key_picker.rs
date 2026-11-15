@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::widgets::{Block, Borders, Paragraph};
 
@@ -12,7 +12,7 @@ use crate::config::KeyFilter;
 use crate::i18n::Lang;
 use crate::layout::KeyStroke;
 use crate::layout::geometry::geometry;
-use crate::ui::keyboard::{KeyboardState, KeyboardView};
+use crate::ui::keyboard::{KeyboardState, KeyboardView, resolve_style};
 use crate::ui::{left_inset, theme::Theme};
 
 pub fn render(frame: &mut Frame, app: &App) {
@@ -27,11 +27,14 @@ pub fn render(frame: &mut Frame, app: &App) {
         .style(Style::default().fg(theme.fg));
     let inner = block.inner(area);
     frame.render_widget(block, area);
+    let keyboard_room = inner.height.saturating_sub(6);
+    let keyboard_rows = resolve_style(&app.config.keyboard.style, Rect::new(inner.x, inner.y, inner.width, keyboard_room), false)
+        .map_or(0, |style| style.height(false));
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(2),
-            Constraint::Length(8),
+            Constraint::Length(keyboard_rows),
             Constraint::Length(2),
             Constraint::Length(2),
             Constraint::Fill(1),
@@ -72,6 +75,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             &state,
             KeyboardView {
                 show: "full",
+                style: &app.config.keyboard.style,
                 finger_guide: false,
             },
         );

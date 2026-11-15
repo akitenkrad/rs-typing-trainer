@@ -25,6 +25,8 @@ pub struct Config {
     #[serde(default)]
     pub general: GeneralConfig,
     #[serde(default)]
+    pub display: DisplayConfig,
+    #[serde(default)]
     pub keyboard: KeyboardConfig,
     #[serde(default)]
     pub session: SessionConfig,
@@ -75,6 +77,12 @@ pub struct GeneralConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DisplayConfig {
+    #[serde(default = "default_prompt_size")]
+    pub prompt_size: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyboardConfig {
     #[serde(default = "default_layout")]
     pub layout: String,
@@ -84,6 +92,8 @@ pub struct KeyboardConfig {
     pub geometry: String,
     #[serde(default = "default_keyboard_show")]
     pub show: String,
+    #[serde(default = "default_keyboard_style")]
+    pub style: String,
     #[serde(default = "default_heatmap")]
     pub heatmap: String,
     #[serde(default = "default_true")]
@@ -505,6 +515,7 @@ impl Default for KeyboardConfig {
             input_layout: default_input_layout(),
             geometry: default_geometry(),
             show: default_keyboard_show(),
+            style: default_keyboard_style(),
             heatmap: default_heatmap(),
             finger_guide: true,
             digit6_finger: default_digit6_finger(),
@@ -512,8 +523,20 @@ impl Default for KeyboardConfig {
     }
 }
 
+impl Default for DisplayConfig {
+    fn default() -> Self {
+        Self {
+            prompt_size: default_prompt_size(),
+        }
+    }
+}
+
 fn default_layout() -> String {
     "qwerty".to_owned()
+}
+
+fn default_prompt_size() -> String {
+    "auto".to_owned()
 }
 
 fn default_duration_seconds() -> u64 {
@@ -616,6 +639,10 @@ fn default_keyboard_show() -> String {
     "full".to_owned()
 }
 
+fn default_keyboard_style() -> String {
+    "keycap".to_owned()
+}
+
 fn default_heatmap() -> String {
     "off".to_owned()
 }
@@ -653,6 +680,7 @@ impl Default for Config {
     fn default() -> Self {
         let mut c = Self {
             general: GeneralConfig::default(),
+            display: DisplayConfig::default(),
             keyboard: KeyboardConfig::default(),
             session: SessionConfig::default(),
             mode: ModeConfig::default(),
@@ -774,10 +802,22 @@ impl Config {
                 value: self.keyboard.geometry.clone(),
             });
         }
+        if !matches!(self.display.prompt_size.as_str(), "auto" | "normal" | "large" | "xlarge") {
+            return Err(ConfigError::UnknownKeyboardSetting {
+                field: "display.prompt_size",
+                value: self.display.prompt_size.clone(),
+            });
+        }
         if !matches!(self.keyboard.show.as_str(), "full" | "dim" | "hidden" | "auto") {
             return Err(ConfigError::UnknownKeyboardSetting {
                 field: "show",
                 value: self.keyboard.show.clone(),
+            });
+        }
+        if !matches!(self.keyboard.style.as_str(), "keycap" | "raised" | "plain") {
+            return Err(ConfigError::UnknownKeyboardSetting {
+                field: "style",
+                value: self.keyboard.style.clone(),
             });
         }
         if !matches!(self.keyboard.heatmap.as_str(), "off" | "errors" | "latency") {
@@ -842,12 +882,13 @@ pub fn save_keyboard_layout(path: &Path, layout: &str) -> AppResult<()> {
 /// rest of the document.
 pub fn save_settings(path: &Path, config: &Config) -> AppResult<()> {
     let raw = if path.exists() { std::fs::read_to_string(path)? } else { String::new() };
-    let mut document = document_with_sections(&raw, &["keyboard", "general", "session"])?;
+    let mut document = document_with_sections(&raw, &["keyboard", "display", "general", "session"])?;
     for (key, value) in [
         ("layout", config.keyboard.layout.as_str()),
         ("input_layout", config.keyboard.input_layout.as_str()),
         ("geometry", config.keyboard.geometry.as_str()),
         ("show", config.keyboard.show.as_str()),
+        ("style", config.keyboard.style.as_str()),
     ] {
         set_string_preserving_decor(&mut document["keyboard"][key], value);
     }
@@ -856,6 +897,7 @@ pub fn save_settings(path: &Path, config: &Config) -> AppResult<()> {
         Lang::Ja => "ja",
     };
     set_string_preserving_decor(&mut document["general"]["lang"], language);
+    set_string_preserving_decor(&mut document["display"]["prompt_size"], &config.display.prompt_size);
     set_string_preserving_decor(
         &mut document["session"]["error_mode"],
         match config.session.error_mode {

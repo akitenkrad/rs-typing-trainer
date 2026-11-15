@@ -4,7 +4,7 @@ set -eu
 destination=${1:-p4in}
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
-mkdir -p "$destination/aozora/zips" "$destination/gutenberg" "$destination/scowl" "$destination/tatoeba"
+mkdir -p "$destination/aozora/zips" "$destination/gutenberg" "$destination/scowl" "$destination/tatoeba" "$destination/shinonome"
 cp "$script_dir/aozora_selection.tsv" "$destination/aozora/selection.tsv"
 
 fetch() {
@@ -35,3 +35,16 @@ fi
 
 fetch "https://downloads.tatoeba.org/exports/per_language/eng/eng_sentences_CC0.tsv.bz2" \
     "$destination/tatoeba/eng_sentences_CC0.tsv.bz2"
+
+shinonome_archive="$destination/shinonome/shinonome-0.9.11p1.tar.bz2"
+shinonome_sha256=95663c95c92ba5765f63ccbdf033eb93b707be01812a989c548db943479c838f
+fetch "http://openlab.ring.gr.jp/efont/dist/shinonome/shinonome-0.9.11p1.tar.bz2" \
+    "$shinonome_archive"
+actual_sha256=$(shasum -a 256 "$shinonome_archive" | awk '{print $1}')
+if [ "$actual_sha256" != "$shinonome_sha256" ]; then
+    echo "Shinonome SHA-256 mismatch: expected $shinonome_sha256, got $actual_sha256" >&2
+    exit 1
+fi
+if [ ! -d "$destination/shinonome/shinonome-0.9.11" ]; then
+    tar -xjf "$shinonome_archive" -C "$destination/shinonome"
+fi

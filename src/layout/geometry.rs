@@ -27,6 +27,7 @@ pub struct PhysicalKey {
     pub code: &'static str,
     pub finger: Finger,
     pub row: KeyRow,
+    /// Physical width in quarter-unit increments. Four equals one key unit.
     pub width: u16,
 }
 
@@ -54,103 +55,185 @@ pub fn geometry(name: &str) -> Option<KeyboardGeometry> {
 }
 
 fn key(code: &'static str, finger: Finger, row: KeyRow) -> PhysicalKey {
-    PhysicalKey { code, finger, row, width: 1 }
+    wide(code, finger, row, 4)
 }
 
 fn wide(code: &'static str, finger: Finger, row: KeyRow, width: u16) -> PhysicalKey {
     PhysicalKey { code, finger, row, width }
 }
 
-fn number_row(jis: bool) -> Vec<PhysicalKey> {
-    use Finger::*;
-    use KeyRow::Number;
-    let mut keys = vec![
-        key("Backquote", LeftPinky, Number),
-        key("Digit1", LeftPinky, Number),
-        key("Digit2", LeftRing, Number),
-        key("Digit3", LeftMiddle, Number),
-        key("Digit4", LeftIndex, Number),
-        key("Digit5", LeftIndex, Number),
-        key("Digit6", LeftIndex, Number),
-        key("Digit7", RightIndex, Number),
-        key("Digit8", RightMiddle, Number),
-        key("Digit9", RightRing, Number),
-        key("Digit0", RightPinky, Number),
-        key("Minus", RightPinky, Number),
-        key("Equal", RightPinky, Number),
-    ];
-    if jis {
-        keys.push(key("IntlYen", RightPinky, Number));
-    }
-    keys
-}
-
-fn letter_rows(jis: bool) -> Vec<Vec<PhysicalKey>> {
-    use Finger::*;
-    let mut top = vec![
-        key("KeyQ", LeftPinky, KeyRow::Top),
-        key("KeyW", LeftRing, KeyRow::Top),
-        key("KeyE", LeftMiddle, KeyRow::Top),
-        key("KeyR", LeftIndex, KeyRow::Top),
-        key("KeyT", LeftIndex, KeyRow::Top),
-        key("KeyY", RightIndex, KeyRow::Top),
-        key("KeyU", RightIndex, KeyRow::Top),
-        key("KeyI", RightMiddle, KeyRow::Top),
-        key("KeyO", RightRing, KeyRow::Top),
-        key("KeyP", RightPinky, KeyRow::Top),
-        key("BracketLeft", RightPinky, KeyRow::Top),
-        key("BracketRight", RightPinky, KeyRow::Top),
-    ];
-    top.push(key("Backslash", RightPinky, KeyRow::Top));
-    let home = vec![
-        key("KeyA", LeftPinky, KeyRow::Home),
-        key("KeyS", LeftRing, KeyRow::Home),
-        key("KeyD", LeftMiddle, KeyRow::Home),
-        key("KeyF", LeftIndex, KeyRow::Home),
-        key("KeyG", LeftIndex, KeyRow::Home),
-        key("KeyH", RightIndex, KeyRow::Home),
-        key("KeyJ", RightIndex, KeyRow::Home),
-        key("KeyK", RightMiddle, KeyRow::Home),
-        key("KeyL", RightRing, KeyRow::Home),
-        key("Semicolon", RightPinky, KeyRow::Home),
-        key("Quote", RightPinky, KeyRow::Home),
-    ];
-    let mut bottom = vec![
-        key("KeyZ", LeftPinky, KeyRow::Bottom),
-        key("KeyX", LeftRing, KeyRow::Bottom),
-        key("KeyC", LeftMiddle, KeyRow::Bottom),
-        key("KeyV", LeftIndex, KeyRow::Bottom),
-        key("KeyB", LeftIndex, KeyRow::Bottom),
-        key("KeyN", RightIndex, KeyRow::Bottom),
-        key("KeyM", RightIndex, KeyRow::Bottom),
-        key("Comma", RightMiddle, KeyRow::Bottom),
-        key("Period", RightRing, KeyRow::Bottom),
-        key("Slash", RightPinky, KeyRow::Bottom),
-    ];
-    if jis {
-        bottom.push(key("IntlRo", RightPinky, KeyRow::Bottom));
-    }
-    vec![top, home, bottom]
-}
-
-fn control_row() -> Vec<PhysicalKey> {
-    vec![
-        wide("ShiftLeft", Finger::LeftPinky, KeyRow::Control, 3),
-        wide("Space", Finger::Thumb, KeyRow::Control, 6),
-        wide("ShiftRight", Finger::RightPinky, KeyRow::Control, 3),
-    ]
-}
-
 fn ansi() -> KeyboardGeometry {
-    let mut rows = vec![number_row(false)];
-    rows.extend(letter_rows(false));
-    rows.push(control_row());
+    use Finger::*;
+    use KeyRow::*;
+
+    let rows = vec![
+        vec![
+            key("Backquote", LeftPinky, Number),
+            key("Digit1", LeftPinky, Number),
+            key("Digit2", LeftRing, Number),
+            key("Digit3", LeftMiddle, Number),
+            key("Digit4", LeftIndex, Number),
+            key("Digit5", LeftIndex, Number),
+            key("Digit6", LeftIndex, Number),
+            key("Digit7", RightIndex, Number),
+            key("Digit8", RightMiddle, Number),
+            key("Digit9", RightRing, Number),
+            key("Digit0", RightPinky, Number),
+            key("Minus", RightPinky, Number),
+            key("Equal", RightPinky, Number),
+            wide("Backspace", RightPinky, Number, 8),
+        ],
+        vec![
+            wide("Tab", LeftPinky, Top, 6),
+            key("KeyQ", LeftPinky, Top),
+            key("KeyW", LeftRing, Top),
+            key("KeyE", LeftMiddle, Top),
+            key("KeyR", LeftIndex, Top),
+            key("KeyT", LeftIndex, Top),
+            key("KeyY", RightIndex, Top),
+            key("KeyU", RightIndex, Top),
+            key("KeyI", RightMiddle, Top),
+            key("KeyO", RightRing, Top),
+            key("KeyP", RightPinky, Top),
+            key("BracketLeft", RightPinky, Top),
+            key("BracketRight", RightPinky, Top),
+            wide("Backslash", RightPinky, Top, 6),
+        ],
+        vec![
+            wide("CapsLock", LeftPinky, Home, 7),
+            key("KeyA", LeftPinky, Home),
+            key("KeyS", LeftRing, Home),
+            key("KeyD", LeftMiddle, Home),
+            key("KeyF", LeftIndex, Home),
+            key("KeyG", LeftIndex, Home),
+            key("KeyH", RightIndex, Home),
+            key("KeyJ", RightIndex, Home),
+            key("KeyK", RightMiddle, Home),
+            key("KeyL", RightRing, Home),
+            key("Semicolon", RightPinky, Home),
+            key("Quote", RightPinky, Home),
+            wide("Enter", RightPinky, Home, 9),
+        ],
+        vec![
+            wide("ShiftLeft", LeftPinky, Bottom, 9),
+            key("KeyZ", LeftPinky, Bottom),
+            key("KeyX", LeftRing, Bottom),
+            key("KeyC", LeftMiddle, Bottom),
+            key("KeyV", LeftIndex, Bottom),
+            key("KeyB", LeftIndex, Bottom),
+            key("KeyN", RightIndex, Bottom),
+            key("KeyM", RightIndex, Bottom),
+            key("Comma", RightMiddle, Bottom),
+            key("Period", RightRing, Bottom),
+            key("Slash", RightPinky, Bottom),
+            wide("ShiftRight", RightPinky, Bottom, 11),
+        ],
+        ansi_control_row(),
+    ];
     KeyboardGeometry { name: "ansi", rows }
 }
 
+fn ansi_control_row() -> Vec<PhysicalKey> {
+    use Finger::*;
+    use KeyRow::Control;
+    vec![
+        wide("ControlLeft", LeftPinky, Control, 5),
+        wide("MetaLeft", LeftPinky, Control, 5),
+        wide("AltLeft", LeftPinky, Control, 5),
+        wide("Space", Thumb, Control, 25),
+        wide("AltRight", RightPinky, Control, 5),
+        wide("MetaRight", RightPinky, Control, 5),
+        wide("ContextMenu", RightPinky, Control, 5),
+        wide("ControlRight", RightPinky, Control, 5),
+    ]
+}
+
 fn jis() -> KeyboardGeometry {
-    let mut rows = vec![number_row(true)];
-    rows.extend(letter_rows(true));
-    rows.push(control_row());
+    use Finger::*;
+    use KeyRow::*;
+
+    let rows = vec![
+        vec![
+            key("Digit1", LeftPinky, Number),
+            key("Digit2", LeftRing, Number),
+            key("Digit3", LeftMiddle, Number),
+            key("Digit4", LeftIndex, Number),
+            key("Digit5", LeftIndex, Number),
+            key("Digit6", LeftIndex, Number),
+            key("Digit7", RightIndex, Number),
+            key("Digit8", RightMiddle, Number),
+            key("Digit9", RightRing, Number),
+            key("Digit0", RightPinky, Number),
+            key("Minus", RightPinky, Number),
+            key("Equal", RightPinky, Number),
+            key("IntlYen", RightPinky, Number),
+            wide("Backspace", RightPinky, Number, 8),
+        ],
+        vec![
+            wide("Tab", LeftPinky, Top, 6),
+            key("KeyQ", LeftPinky, Top),
+            key("KeyW", LeftRing, Top),
+            key("KeyE", LeftMiddle, Top),
+            key("KeyR", LeftIndex, Top),
+            key("KeyT", LeftIndex, Top),
+            key("KeyY", RightIndex, Top),
+            key("KeyU", RightIndex, Top),
+            key("KeyI", RightMiddle, Top),
+            key("KeyO", RightRing, Top),
+            key("KeyP", RightPinky, Top),
+            key("BracketLeft", RightPinky, Top),
+            key("BracketRight", RightPinky, Top),
+            wide("Enter", RightPinky, Top, 6),
+        ],
+        vec![
+            wide("CapsLock", LeftPinky, Home, 7),
+            key("KeyA", LeftPinky, Home),
+            key("KeyS", LeftRing, Home),
+            key("KeyD", LeftMiddle, Home),
+            key("KeyF", LeftIndex, Home),
+            key("KeyG", LeftIndex, Home),
+            key("KeyH", RightIndex, Home),
+            key("KeyJ", RightIndex, Home),
+            key("KeyK", RightMiddle, Home),
+            key("KeyL", RightRing, Home),
+            key("Semicolon", RightPinky, Home),
+            key("Quote", RightPinky, Home),
+            key("Backslash", RightPinky, Home),
+            wide("Enter", RightPinky, Home, 5),
+        ],
+        vec![
+            wide("ShiftLeft", LeftPinky, Bottom, 9),
+            key("KeyZ", LeftPinky, Bottom),
+            key("KeyX", LeftRing, Bottom),
+            key("KeyC", LeftMiddle, Bottom),
+            key("KeyV", LeftIndex, Bottom),
+            key("KeyB", LeftIndex, Bottom),
+            key("KeyN", RightIndex, Bottom),
+            key("KeyM", RightIndex, Bottom),
+            key("Comma", RightMiddle, Bottom),
+            key("Period", RightRing, Bottom),
+            key("Slash", RightPinky, Bottom),
+            key("IntlRo", RightPinky, Bottom),
+            wide("ShiftRight", RightPinky, Bottom, 7),
+        ],
+        jis_control_row(),
+    ];
     KeyboardGeometry { name: "jis", rows }
+}
+
+fn jis_control_row() -> Vec<PhysicalKey> {
+    use Finger::*;
+    use KeyRow::Control;
+    vec![
+        wide("ControlLeft", LeftPinky, Control, 5),
+        key("MetaLeft", LeftPinky, Control),
+        key("AltLeft", LeftPinky, Control),
+        wide("NonConvert", Thumb, Control, 5),
+        wide("Space", Thumb, Control, 18),
+        wide("Convert", Thumb, Control, 5),
+        wide("KanaMode", Thumb, Control, 5),
+        key("AltRight", RightPinky, Control),
+        key("MetaRight", RightPinky, Control),
+        wide("ControlRight", RightPinky, Control, 6),
+    ]
 }

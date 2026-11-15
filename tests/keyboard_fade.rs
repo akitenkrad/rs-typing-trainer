@@ -64,7 +64,11 @@ fn render(show: &str, fade: HashMap<String, KeyFade>, next: Option<KeyStroke>) -
                 &geometry("ansi").unwrap(),
                 &builtin_layout("qwerty").unwrap(),
                 &state,
-                KeyboardView { show, finger_guide: false },
+                KeyboardView {
+                    show,
+                    style: "plain",
+                    finger_guide: false,
+                },
             )
         })
         .unwrap();

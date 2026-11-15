@@ -9,10 +9,12 @@
 | キー | 型 | 既定値 | 説明 |
 |---|---|---|---|
 | `general.lang` | `en` / `ja` | `"en"` | 表示言語． |
+| `display.prompt_size` | `auto` / `normal` / `large` / `xlarge` | `"auto"` | 出題文字の大きさ．`large` は12ドット，`xlarge` は16ドットの字形を使い，収まらない場合は自動で段階を下げる． |
 | `keyboard.layout` | 文字列 | `"qwerty"` | 同梱または利用者定義の練習レイアウト名． |
 | `keyboard.input_layout` | 文字列 | `"same"` | 物理キーの読み替えに使う OS 側のレイアウト． |
 | `keyboard.geometry` | `ansi` / `jis` | `"ansi"` | キーボードの物理配置． |
 | `keyboard.show` | `full` / `dim` / `hidden` / `auto` | `"full"` | 画面上のキーボード表示と自動薄化． |
+| `keyboard.style` | `keycap` / `raised` / `plain` | `"keycap"` | キーボードの見た目．場所が足りない場合は自動で簡素化． |
 | `keyboard.heatmap` | `off` / `errors` / `latency` | `"off"` | 分析画面の初期熱分布． |
 | `keyboard.finger_guide` | 真偽値 | `true` | 担当指の色帯を表示する． |
 | `keyboard.digit6_finger` | `left-index` / `right-index` | `"left-index"` | `6` キーを担当する指． |
@@ -71,4 +73,4 @@
 | `characters.allow_consecutive_same_word` | 真偽値 | `false` | v1 の random モード用設定． |
 | `metrics.db_path` | パス | `—` | v1 の DB 保存先．`storage.db_path` が優先． |
 
-設定画面では，レイアウト，入力レイアウト，物理配置，キーボード表示，言語，誤入力の扱いを変更し，コメントと関係のない TOML キーを保ちます．各値の動作は[訓練モード](modes.ja.md)，[訓練機能](training.ja.md)，[キーボードの配列](keyboard.ja.md)を参照してください．
+設定画面では，レイアウト，入力レイアウト，物理配置，キーボード表示，キーボードの見た目，出題文字の大きさ，言語，誤入力の扱いを変更し，コメントと関係のない TOML キーを保ちます．各値の動作は[訓練モード](modes.ja.md)，[訓練機能](training.ja.md)，[キーボードの配列](keyboard.ja.md)を参照してください．

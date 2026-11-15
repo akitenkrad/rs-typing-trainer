@@ -4,8 +4,13 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 
+mod font;
 mod generate;
 
+pub use font::{
+    BdfGlyph, FontGenerationOptions, FontGenerationReport, FontKind, SHINONOME_ARCHIVE, SHINONOME_ARCHIVE_SHA256, generate_fonts, jis_x0208_to_char,
+    parse_bdf, update_shinonome_manifest, update_shinonome_notice,
+};
 pub use generate::{GenerationOptions, GenerationReport, generate};
 
 const SCOWL_LEVELS: [u8; 6] = [10, 20, 35, 40, 50, 60];

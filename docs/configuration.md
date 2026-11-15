@@ -9,10 +9,12 @@ Every supported key is listed here. “Unset” means that the application deriv
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `general.lang` | `en` / `ja` | `"en"` | Interface language. |
+| `display.prompt_size` | `auto` / `normal` / `large` / `xlarge` | `"auto"` | Prompt size. `large` uses the 12-dot bitmap and `xlarge` the 16-dot bitmap; constrained screens step down automatically. |
 | `keyboard.layout` | string | `"qwerty"` | Practice layout; bundled or user-defined name. |
 | `keyboard.input_layout` | string | `"same"` | OS input layout used for physical-key remapping. |
 | `keyboard.geometry` | `ansi` / `jis` | `"ansi"` | Physical keyboard geometry. |
 | `keyboard.show` | `full` / `dim` / `hidden` / `auto` | `"full"` | On-screen keyboard visibility and fading. |
+| `keyboard.style` | `keycap` / `raised` / `plain` | `"keycap"` | Preferred appearance; automatically simplified when space is limited. |
 | `keyboard.heatmap` | `off` / `errors` / `latency` | `"off"` | Default analysis heatmap. |
 | `keyboard.finger_guide` | boolean | `true` | Show the coloured finger guide. |
 | `keyboard.digit6_finger` | `left-index` / `right-index` | `"left-index"` | Finger assigned to the `6` key. |
@@ -71,4 +73,4 @@ Every supported key is listed here. “Unset” means that the application deriv
 | `characters.allow_consecutive_same_word` | boolean | `false` | v1 alias for the random-mode setting. |
 | `metrics.db_path` | path | `—` | v1 database-path alias; `storage.db_path` wins. |
 
-The settings screen edits layout, input layout, geometry, keyboard visibility, language, and error mode while preserving comments and unrelated TOML keys. See [Training modes](modes.md), [Training tools](training.md), and [Keyboard layouts](keyboard.md) for behavior behind these values.
+The settings screen edits layout, input layout, geometry, keyboard visibility, keyboard appearance, prompt size, language, and error mode while preserving comments and unrelated TOML keys. See [Training modes](modes.md), [Training tools](training.md), and [Keyboard layouts](keyboard.md) for behavior behind these values.

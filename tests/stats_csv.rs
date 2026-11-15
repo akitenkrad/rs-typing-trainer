@@ -103,3 +103,14 @@ fn legacy_session_csv_leaves_iki_fields_empty() {
     assert_eq!(fields[10], "", "{row}");
     assert_eq!(fields[11], "", "{row}");
 }
+
+#[test]
+fn summary_output_uses_the_existing_since_and_mode_filters() {
+    let (_directory, config, _db) = fixture();
+
+    let output = stats(&config, &["--summary", "--since", "2026-06-01", "--mode", "words"]);
+
+    assert!(output.contains("Current ability"), "{output}");
+    assert!(output.contains("words"), "{output}");
+    assert!(!output.contains("romaji"), "{output}");
+}

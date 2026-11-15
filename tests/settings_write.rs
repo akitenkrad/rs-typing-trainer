@@ -99,7 +99,7 @@ fn settings_values_share_one_column() {
         .map(|(index, _)| index as u16 % buffer.area.width)
         .collect::<Vec<_>>();
 
-    assert_eq!(value_columns.len(), 6);
+    assert_eq!(value_columns.len(), 8);
     assert!(value_columns.windows(2).all(|pair| pair[0] == pair[1]), "{value_columns:?}");
     let arrow_columns = buffer
         .content()
@@ -118,6 +118,8 @@ fn every_setting_has_a_bilingual_description_with_options_and_a_default() {
         ("OS input layout", "OS が使っている配列"),
         ("physical key arrangement", "物理的な並び"),
         ("full: always visible", "full: 常に表示"),
+        ("Keyboard appearance", "キーボードの見た目"),
+        ("Prompt size", "出題文字の大きさ"),
         ("interface language", "画面の表示言語"),
         ("mistyped character", "誤入力した文字"),
     ];
@@ -126,6 +128,8 @@ fn every_setting_has_a_bilingual_description_with_options_and_a_default() {
         ["same", "qwerty", "colemak-dh-ansi", "jis-qwerty"].as_slice(),
         ["ansi", "jis"].as_slice(),
         ["full", "auto", "dim", "hidden"].as_slice(),
+        ["keycap", "raised", "plain"].as_slice(),
+        ["auto", "normal", "large", "xlarge"].as_slice(),
         ["English", "Japanese"].as_slice(),
         ["stop", "advance"].as_slice(),
     ];
@@ -148,12 +152,12 @@ fn every_setting_has_a_bilingual_description_with_options_and_a_default() {
                     !symbol.trim().is_empty()
                 })
             };
-            assert!(description_row_has_text(9), "setting {index}, {lang:?} has no description");
+            assert!(description_row_has_text(11), "setting {index}, {lang:?} has no description");
             assert!(
-                description_row_has_text(10),
+                description_row_has_text(12),
                 "setting {index}, {lang:?} needs at least two description lines"
             );
-            assert!(!description_row_has_text(13), "setting {index}, {lang:?} exceeded four description lines");
+            assert!(!description_row_has_text(15), "setting {index}, {lang:?} exceeded four description lines");
             let rendered = terminal
                 .backend()
                 .buffer()
@@ -199,6 +203,57 @@ fn settings_save_updates_error_mode_without_rewriting_unrelated_keys() {
     assert!(updated.contains("error_mode = \"advance\" # keep"));
     assert!(updated.contains("preview_items = 3"));
     assert!(updated.contains("# retained"));
+}
+
+#[test]
+fn settings_screen_cycles_and_saves_keyboard_style() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("config.toml");
+    fs::write(&path, "[keyboard]\nstyle = \"keycap\" # keep\n").unwrap();
+    let config = Config::from_path(&path).unwrap();
+    let mut app = test_app(config);
+    app.config_path = Some(path.clone());
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
+    for _ in 0..4 {
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    }
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    assert_eq!(app.config.keyboard.style, "raised");
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    let updated = fs::read_to_string(path).unwrap();
+    assert!(updated.contains("style = \"raised\" # keep"), "{updated}");
+}
+
+#[test]
+fn settings_screen_cycles_saves_and_cancels_prompt_size() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("config.toml");
+    fs::write(&path, "[display]\nprompt_size = \"auto\" # keep\n").unwrap();
+    let config = Config::from_path(&path).unwrap();
+    let mut app = test_app(config);
+    app.config_path = Some(path.clone());
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
+    for _ in 0..5 {
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    }
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    assert_eq!(app.config.display.prompt_size, "normal");
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert_eq!(app.config.display.prompt_size, "auto");
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
+    for _ in 0..5 {
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    }
+    app.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+    assert_eq!(app.config.display.prompt_size, "xlarge");
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    let updated = fs::read_to_string(path).unwrap();
+    assert!(updated.contains("prompt_size = \"xlarge\" # keep"), "{updated}");
 }
 
 #[test]
