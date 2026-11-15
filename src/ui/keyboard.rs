@@ -1,16 +1,20 @@
 //! On-screen physical keyboard, key feedback, finger guide, and heatmap.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Rect};
+use ratatui::layout::{Alignment, Rect, Size};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::Paragraph;
+use ratatui_image::Image;
 use unicode_width::UnicodeWidthStr;
 
+use crate::graphics::{GraphicsDetection, GraphicsMode};
 use crate::layout::geometry::{Finger, KeyRow, KeyboardGeometry, PhysicalKey};
 use crate::layout::{KeyStroke, KeyboardLayout};
 use crate::practice::keyboard_fade::KeyFade;
+use crate::ui::keyboard_image::{KeyTileSpec, KeyboardImageCache};
 
 const QUARTERS_PER_UNIT: u16 = 4;
 const BOARD_QUARTERS: u16 = 60;
@@ -85,6 +89,18 @@ pub struct KeyboardView<'a> {
     pub finger_guide: bool,
 }
 
+#[derive(Clone, Copy)]
+pub struct KeyboardImageContext<'a> {
+    pub detection: &'a GraphicsDetection,
+    pub cache: &'a RefCell<KeyboardImageCache>,
+}
+
+#[derive(Clone, Copy)]
+struct RenderOptions<'a> {
+    heatmap_only: bool,
+    images: Option<KeyboardImageContext<'a>>,
+}
+
 /// Resolve the requested appearance against the actual rectangle. Styles only
 /// simplify: keycap → raised → plain → hidden.
 pub fn resolve_style(requested: &str, area: Rect, finger_guide: bool) -> Option<KeyboardStyle> {
@@ -101,7 +117,41 @@ pub fn resolve_style(requested: &str, area: Rect, finger_guide: bool) -> Option<
 }
 
 pub fn render(frame: &mut Frame, area: Rect, geometry: &KeyboardGeometry, layout: &KeyboardLayout, state: &KeyboardState, view: KeyboardView<'_>) {
-    render_inner(frame, area, geometry, layout, state, view, false);
+    render_inner(
+        frame,
+        area,
+        geometry,
+        layout,
+        state,
+        view,
+        RenderOptions {
+            heatmap_only: false,
+            images: None,
+        },
+    );
+}
+
+pub fn render_with_images(
+    frame: &mut Frame,
+    area: Rect,
+    geometry: &KeyboardGeometry,
+    layout: &KeyboardLayout,
+    state: &KeyboardState,
+    view: KeyboardView<'_>,
+    images: KeyboardImageContext<'_>,
+) {
+    render_inner(
+        frame,
+        area,
+        geometry,
+        layout,
+        state,
+        view,
+        RenderOptions {
+            heatmap_only: false,
+            images: Some(images),
+        },
+    );
 }
 
 pub fn render_heatmap(
@@ -112,7 +162,41 @@ pub fn render_heatmap(
     state: &KeyboardState,
     view: KeyboardView<'_>,
 ) {
-    render_inner(frame, area, geometry, layout, state, view, true);
+    render_inner(
+        frame,
+        area,
+        geometry,
+        layout,
+        state,
+        view,
+        RenderOptions {
+            heatmap_only: true,
+            images: None,
+        },
+    );
+}
+
+pub fn render_heatmap_with_images(
+    frame: &mut Frame,
+    area: Rect,
+    geometry: &KeyboardGeometry,
+    layout: &KeyboardLayout,
+    state: &KeyboardState,
+    view: KeyboardView<'_>,
+    images: KeyboardImageContext<'_>,
+) {
+    render_inner(
+        frame,
+        area,
+        geometry,
+        layout,
+        state,
+        view,
+        RenderOptions {
+            heatmap_only: true,
+            images: Some(images),
+        },
+    );
 }
 
 fn render_inner(
@@ -122,7 +206,7 @@ fn render_inner(
     layout: &KeyboardLayout,
     state: &KeyboardState,
     view: KeyboardView<'_>,
-    heatmap_only: bool,
+    options: RenderOptions<'_>,
 ) {
     if view.show == "hidden" || area.width == 0 || area.height == 0 {
         return;
@@ -131,10 +215,121 @@ fn render_inner(
         return;
     };
     match style {
-        KeyboardStyle::Keycap => render_keycap(frame, area, geometry, layout, state, view, heatmap_only),
-        KeyboardStyle::Raised => render_raised(frame, area, geometry, layout, state, view, heatmap_only),
-        KeyboardStyle::Plain => render_plain(frame, area, geometry, layout, state, view, heatmap_only),
+        KeyboardStyle::Keycap => {
+            let rendered = options.images.is_some_and(|images| {
+                images.detection.mode != GraphicsMode::Off && render_keycap_image(frame, area, geometry, layout, state, view, options)
+            });
+            if !rendered {
+                render_keycap(frame, area, geometry, layout, state, view, options.heatmap_only);
+            }
+        }
+        KeyboardStyle::Raised => render_raised(frame, area, geometry, layout, state, view, options.heatmap_only),
+        KeyboardStyle::Plain => render_plain(frame, area, geometry, layout, state, view, options.heatmap_only),
     }
+}
+
+#[derive(Clone)]
+struct KeyTilePlacement {
+    x: u16,
+    y: u16,
+    spec: KeyTileSpec,
+}
+
+pub fn prepare_keycap_images(
+    detection: &GraphicsDetection,
+    cache: &mut KeyboardImageCache,
+    geometry: &KeyboardGeometry,
+    layout: &KeyboardLayout,
+    state: &KeyboardState,
+    view: KeyboardView<'_>,
+    heatmap_only: bool,
+) -> Result<usize, String> {
+    let before = cache.creation_count();
+    let ordinary = KeyboardState::default();
+    for placement in keycap_tile_placements(geometry, layout, &ordinary, view, heatmap_only) {
+        cache.prepare(detection, &placement.spec)?;
+    }
+    for placement in keycap_tile_placements(geometry, layout, state, view, heatmap_only) {
+        cache.prepare(detection, &placement.spec)?;
+    }
+    Ok(cache.creation_count() - before)
+}
+
+fn render_keycap_image(
+    frame: &mut Frame,
+    area: Rect,
+    geometry: &KeyboardGeometry,
+    layout: &KeyboardLayout,
+    state: &KeyboardState,
+    view: KeyboardView<'_>,
+    options: RenderOptions<'_>,
+) -> bool {
+    let Some(images) = options.images else {
+        return false;
+    };
+    let placements = keycap_tile_placements(geometry, layout, state, view, options.heatmap_only);
+    let mut cache = images.cache.borrow_mut();
+    if prepare_keycap_images(images.detection, &mut cache, geometry, layout, state, view, options.heatmap_only).is_err() {
+        return false;
+    }
+    let width = KeyboardStyle::Keycap.width();
+    let height = KeyboardStyle::Keycap.height(view.finger_guide);
+    let origin_x = area.x + area.width.saturating_sub(width) / 2;
+    let origin_y = area.y + area.height.saturating_sub(height) / 2;
+    for placement in placements {
+        let Some(protocol) = cache.protocol(images.detection, &placement.spec) else {
+            return false;
+        };
+        frame.render_widget(
+            Image::new(protocol),
+            Rect::new(
+                origin_x + placement.x,
+                origin_y + placement.y,
+                placement.spec.cells.width,
+                placement.spec.cells.height,
+            ),
+        );
+    }
+    true
+}
+
+fn keycap_tile_placements(
+    geometry: &KeyboardGeometry,
+    layout: &KeyboardLayout,
+    state: &KeyboardState,
+    view: KeyboardView<'_>,
+    heatmap_only: bool,
+) -> Vec<KeyTilePlacement> {
+    const UNIT: u16 = 5;
+    let mut placements = Vec::with_capacity(geometry.rows.iter().map(Vec::len).sum());
+    for (row_index, row) in geometry.rows.iter().enumerate() {
+        let mut quarter = 0;
+        for key in row {
+            let left = scaled_boundary(quarter, UNIT);
+            quarter += key.width;
+            let right = scaled_boundary(quarter, UNIT);
+            let cells_width = right.saturating_sub(left);
+            if cells_width == 0 {
+                continue;
+            }
+            let (label, style) = key_appearance(key, layout, state, view.show, heatmap_only, false, u16::MAX);
+            placements.push(KeyTilePlacement {
+                x: left,
+                y: row_index as u16 * 2,
+                spec: KeyTileSpec {
+                    cells: Size::new(cells_width, 2),
+                    label,
+                    face_color: style.bg.unwrap_or(Color::Rgb(75, 81, 91)),
+                    text_color: style.fg.unwrap_or(Color::White),
+                    bold: style.add_modifier.contains(Modifier::BOLD),
+                    pressed: is_pressed(key.code, state),
+                    modifier: is_modifier(key),
+                    finger_color: view.finger_guide.then(|| finger_color(key.finger)),
+                },
+            });
+        }
+    }
+    placements
 }
 
 fn render_keycap(

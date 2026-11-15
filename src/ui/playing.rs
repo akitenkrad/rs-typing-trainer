@@ -324,7 +324,7 @@ fn render_keyboard(frame: &mut Frame, app: &App, area: Rect, keyboard_style: Key
     } else {
         area
     };
-    crate::ui::keyboard::render(
+    crate::ui::keyboard::render_with_images(
         frame,
         keyboard_area,
         &geometry,
@@ -338,6 +338,10 @@ fn render_keyboard(frame: &mut Frame, app: &App, area: Rect, keyboard_style: Key
             },
             style: keyboard_style.as_str(),
             finger_guide: app.config.keyboard.finger_guide,
+        },
+        crate::ui::keyboard::KeyboardImageContext {
+            detection: &app.graphics,
+            cache: &app.keyboard_images,
         },
     );
     if app.config.mode.kind == crate::config::ModeKind::Unlock && area.height >= 3 {

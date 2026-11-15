@@ -18,6 +18,7 @@ use toml_edit::{DocumentMut, Formatted, Item, Value};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::error::{AppError, AppResult, ConfigError};
+use crate::graphics::GraphicsPreference;
 use crate::i18n::Lang;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,6 +86,8 @@ pub struct DisplayConfig {
     pub prompt_style: String,
     /// Amount of post-session coaching shown on the result screen.
     pub feedback: String,
+    /// Terminal image protocol selection.
+    pub graphics: GraphicsPreference,
 }
 
 /// `[display]` as written on disk. Older files use `prompt_size`
@@ -99,6 +102,8 @@ struct RawDisplayConfig {
     prompt_size: Option<String>,
     #[serde(default = "default_feedback")]
     feedback: String,
+    #[serde(default)]
+    graphics: GraphicsPreference,
 }
 
 impl From<RawDisplayConfig> for DisplayConfig {
@@ -111,6 +116,7 @@ impl From<RawDisplayConfig> for DisplayConfig {
         Self {
             prompt_style,
             feedback: raw.feedback,
+            graphics: raw.graphics,
         }
     }
 }
@@ -573,6 +579,7 @@ impl Default for DisplayConfig {
         Self {
             prompt_style: default_prompt_style(),
             feedback: default_feedback(),
+            graphics: GraphicsPreference::Auto,
         }
     }
 }
@@ -975,6 +982,16 @@ pub fn save_settings(path: &Path, config: &Config) -> AppResult<()> {
     set_string_preserving_decor(&mut document["general"]["lang"], language);
     set_prompt_style(&mut document, &config.display.prompt_style);
     set_string_preserving_decor(&mut document["display"]["feedback"], &config.display.feedback);
+    set_string_preserving_decor(
+        &mut document["display"]["graphics"],
+        match config.display.graphics {
+            GraphicsPreference::Auto => "auto",
+            GraphicsPreference::Kitty => "kitty",
+            GraphicsPreference::Sixel => "sixel",
+            GraphicsPreference::Iterm2 => "iterm2",
+            GraphicsPreference::Off => "off",
+        },
+    );
     set_string_preserving_decor(
         &mut document["session"]["error_mode"],
         match config.session.error_mode {

@@ -464,7 +464,7 @@ fn render_keyboard(frame: &mut Frame, app: &App, area: Rect) {
         fade: Default::default(),
         unlock: None,
     };
-    crate::ui::keyboard::render_heatmap(
+    crate::ui::keyboard::render_heatmap_with_images(
         frame,
         area,
         &physical,
@@ -474,6 +474,10 @@ fn render_keyboard(frame: &mut Frame, app: &App, area: Rect) {
             show: "full",
             style: &app.config.keyboard.style,
             finger_guide: true,
+        },
+        crate::ui::keyboard::KeyboardImageContext {
+            detection: &app.graphics,
+            cache: &app.keyboard_images,
         },
     );
     let label = match (app.analysis_keyboard_view, app.config.general.lang) {

@@ -26,6 +26,7 @@ cargo run --release
 rs-typing-trainer
 rs-typing-trainer --lang ja
 rs-typing-trainer --config path/to/config.toml
+rs-typing-trainer graphics
 rs-typing-trainer replay examples/records/dvorak-sentence-en.ttrec
 ```
 
@@ -40,6 +41,7 @@ rs-typing-trainer replay examples/records/dvorak-sentence-en.ttrec
 - [Record format and metrics](docs/records.md) — SQLite, `.ttrec`, and metric definitions
 - [Replay](docs/replay.md) — playback options, sample records and video recording
 - [Configuration reference](docs/configuration.md) — every TOML key, type and default
+- [Terminal graphics](docs/graphics.md) — detection, diagnostics and terminal support
 - [Development](docs/development.md) — building, source layout and tests
 
 Part of [rs-games](https://github.com/akitenkrad/rs-games), a collection of terminal games written in Rust.

@@ -24,6 +24,7 @@ cargo run --release
 rs-typing-trainer
 rs-typing-trainer --lang ja
 rs-typing-trainer --config path/to/config.toml
+rs-typing-trainer graphics
 rs-typing-trainer replay examples/records/dvorak-sentence-en.ttrec
 ```
 
@@ -38,6 +39,7 @@ rs-typing-trainer replay examples/records/dvorak-sentence-en.ttrec
 - [記録形式と指標](docs/records.ja.md) — SQLite，`.ttrec`，指標の定義
 - [リプレイ](docs/replay.ja.md) — 再生オプション，サンプル記録，動画の録画
 - [設定リファレンス](docs/configuration.ja.md) — すべての TOML キー，型，既定値
+- [端末画像](docs/graphics.ja.md) — 判定，診断，端末ごとの対応
 - [開発者向け情報](docs/development.ja.md) — ビルド，ソース構成，テスト
 
 [rs-games](https://github.com/akitenkrad/rs-games)（Rust 製ターミナルゲームのコレクション）に収録しています．

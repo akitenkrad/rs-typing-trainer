@@ -6,6 +6,7 @@ use std::time::Duration;
 use crate::analysis::Analysis;
 use crate::app::App;
 use crate::engine::session::{ItemOutcome, SessionLog};
+use crate::graphics::{GraphicsDetection, TerminalPixelSize};
 use crate::i18n::Lang;
 use crate::record::SessionRecord;
 
@@ -60,6 +61,14 @@ impl Replay {
 
     pub fn app(&self) -> &App {
         &self.app
+    }
+
+    pub fn set_graphics_detection(&mut self, graphics: GraphicsDetection) {
+        self.app.set_graphics_detection(graphics);
+    }
+
+    pub fn update_graphics_cell_pixels(&mut self, size: TerminalPixelSize) {
+        self.app.update_graphics_cell_pixels(size);
     }
 
     pub fn timing(&self) -> PlaybackTiming {

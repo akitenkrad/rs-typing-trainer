@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use rs_typing_trainer::config::{Config, ErrorMode, KeyFilter, ModeKind};
+use rs_typing_trainer::graphics::GraphicsPreference;
 
 #[test]
 fn reads_all_v2_training_sections() {
@@ -10,6 +11,7 @@ fn reads_all_v2_training_sections() {
 lang = "ja"
 [display]
 prompt_size = "xlarge"
+graphics = "sixel"
 [keyboard]
 layout = "colemak-dh-ansi"
 input_layout = "qwerty"
@@ -77,6 +79,7 @@ db_path = "/tmp/test-sessions.db"
 
     assert_eq!(config.session.duration_seconds, 90);
     assert_eq!(config.display.prompt_style, "large", "legacy prompt_size = \"xlarge\" reads as large");
+    assert_eq!(config.display.graphics, GraphicsPreference::Sixel);
     assert_eq!(config.session.item_timeout_seconds, 0);
     assert_eq!(config.session.error_mode, ErrorMode::Advance);
     assert_eq!(config.session.preview_items, 2);
@@ -111,6 +114,24 @@ db_path = "/tmp/test-sessions.db"
 #[test]
 fn auto_difficulty_defaults_to_enabled() {
     assert!(Config::default().practice.auto_difficulty);
+}
+
+#[test]
+fn graphics_defaults_to_auto_and_round_trips_all_values() {
+    assert_eq!(Config::default().display.graphics, GraphicsPreference::Auto);
+
+    for (value, expected) in [
+        ("auto", GraphicsPreference::Auto),
+        ("kitty", GraphicsPreference::Kitty),
+        ("sixel", GraphicsPreference::Sixel),
+        ("iterm2", GraphicsPreference::Iterm2),
+        ("off", GraphicsPreference::Off),
+    ] {
+        let config = Config::from_toml(&format!("[display]\ngraphics = \"{value}\"\n")).unwrap();
+        assert_eq!(config.display.graphics, expected, "{value}");
+    }
+
+    assert!(Config::from_toml("[display]\ngraphics = \"unknown\"\n").is_err());
 }
 
 #[test]

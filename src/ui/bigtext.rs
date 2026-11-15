@@ -161,6 +161,10 @@ pub fn window_by_widths(widths: &[u16], current: usize, max_width: u16) -> Range
 }
 
 impl BitmapFont {
+    pub(crate) fn glyph_bitmap(&self, character: char) -> Option<(u8, u8, &[u16])> {
+        self.glyphs.get(&character).map(|glyph| (glyph.width, self.height, glyph.rows.as_ref()))
+    }
+
     pub fn glyph_count(&self) -> usize {
         self.glyphs.len()
     }

@@ -8,6 +8,7 @@ use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::App;
+use crate::graphics::{GraphicsMode, GraphicsPreference};
 use crate::i18n::{Lang, Msg};
 use crate::ui::{left_inset, theme::Theme};
 
@@ -25,9 +26,10 @@ pub fn render(frame: &mut Frame, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(0),
-            Constraint::Length(9),
+            Constraint::Length(10),
             Constraint::Length(1),
-            Constraint::Length(5),
+            Constraint::Length(4),
+            Constraint::Length(1),
             Constraint::Min(0),
             Constraint::Length(2),
         ])
@@ -44,6 +46,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         (Msg::SettingShow, app.config.keyboard.show.as_str()),
         (Msg::SettingKeyboardStyle, app.config.keyboard.style.as_str()),
         (Msg::SettingPromptStyle, prompt_style_label(&app.config.display.prompt_style, lang)),
+        (Msg::SettingGraphics, graphics_preference_label(app.config.display.graphics)),
         (Msg::SettingLanguage, language),
         (
             Msg::SettingErrorMode,
@@ -86,15 +89,19 @@ pub fn render(frame: &mut Frame, app: &App) {
             .style(Style::default().fg(theme.muted)),
         left_inset(chunks[3]),
     );
+    frame.render_widget(
+        Paragraph::new(graphics_status(app, lang)).style(Style::default().fg(theme.muted)),
+        left_inset(chunks[4]),
+    );
     if let Some(error) = &app.settings_save_error {
         frame.render_widget(
             Paragraph::new(error.clone()).style(Style::default().fg(theme.mistype)),
-            left_inset(chunks[4]),
+            left_inset(chunks[5]),
         );
     }
     frame.render_widget(
         Paragraph::new(Msg::SettingsHint.text(lang)).style(Style::default().fg(theme.accent)),
-        left_inset(chunks[5]),
+        left_inset(chunks[6]),
     );
 }
 
@@ -137,24 +144,55 @@ fn setting_description(index: usize, lang: Lang) -> &'static str {
             "大きな文字（large）は字形で大きく描き，端末が小さいと自動で小さくなる（16→12ドット→通常の文字）．通常の文字（normal）は端末の文字のまま枠で囲み，字間を広げて描く．モード選択の[Z]でも切り替えられる．既定:large．"
         }
         (6, Lang::En) => {
-            "The interface language. Choose English or Japanese. This is separate from the practice language used by adaptive and sentence modes. Default: English."
+            "Terminal images. auto queries the terminal; kitty, sixel, and iterm2 force a protocol; off keeps text rendering only. Explicit modes still need a cell pixel size. Default: auto."
         }
         (6, Lang::Ja) => {
-            "画面の表示言語．English（英語）か Japanese（日本語）を選べます．adaptive や sentence で練習する言語とは別です．既定: English．"
+            "端末画像．auto は端末へ問い合わせ，kitty / sixel / iterm2 は方式を明示し，off は文字だけで描きます．明示した方式にも 1 セルの画素数が必要です．既定: auto．"
         }
         (7, Lang::En) => {
-            "How a mistyped character is handled. stop keeps the cursor in place until the correct key is typed. advance accepts the error and moves forward; Backspace can move back. Default: stop."
+            "The interface language. Choose English or Japanese. This is separate from the practice language used by adaptive and sentence modes. Default: English."
         }
         (7, Lang::Ja) => {
-            "誤入力した文字の扱い．stop は正しいキーを打つまでその位置で止まります．advance は誤入力を記録して先へ進み，Backspace で戻れます．既定: stop．"
+            "画面の表示言語．English（英語）か Japanese（日本語）を選べます．adaptive や sentence で練習する言語とは別です．既定: English．"
         }
         (8, Lang::En) => {
-            "Post-session coaching. summary shows the single clearest observation. detailed shows up to three observations. Nothing is shown when the evidence is insufficient. Default: summary."
+            "How a mistyped character is handled. stop keeps the cursor in place until the correct key is typed. advance accepts the error and moves forward; Backspace can move back. Default: stop."
         }
         (8, Lang::Ja) => {
+            "誤入力した文字の扱い．stop は正しいキーを打つまでその位置で止まります．advance は誤入力を記録して先へ進み，Backspace で戻れます．既定: stop．"
+        }
+        (9, Lang::En) => {
+            "Post-session coaching. summary shows the single clearest observation. detailed shows up to three observations. Nothing is shown when the evidence is insufficient. Default: summary."
+        }
+        (9, Lang::Ja) => {
             "練習後の気づき．summary は最も目立つ内容を 1 行，detailed は最大 3 行を示します．根拠が足りないときは表示しません．既定: summary．"
         }
         _ => "",
+    }
+}
+
+fn graphics_preference_label(value: GraphicsPreference) -> &'static str {
+    match value {
+        GraphicsPreference::Auto => "auto",
+        GraphicsPreference::Kitty => "kitty",
+        GraphicsPreference::Sixel => "sixel",
+        GraphicsPreference::Iterm2 => "iterm2",
+        GraphicsPreference::Off => "off",
+    }
+}
+
+fn graphics_status(app: &App, lang: Lang) -> String {
+    let label = match lang {
+        Lang::En => "Image",
+        Lang::Ja => "画像",
+    };
+    match (app.graphics.mode, app.graphics.cell_pixels) {
+        (GraphicsMode::Off, _) => format!("{label}: off ({})", app.graphics.reason.text(lang)),
+        (mode, Some(cell)) => match lang {
+            Lang::En => format!("{label}: {mode} (1 cell {}x{} px)", cell.width, cell.height),
+            Lang::Ja => format!("{label}: {mode}（1 セル {}×{} px）", cell.width, cell.height),
+        },
+        (mode, None) => format!("{label}: {mode}"),
     }
 }
 

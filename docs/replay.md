@@ -43,4 +43,4 @@ With [asciinema](https://asciinema.org):
 asciinema rec -c "rs-typing-trainer replay examples/records/dvorak-sentence-en.ttrec --exit-on-end" typing.cast
 ```
 
-For [VHS](https://github.com/charmbracelet/vhs), use a tape like [`examples/demo.tape`](../examples/demo.tape). The rs-games catalog recording deliberately omits `--exit-on-end`, waits for the replay duration plus 3.5 seconds, and leaves the completed final playing frame visible in the GIF.
+For [VHS](https://github.com/charmbracelet/vhs), use a tape like [`examples/demo.tape`](../examples/demo.tape). VHS starts ttyd with Sixel enabled, but its canvas recording does not capture the image layer even though xterm.js reports Sixel support, so add `--graphics off` to replay commands in VHS tapes. The rs-games catalog recording deliberately omits `--exit-on-end`, waits for the replay duration plus 3.5 seconds, and leaves the completed final playing frame visible in the GIF.

@@ -10,6 +10,7 @@ pub mod countdown;
 pub mod history;
 pub mod key_picker;
 pub mod keyboard;
+pub mod keyboard_image;
 pub mod mode_select;
 pub mod playing;
 pub mod prompt;

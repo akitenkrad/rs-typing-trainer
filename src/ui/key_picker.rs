@@ -67,7 +67,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             fade: Default::default(),
             unlock: None,
         };
-        crate::ui::keyboard::render(
+        crate::ui::keyboard::render_with_images(
             frame,
             chunks[1],
             &geometry,
@@ -77,6 +77,10 @@ pub fn render(frame: &mut Frame, app: &App) {
                 show: "full",
                 style: &app.config.keyboard.style,
                 finger_guide: false,
+            },
+            crate::ui::keyboard::KeyboardImageContext {
+                detection: &app.graphics,
+                cache: &app.keyboard_images,
             },
         );
     }

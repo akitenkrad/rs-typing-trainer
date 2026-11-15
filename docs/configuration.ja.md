@@ -2,7 +2,7 @@
 
 # 設定リファレンス
 
-`--config` を省略すると，`./config.toml`，`~/.config/rs-typing-trainer/config.toml` の順で最初に存在するファイルを読みます．どちらも無ければ，次の既定値を使います．`~/` で始まるパスは利用者のホームディレクトリを基準に展開します．コマンドラインの `--lang` は `general.lang` より優先されます．
+`--config` を省略すると，`./config.toml`，`~/.config/rs-typing-trainer/config.toml` の順で最初に存在するファイルを読みます．どちらも無ければ，次の既定値を使います．`~/` で始まるパスは利用者のホームディレクトリを基準に展開します．コマンドラインの `--lang` は `general.lang` より優先され，`--graphics MODE` は `display.graphics` より優先されます．
 
 対応するキーをすべて次の表にまとめます．「未設定」は，値を実行時に求めるか，同梱データ・既定の保存先を使うことを表します．`[game]`，`[characters]`，`[metrics]` は v1 互換キーです．新しい設定では v2 のキーを使ってください．
 
@@ -11,6 +11,7 @@
 | `general.lang` | `en` / `ja` | `"en"` | 表示言語． |
 | `display.prompt_style` | `large` / `normal` | `"large"` | 問題文の描き方．`large` は大きな字形（16ドット，入らなければ12ドット）で描き，どちらも入らなければ通常の文字にする．`normal` は端末の文字の大きさのまま，枠で囲んだカードに字間を広げて描く．モード選択画面の `Z` でも切り替えられる．旧キー `prompt_size` も読み込む（`normal` → `normal`，それ以外 → `large`）．アプリから保存すると `prompt_style` で書き戻す． |
 | `display.feedback` | `summary` / `detailed` | `"summary"` | セッション後の気づき．`summary` は最も目立つ内容を 1 行，`detailed` は最大 3 行を示す．根拠が足りないときは値や文言を補わない． |
+| `display.graphics` | `auto` / `kitty` / `sixel` / `iterm2` / `off` | `"auto"` | 端末画像の方式．`auto` は起動時に 1 回だけ端末へ問い合わせる．方式を明示しても，1 セルの画素数を取得できなければ使わない．標準入出力が端末でなければ常に `off`．tmux／screen 内の `auto` も passthrough を確かめられないため `off`．詳しくは[端末画像](graphics.ja.md)を参照． |
 | `keyboard.layout` | 文字列 | `"qwerty"` | 同梱または利用者定義の練習レイアウト名． |
 | `keyboard.input_layout` | 文字列 | `"same"` | 物理キーの読み替えに使う OS 側のレイアウト． |
 | `keyboard.geometry` | `ansi` / `jis` | `"ansi"` | キーボードの物理配置． |
@@ -78,4 +79,4 @@
 | `characters.allow_consecutive_same_word` | 真偽値 | `false` | v1 の random モード用設定． |
 | `metrics.db_path` | パス | `—` | v1 の DB 保存先．`storage.db_path` が優先． |
 
-設定画面では，レイアウト，入力レイアウト，物理配置，キーボード表示，キーボードの見た目，出題文字の大きさ，言語，誤入力の扱い，結果の気づきを変更し，コメントと関係のない TOML キーを保ちます．各値の動作は[訓練モード](modes.ja.md)，[訓練機能](training.ja.md)，[キーボードの配列](keyboard.ja.md)を参照してください．
+設定画面では，レイアウト，入力レイアウト，物理配置，キーボード表示，キーボードの見た目，出題文字の大きさ，端末画像，言語，誤入力の扱い，結果の気づきを変更し，コメントと関係のない TOML キーを保ちます．各値の動作は[訓練モード](modes.ja.md)，[訓練機能](training.ja.md)，[キーボードの配列](keyboard.ja.md)を参照してください．

@@ -43,4 +43,4 @@ cargo run --locked --example gen_sample_records
 asciinema rec -c "rs-typing-trainer replay examples/records/dvorak-sentence-en.ttrec --exit-on-end" typing.cast
 ```
 
-[VHS](https://github.com/charmbracelet/vhs) では [`examples/demo.tape`](../examples/demo.tape) のような tape を使います．rs-games の一覧用録画では `--exit-on-end` を付けず，再生時間に 3.5 秒を加えて待ち，GIF の最後に打ち終えたプレイ画面を残します．
+[VHS](https://github.com/charmbracelet/vhs) では [`examples/demo.tape`](../examples/demo.tape) のような tape を使います．VHS は Sixel を有効にして ttyd を起動しますが，xterm.js が Sixel 対応を返しても canvas の録画には画像レイヤーが写らないため，VHS の tape 内の replay には `--graphics off` を付けます．rs-games の一覧用録画では `--exit-on-end` を付けず，再生時間に 3.5 秒を加えて待ち，GIF の最後に打ち終えたプレイ画面を残します．

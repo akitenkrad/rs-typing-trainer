@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
 
+use crate::graphics::GraphicsPreference;
 use crate::i18n::Lang;
 
 #[derive(Debug, Default, Parser)]
@@ -17,6 +18,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub config: Option<PathBuf>,
 
+    /// Override terminal image protocol selection.
+    #[arg(long, global = true, value_enum)]
+    pub graphics: Option<GraphicsPreference>,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -25,6 +30,16 @@ pub struct Cli {
 pub enum Command {
     /// Start a typing session.
     Play,
+
+    /// Detect terminal image support or show a test image.
+    Graphics {
+        /// Show a temporary image-protocol test screen.
+        #[arg(long)]
+        demo: bool,
+        /// Maximum number of seconds to show the demo.
+        #[arg(long, default_value_t = 3)]
+        seconds: u64,
+    },
 
     /// Replay a typing session record.
     Replay {

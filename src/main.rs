@@ -15,10 +15,14 @@ use ratatui::crossterm::event::{
 };
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode, supports_keyboard_enhancement};
+use ratatui::layout::{Alignment, Rect, Size};
+use ratatui::widgets::{Paragraph, Wrap};
+use ratatui_image::{Image as TerminalImage, Resize};
 
 use rs_typing_trainer::app::App;
 use rs_typing_trainer::cli::{Cli, Command};
 use rs_typing_trainer::config::Config;
+use rs_typing_trainer::graphics::{GraphicsMode, TerminalPixelSize};
 use rs_typing_trainer::i18n::Msg;
 use rs_typing_trainer::layout::load_user_layouts;
 use rs_typing_trainer::record::{db, storage, ttrec};
@@ -45,7 +49,18 @@ fn main() -> ExitCode {
             paused,
             exit_on_end,
             print,
-        }) => match run_replay(file, *interval, *speed, *paused, *exit_on_end, *print, lang) {
+        }) => match run_replay(
+            &cli,
+            &home,
+            file,
+            ReplayOptions {
+                interval_ms: *interval,
+                speed: *speed,
+                paused: *paused,
+                exit_on_end: *exit_on_end,
+                print_summary: *print,
+            },
+        ) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("{}: {error}", Msg::AppTitle.text(lang));
@@ -73,6 +88,13 @@ fn main() -> ExitCode {
                 ExitCode::from(1)
             }
         },
+        Some(Command::Graphics { demo, seconds }) => match run_graphics_command(&cli, &home, *demo, *seconds) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("{}: {error}", Msg::AppTitle.text(lang));
+                ExitCode::from(1)
+            }
+        },
         None | Some(Command::Play) => match run_game(&cli, &home) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
@@ -83,32 +105,138 @@ fn main() -> ExitCode {
     }
 }
 
-fn run_replay(
-    file: &std::path::Path,
+fn run_graphics_command(cli: &Cli, home: &std::path::Path, demo: bool, seconds: u64) -> Result<()> {
+    let config = Config::load_from(home, cli.config.as_deref())?;
+    let lang = cli.effective_lang(config.general.lang);
+
+    if demo {
+        return run_graphics_demo(config.display.graphics, cli.graphics, lang, seconds);
+    }
+
+    let detected = rs_typing_trainer::graphics::detect_stdio(config.display.graphics, cli.graphics);
+    print_graphics_report(&detected, lang);
+    Ok(())
+}
+
+fn print_graphics_report(detected: &rs_typing_trainer::graphics::RuntimeDetection, lang: rs_typing_trainer::i18n::Lang) {
+    let (mode_label, cell_label, reason_label, present, absent) = match lang {
+        rs_typing_trainer::i18n::Lang::En => ("Mode", "Cell pixels", "Reason", "yes", "no"),
+        rs_typing_trainer::i18n::Lang::Ja => ("方式", "1 セルの画素数", "理由", "あり", "なし"),
+    };
+    let cell = detected
+        .result
+        .cell_pixels
+        .map_or_else(|| "-".to_owned(), |value| format!("{}x{} px", value.width, value.height));
+    println!("{mode_label}: {}", detected.result.mode);
+    println!("{cell_label}: {cell}");
+    println!("{reason_label}: {}", detected.result.reason.text(lang));
+    println!("TERM: {}", detected.environment.term.as_deref().unwrap_or("-"));
+    println!("TERM_PROGRAM: {}", detected.environment.term_program.as_deref().unwrap_or("-"));
+    println!("tmux: {}", if detected.environment.in_tmux { present } else { absent });
+    println!("screen: {}", if detected.environment.in_screen { present } else { absent });
+    println!("SSH: {}", if detected.environment.ssh { present } else { absent });
+}
+
+fn run_graphics_demo(
+    configured: rs_typing_trainer::graphics::GraphicsPreference,
+    override_mode: Option<rs_typing_trainer::graphics::GraphicsPreference>,
+    lang: rs_typing_trainer::i18n::Lang,
+    seconds: u64,
+) -> Result<()> {
+    let (mut terminal, mut terminal_guard, _) = init_terminal()?;
+    // Picker consumes all query replies here, before the first event::poll/read below.
+    let detected = rs_typing_trainer::graphics::detect_stdio(configured, override_mode);
+    terminal_guard.set_graphics_mode(detected.result.mode);
+    let result = (|| -> Result<()> {
+        let area = terminal.size()?;
+        let columns = area.width.saturating_sub(4).clamp(1, 40);
+        let rows = area.height.saturating_sub(5).clamp(1, 12);
+        let protocol = if let (Some(cell), Some(picker)) = (detected.result.cell_pixels, detected.picker.as_ref()) {
+            let image = rs_typing_trainer::graphics::make_demo_image(cell, columns, rows);
+            Some(picker.new_protocol(image, Size::new(columns, rows), Resize::Fit(None))?)
+        } else {
+            None
+        };
+        let reason = detected.result.reason.text(lang);
+        terminal.draw(|frame| {
+            let frame_area = frame.area();
+            if let Some(protocol) = protocol.as_ref() {
+                let total_height = rows.saturating_add(1);
+                let x = frame_area.x + frame_area.width.saturating_sub(columns) / 2;
+                let y = frame_area.y + frame_area.height.saturating_sub(total_height) / 2;
+                frame.render_widget(TerminalImage::new(protocol), Rect::new(x, y, columns, rows));
+                let status = match detected.result.cell_pixels {
+                    Some(cell) => format!("{} — {}x{} px", detected.result.mode, cell.width, cell.height),
+                    None => detected.result.mode.to_string(),
+                };
+                frame.render_widget(
+                    Paragraph::new(status).alignment(Alignment::Center),
+                    Rect::new(frame_area.x, y.saturating_add(rows), frame_area.width, 1),
+                );
+            } else {
+                let message = match lang {
+                    rs_typing_trainer::i18n::Lang::En => format!("Images are unavailable ({reason})"),
+                    rs_typing_trainer::i18n::Lang::Ja => format!("画像は使えません（{reason}）"),
+                };
+                frame.render_widget(Paragraph::new(message).alignment(Alignment::Center).wrap(Wrap { trim: true }), frame_area);
+            }
+        })?;
+
+        let deadline = Instant::now() + Duration::from_secs(seconds);
+        while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
+            if !event::poll(remaining)? {
+                break;
+            }
+            if let Event::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press
+            {
+                break;
+            }
+        }
+        Ok(())
+    })();
+    terminal_guard.restore()?;
+    result
+}
+
+#[derive(Clone, Copy)]
+struct ReplayOptions {
     interval_ms: Option<u64>,
     speed: f64,
     paused: bool,
     exit_on_end: bool,
     print_summary: bool,
-    lang: rs_typing_trainer::i18n::Lang,
-) -> Result<()> {
+}
+
+fn run_replay(cli: &Cli, home: &std::path::Path, file: &std::path::Path, options: ReplayOptions) -> Result<()> {
     let input = std::fs::File::open(file)?;
     let record = ttrec::read(std::io::BufReader::new(input))?;
-    if print_summary {
+    if options.print_summary {
         print!("{}", rs_typing_trainer::replay::format_summary(&record));
         return Ok(());
     }
-    let timing = interval_ms.map_or(rs_typing_trainer::replay::PlaybackTiming::Recorded { speed }, |milliseconds| {
-        rs_typing_trainer::replay::PlaybackTiming::Fixed {
+    let config = Config::load_from(home, cli.config.as_deref())?;
+    let lang = cli.effective_lang(config.general.lang);
+    let timing = options.interval_ms.map_or(
+        rs_typing_trainer::replay::PlaybackTiming::Recorded { speed: options.speed },
+        |milliseconds| rs_typing_trainer::replay::PlaybackTiming::Fixed {
             interval: Duration::from_millis(milliseconds),
-        }
-    });
-    let replay = rs_typing_trainer::replay::Replay::new_with_lang(record, timing, paused, exit_on_end, lang);
-    run_replay_tui(replay, lang)
+        },
+    );
+    let replay = rs_typing_trainer::replay::Replay::new_with_lang(record, timing, options.paused, options.exit_on_end, lang);
+    run_replay_tui(replay, lang, config.display.graphics, cli.graphics)
 }
 
-fn run_replay_tui(mut replay: rs_typing_trainer::replay::Replay, lang: rs_typing_trainer::i18n::Lang) -> Result<()> {
+fn run_replay_tui(
+    mut replay: rs_typing_trainer::replay::Replay,
+    lang: rs_typing_trainer::i18n::Lang,
+    configured_graphics: rs_typing_trainer::graphics::GraphicsPreference,
+    graphics_override: Option<rs_typing_trainer::graphics::GraphicsPreference>,
+) -> Result<()> {
     let (mut terminal, mut terminal_guard, release_events) = init_terminal()?;
+    let detected = rs_typing_trainer::graphics::detect_stdio(configured_graphics, graphics_override);
+    terminal_guard.set_graphics_mode(detected.result.mode);
+    replay.set_graphics_detection(detected.result);
     let started = Instant::now();
     let result = (|| -> Result<()> {
         loop {
@@ -116,29 +244,41 @@ fn run_replay_tui(mut replay: rs_typing_trainer::replay::Replay, lang: rs_typing
             if replay.should_exit() {
                 break;
             }
-            if event::poll(TICK)?
-                && let Event::Key(key) = event::read()?
-                && key.kind == KeyEventKind::Press
-            {
-                let elapsed = started.elapsed();
-                let should_exit = match key.code {
-                    KeyCode::Char(' ') => {
-                        replay.toggle_pause(elapsed);
-                        false
+            if event::poll(TICK)? {
+                match event::read()? {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                        let elapsed = started.elapsed();
+                        let should_exit = match key.code {
+                            KeyCode::Char(' ') => {
+                                replay.toggle_pause(elapsed);
+                                false
+                            }
+                            KeyCode::Right => {
+                                replay.step();
+                                false
+                            }
+                            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => true,
+                            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
+                            _ => false,
+                        };
+                        if should_exit {
+                            if release_events {
+                                wait_for_key_release(&key, RELEASE_WAIT_LIMIT)?;
+                            }
+                            break;
+                        }
                     }
-                    KeyCode::Right => {
-                        replay.step();
-                        false
+                    Event::Resize(_, _) => {
+                        if let Ok(size) = ratatui::crossterm::terminal::window_size() {
+                            replay.update_graphics_cell_pixels(TerminalPixelSize {
+                                columns: size.columns,
+                                rows: size.rows,
+                                width: size.width,
+                                height: size.height,
+                            });
+                        }
                     }
-                    KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => true,
-                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
-                    _ => false,
-                };
-                if should_exit {
-                    if release_events {
-                        wait_for_key_release(&key, RELEASE_WAIT_LIMIT)?;
-                    }
-                    break;
+                    _ => {}
                 }
             }
             replay.advance_to(started.elapsed());
@@ -229,6 +369,9 @@ fn run_game(cli: &Cli, home: &std::path::Path) -> Result<()> {
     }
 
     let (mut terminal, mut terminal_guard, release_events) = init_terminal()?;
+    let detected = rs_typing_trainer::graphics::detect_stdio(app.config.display.graphics, cli.graphics);
+    terminal_guard.set_graphics_mode(detected.result.mode);
+    app.set_graphics_detection(detected.result);
     app.release_events_supported = release_events;
     let result = run(&mut terminal, app);
     terminal_guard.restore()?;
@@ -244,13 +387,26 @@ where
         terminal.draw(|f| ui::render(f, &app))?;
 
         let timeout = TICK.checked_sub(last_tick.elapsed()).unwrap_or_else(|| Duration::from_millis(0));
-        if event::poll(timeout)?
-            && let Event::Key(key) = event::read()?
-        {
-            let was_quitting = app.should_quit;
-            app.handle_key_at(key, Instant::now());
-            if !was_quitting && app.should_quit && app.release_events_supported && key.kind == KeyEventKind::Press {
-                wait_for_key_release(&key, RELEASE_WAIT_LIMIT)?;
+        if event::poll(timeout)? {
+            match event::read()? {
+                Event::Key(key) => {
+                    let was_quitting = app.should_quit;
+                    app.handle_key_at(key, Instant::now());
+                    if !was_quitting && app.should_quit && app.release_events_supported && key.kind == KeyEventKind::Press {
+                        wait_for_key_release(&key, RELEASE_WAIT_LIMIT)?;
+                    }
+                }
+                Event::Resize(_, _) => {
+                    if let Ok(size) = ratatui::crossterm::terminal::window_size() {
+                        app.update_graphics_cell_pixels(TerminalPixelSize {
+                            columns: size.columns,
+                            rows: size.rows,
+                            width: size.width,
+                            height: size.height,
+                        });
+                    }
+                }
+                _ => {}
             }
         }
         let now = Instant::now();
@@ -304,6 +460,7 @@ fn wait_for_key_release(pressed: &ratatui::crossterm::event::KeyEvent, limit: Du
 }
 
 trait CleanupActions {
+    fn delete_kitty_images(&mut self) -> io::Result<()>;
     fn pop_keyboard_enhancement(&mut self) -> io::Result<()>;
     fn drain_input(&mut self) -> io::Result<()>;
     fn leave_screen_and_show_cursor(&mut self) -> io::Result<()>;
@@ -313,6 +470,12 @@ trait CleanupActions {
 struct CrosstermCleanup;
 
 impl CleanupActions for CrosstermCleanup {
+    fn delete_kitty_images(&mut self) -> io::Result<()> {
+        let mut stdout = io::stdout();
+        stdout.write_all(b"\x1b_Ga=d,d=A\x1b\\")?;
+        stdout.flush()
+    }
+
     fn pop_keyboard_enhancement(&mut self) -> io::Result<()> {
         // Kitty's CSI `<u` pops the current keyboard-enhancement flags.
         let mut stdout = io::stdout();
@@ -347,6 +510,7 @@ struct TerminalGuard<C: CleanupActions> {
     raw_active: bool,
     enhancement_active: bool,
     screen_active: bool,
+    graphics_mode: GraphicsMode,
     restored: bool,
 }
 
@@ -357,19 +521,25 @@ impl<C: CleanupActions> TerminalGuard<C> {
             raw_active,
             enhancement_active: false,
             screen_active: false,
+            graphics_mode: GraphicsMode::Off,
             restored: false,
         }
     }
 
     #[cfg(test)]
-    fn for_test(cleanup: C, raw_active: bool, enhancement_active: bool, screen_active: bool) -> Self {
+    fn for_test(cleanup: C, raw_active: bool, enhancement_active: bool, screen_active: bool, graphics_mode: GraphicsMode) -> Self {
         Self {
             cleanup,
             raw_active,
             enhancement_active,
             screen_active,
+            graphics_mode,
             restored: false,
         }
+    }
+
+    fn set_graphics_mode(&mut self, graphics_mode: GraphicsMode) {
+        self.graphics_mode = graphics_mode;
     }
 
     fn restore(&mut self) -> io::Result<()> {
@@ -378,6 +548,9 @@ impl<C: CleanupActions> TerminalGuard<C> {
         }
         self.restored = true;
         let mut first_error = None;
+        if self.screen_active && self.graphics_mode == GraphicsMode::Kitty {
+            remember_cleanup_error(&mut first_error, self.cleanup.delete_kitty_images());
+        }
         if self.enhancement_active {
             remember_cleanup_error(&mut first_error, self.cleanup.pop_keyboard_enhancement());
             remember_cleanup_error(&mut first_error, self.cleanup.drain_input());
@@ -424,6 +597,7 @@ mod terminal_cleanup_tests {
     use ratatui::crossterm::terminal::LeaveAlternateScreen;
 
     use super::{CleanupActions, TerminalGuard};
+    use rs_typing_trainer::graphics::GraphicsMode;
 
     #[derive(Clone)]
     struct RecordingCleanup {
@@ -432,6 +606,11 @@ mod terminal_cleanup_tests {
     }
 
     impl CleanupActions for RecordingCleanup {
+        fn delete_kitty_images(&mut self) -> io::Result<()> {
+            self.output.borrow_mut().extend_from_slice(b"\x1b_Ga=d,d=A\x1b\\");
+            Ok(())
+        }
+
         fn pop_keyboard_enhancement(&mut self) -> io::Result<()> {
             self.output.borrow_mut().extend_from_slice(b"\x1b[<u");
             if self.fail_pop { Err(io::Error::other("pop failed")) } else { Ok(()) }
@@ -460,7 +639,7 @@ mod terminal_cleanup_tests {
             output: output.clone(),
             fail_pop: false,
         };
-        let mut guard = TerminalGuard::for_test(cleanup, true, true, true);
+        let mut guard = TerminalGuard::for_test(cleanup, true, true, true, GraphicsMode::Off);
 
         guard.restore().unwrap();
 
@@ -481,7 +660,7 @@ mod terminal_cleanup_tests {
             output: output.clone(),
             fail_pop: false,
         };
-        let mut guard = TerminalGuard::for_test(cleanup, true, true, true);
+        let mut guard = TerminalGuard::for_test(cleanup, true, true, true, GraphicsMode::Off);
 
         guard.restore().unwrap();
 
@@ -505,7 +684,7 @@ mod terminal_cleanup_tests {
         };
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _guard = TerminalGuard::for_test(cleanup, true, true, true);
+            let _guard = TerminalGuard::for_test(cleanup, true, true, true, GraphicsMode::Off);
             panic!("test panic");
         }));
 
@@ -521,7 +700,7 @@ mod terminal_cleanup_tests {
             output: output.clone(),
             fail_pop: true,
         };
-        let mut guard = TerminalGuard::for_test(cleanup, true, true, true);
+        let mut guard = TerminalGuard::for_test(cleanup, true, true, true, GraphicsMode::Off);
 
         assert!(guard.restore().is_err());
         let length_after_first_restore = output.borrow().len();
@@ -530,6 +709,29 @@ mod terminal_cleanup_tests {
         let output = output.borrow();
         assert_eq!(output.len(), length_after_first_restore);
         assert!(find_bytes(&output, b"<drain>") < find_bytes(&output, b"<raw-off>"), "{output:?}");
+    }
+
+    #[test]
+    fn cleanup_deletes_images_only_for_kitty_and_before_other_terminal_cleanup() {
+        for (mode, expected) in [(GraphicsMode::Kitty, true), (GraphicsMode::Sixel, false), (GraphicsMode::Off, false)] {
+            let output = Rc::new(RefCell::new(Vec::new()));
+            let cleanup = RecordingCleanup {
+                output: output.clone(),
+                fail_pop: false,
+            };
+            let mut guard = TerminalGuard::for_test(cleanup, true, true, true, mode);
+
+            guard.restore().unwrap();
+
+            let output = output.borrow();
+            let sequence = b"\x1b_Ga=d,d=A\x1b\\";
+            let delete = output.windows(sequence.len()).position(|window| window == sequence);
+            assert_eq!(delete.is_some(), expected, "{mode:?}: {output:?}");
+            if let Some(delete) = delete {
+                assert!(delete < find_bytes(&output, b"\x1b[<u"), "{output:?}");
+                assert!(delete < find_bytes(&output, b"\x1b[?1049l"), "{output:?}");
+            }
+        }
     }
 
     fn find_bytes(haystack: &[u8], needle: &[u8]) -> usize {

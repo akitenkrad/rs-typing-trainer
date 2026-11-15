@@ -1,6 +1,7 @@
 //! Application state machine. Owns the current screen, the optional
 //! in-progress game, and the last completed result.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -23,6 +24,7 @@ use crate::engine::session::{InputEffect, ItemLog, KeystrokeKind, KeystrokeLog, 
 use crate::error::AppResult;
 use crate::game::input::{InputAction, classify};
 use crate::game::word::{ExitKind, Word, WordSlot, WordState};
+use crate::graphics::{GraphicsDetection, GraphicsPreference, TerminalPixelSize, update_cell_pixels};
 use crate::i18n::{Lang, Msg};
 use crate::layout::{KeyboardLayout, builtin_layout, builtin_layout_names, remap_char};
 use crate::metrics::stats::{GameResult, LiveMetrics};
@@ -36,6 +38,7 @@ use crate::practice::session_variants::{BurstSeries, EnduranceComparison};
 use crate::practice::unlock::{UnlockState, apply_result, initial_keys, mode_config, unlock_sequence};
 use crate::record::SessionRecord;
 use crate::record::db::{self, SessionSummary};
+use crate::ui::keyboard_image::KeyboardImageCache;
 use unicode_segmentation::UnicodeSegmentation;
 
 /// Slide-in / slide-out duration for word transitions. During these phases
@@ -120,6 +123,9 @@ impl HistorySort {
 pub struct App {
     pub screen: Screen,
     pub config: Config,
+    /// Image protocol selected at startup.
+    pub graphics: GraphicsDetection,
+    pub(crate) keyboard_images: RefCell<KeyboardImageCache>,
     pub game: Option<GameState>,
     pub last_result: Option<GameResult>,
     pub legacy_wpm: Option<f64>,
@@ -260,6 +266,8 @@ impl App {
         Self {
             screen: Screen::Title,
             config,
+            graphics: GraphicsDetection::default(),
+            keyboard_images: RefCell::new(KeyboardImageCache::new()),
             game: None,
             last_result: None,
             legacy_wpm: None,
@@ -516,6 +524,20 @@ impl App {
     pub fn with_release_events(mut self, supported: bool) -> Self {
         self.release_events_supported = supported;
         self
+    }
+
+    pub fn set_graphics_detection(&mut self, graphics: GraphicsDetection) {
+        self.graphics = graphics;
+        self.keyboard_images.get_mut().clear();
+    }
+
+    /// Refresh cell pixels from a resize ioctl without querying terminal capabilities again.
+    pub fn update_graphics_cell_pixels(&mut self, size: TerminalPixelSize) {
+        let next = update_cell_pixels(self.graphics.cell_pixels, size);
+        if self.graphics.cell_pixels != next {
+            self.graphics.cell_pixels = next;
+            self.keyboard_images.get_mut().clear();
+        }
     }
 
     pub fn with_config_path(mut self, path: PathBuf) -> Self {
@@ -1203,7 +1225,7 @@ impl App {
                 self.settings_selected = self.settings_selected.saturating_sub(1);
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.settings_selected = (self.settings_selected + 1).min(8);
+                self.settings_selected = (self.settings_selected + 1).min(9);
             }
             KeyCode::Left | KeyCode::Char('h') => self.cycle_setting(-1),
             KeyCode::Right | KeyCode::Char('l') => self.cycle_setting(1),
@@ -1269,18 +1291,32 @@ impl App {
                 direction,
             ),
             6 => {
+                self.config.display.graphics = match (self.config.display.graphics, direction.is_positive()) {
+                    (GraphicsPreference::Auto, true) => GraphicsPreference::Kitty,
+                    (GraphicsPreference::Kitty, true) => GraphicsPreference::Sixel,
+                    (GraphicsPreference::Sixel, true) => GraphicsPreference::Iterm2,
+                    (GraphicsPreference::Iterm2, true) => GraphicsPreference::Off,
+                    (GraphicsPreference::Off, true) => GraphicsPreference::Auto,
+                    (GraphicsPreference::Auto, false) => GraphicsPreference::Off,
+                    (GraphicsPreference::Kitty, false) => GraphicsPreference::Auto,
+                    (GraphicsPreference::Sixel, false) => GraphicsPreference::Kitty,
+                    (GraphicsPreference::Iterm2, false) => GraphicsPreference::Sixel,
+                    (GraphicsPreference::Off, false) => GraphicsPreference::Iterm2,
+                };
+            }
+            7 => {
                 self.config.general.lang = match self.config.general.lang {
                     Lang::En => Lang::Ja,
                     Lang::Ja => Lang::En,
                 };
             }
-            7 => {
+            8 => {
                 self.config.session.error_mode = match self.config.session.error_mode {
                     crate::config::ErrorMode::Stop => crate::config::ErrorMode::Advance,
                     crate::config::ErrorMode::Advance => crate::config::ErrorMode::Stop,
                 };
             }
-            8 => cycle_string(
+            9 => cycle_string(
                 &mut self.config.display.feedback,
                 &["summary".to_owned(), "detailed".to_owned()],
                 direction,

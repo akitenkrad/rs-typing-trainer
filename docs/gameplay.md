@@ -6,7 +6,13 @@
 
 Run `rs-typing-trainer` or `cargo run --release` to open the title screen. The default interface language is English; use `--lang ja` for Japanese. An explicit `--config PATH` takes the place of the normal configuration search.
 
-Running the program without a subcommand is the same as `rs-typing-trainer play`. `replay FILE` plays a portable record, `stats` prints saved-session analysis, and `export SESSION_ID [-o FILE]` writes a v2 session as `.ttrec`, using standard output when `-o` is omitted. Replay reads only its record file; see [Replay](replay.md).
+Running the program without a subcommand is the same as `rs-typing-trainer play`. `replay FILE` plays a portable record, `stats` prints saved-session analysis, `graphics` reports terminal-image support, and `export SESSION_ID [-o FILE]` writes a v2 session as `.ttrec`, using standard output when `-o` is omitted. Replay reads only its record file; see [Replay](replay.md).
+
+## Terminal graphics check
+
+`rs-typing-trainer graphics` prints the selected protocol, cell pixel size, reason, `TERM`, `TERM_PROGRAM`, and the presence of tmux, screen, and SSH. It follows `--lang`, reads `display.graphics`, and accepts the global `--graphics auto|kitty|sixel|iterm2|off` override.
+
+`rs-typing-trainer graphics --demo [--seconds N]` opens the alternate screen and shows a roughly 40×12-cell gradient, one-pixel grid, and corner marks with the selected protocol. It closes after three seconds by default or on a key press. If images are unavailable, it shows the reason as text. This diagnostic does not change the normal game rendering yet; see [Terminal graphics](graphics.md).
 
 ## Controls
 
@@ -98,7 +104,7 @@ If `--config` is omitted, rs-typing-trainer reads the first existing file from `
 
 `item_timeout_seconds = 0` disables the per-item timer and its bar. Sentence mode always disables that timer. An empty `mode.keys` value means no filtering in `words`, `romaji`, and `sentence`; `random` and `ngram` ask for keys on the key-selection screen.
 
-The settings screen edits layout, input layout, geometry, keyboard visibility (including `auto`), keyboard appearance, prompt text (large or normal), language, error mode and result feedback. It preserves existing comments and unrelated TOML values. See the [configuration reference](configuration.md) for every key and default, [Training tools](training.md) for training behavior, and [Keyboard layouts and display](keyboard.md) for remapping, custom layouts and key-release support.
+The settings screen edits layout, input layout, geometry, keyboard visibility (including `auto`), keyboard appearance, prompt text (large or normal), terminal graphics, language, error mode and result feedback. It preserves existing comments and unrelated TOML values. See the [configuration reference](configuration.md) for every key and default, [Training tools](training.md) for training behavior, and [Keyboard layouts and display](keyboard.md) for remapping, custom layouts and key-release support.
 
 ## If the terminal remains in a bad state
 

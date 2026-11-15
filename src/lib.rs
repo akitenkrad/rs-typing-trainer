@@ -10,6 +10,7 @@ pub mod data;
 pub mod engine;
 pub mod error;
 pub mod game;
+pub mod graphics;
 pub mod i18n;
 pub mod layout;
 pub mod metrics;

@@ -13,6 +13,7 @@ use rs_typing_trainer::cli::{Cli, Command};
 use rs_typing_trainer::config::Config;
 use rs_typing_trainer::engine::item::Item;
 use rs_typing_trainer::engine::session::Session;
+use rs_typing_trainer::graphics::{CellPixels, GraphicsDetection, GraphicsMode, GraphicsReason, TerminalPixelSize};
 use rs_typing_trainer::i18n::Lang;
 use rs_typing_trainer::record::SessionRecord;
 use rs_typing_trainer::replay::{PlaybackTiming, Replay, format_summary};
@@ -148,6 +149,26 @@ fn fixed_interval_pause_step_and_exit_on_end_are_deterministic() {
     replay.step();
     assert!(replay.is_finished());
     assert!(replay.should_exit());
+}
+
+#[test]
+fn replay_accepts_graphics_detection_and_updates_cell_pixels_on_resize() {
+    let mut replay = Replay::new(record(), PlaybackTiming::Recorded { speed: 1.0 }, false, false);
+    replay.set_graphics_detection(GraphicsDetection {
+        mode: GraphicsMode::Kitty,
+        cell_pixels: Some(CellPixels::new(9, 20)),
+        reason: GraphicsReason::Explicit(GraphicsMode::Kitty),
+    });
+    assert_eq!(replay.app().graphics.mode, GraphicsMode::Kitty);
+    assert_eq!(replay.app().graphics.cell_pixels, Some(CellPixels::new(9, 20)));
+
+    replay.update_graphics_cell_pixels(TerminalPixelSize {
+        columns: 100,
+        rows: 40,
+        width: 1_000,
+        height: 800,
+    });
+    assert_eq!(replay.app().graphics.cell_pixels, Some(CellPixels::new(10, 20)));
 }
 
 #[test]

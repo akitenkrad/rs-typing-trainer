@@ -8,6 +8,7 @@ use rs_typing_trainer::cli::{Cli, Command};
 use rs_typing_trainer::config::Config;
 use rs_typing_trainer::engine::item::Item;
 use rs_typing_trainer::engine::session::Session;
+use rs_typing_trainer::graphics::GraphicsPreference;
 use rs_typing_trainer::i18n::Lang;
 use rs_typing_trainer::record::{SessionRecord, db};
 use tempfile::TempDir;
@@ -125,6 +126,34 @@ fn command_line_language_takes_precedence_over_config() {
 
     assert_eq!(cli.effective_lang(Lang::Ja), Lang::En);
     assert_eq!(Cli::default().effective_lang(Lang::Ja), Lang::Ja);
+}
+
+#[test]
+fn parses_global_graphics_override_and_graphics_demo() {
+    let cli = Cli::try_parse_from(["rs-typing-trainer", "--graphics", "kitty", "graphics", "--demo", "--seconds", "5"]).unwrap();
+
+    assert_eq!(cli.graphics, Some(GraphicsPreference::Kitty));
+    assert_eq!(cli.command, Some(Command::Graphics { demo: true, seconds: 5 }));
+}
+
+#[test]
+fn graphics_subcommand_reports_off_when_stdio_is_not_a_terminal() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join("config.toml");
+    std::fs::write(&config_path, "[display]\ngraphics = \"auto\"\n").unwrap();
+    let output = ProcessCommand::new(env!("CARGO_BIN_EXE_rs-typing-trainer"))
+        .args(["--lang", "ja", "--config", config_path.to_str().unwrap(), "graphics"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("方式: off"), "{stdout}");
+    assert!(stdout.contains("標準入出力が端末ではありません"), "{stdout}");
+    assert!(stdout.contains("TERM:"), "{stdout}");
+    assert!(stdout.contains("TERM_PROGRAM:"), "{stdout}");
+    assert!(stdout.contains("tmux:"), "{stdout}");
+    assert!(stdout.contains("SSH:"), "{stdout}");
 }
 
 #[test]

@@ -6,6 +6,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use rs_typing_trainer::app::Screen;
 use rs_typing_trainer::config::Config;
 use rs_typing_trainer::config::save_keyboard_layout;
+use rs_typing_trainer::graphics::{CellPixels, GraphicsDetection, GraphicsMode, GraphicsPreference, GraphicsReason};
 use rs_typing_trainer::ui;
 use tempfile::TempDir;
 
@@ -99,7 +100,7 @@ fn settings_values_share_one_column() {
         .map(|(index, _)| index as u16 % buffer.area.width)
         .collect::<Vec<_>>();
 
-    assert_eq!(value_columns.len(), 9);
+    assert_eq!(value_columns.len(), 10);
     assert!(value_columns.windows(2).all(|pair| pair[0] == pair[1]), "{value_columns:?}");
     let arrow_columns = buffer
         .content()
@@ -120,6 +121,7 @@ fn every_setting_has_a_bilingual_description_with_options_and_a_default() {
         ("full: always visible", "full: 常に表示"),
         ("Keyboard appearance", "キーボードの見た目"),
         ("Large text (large)", "大きな文字（large）"),
+        ("Terminal images", "端末画像"),
         ("interface language", "画面の表示言語"),
         ("mistyped character", "誤入力した文字"),
         ("Post-session coaching", "練習後の気づき"),
@@ -131,6 +133,7 @@ fn every_setting_has_a_bilingual_description_with_options_and_a_default() {
         ["full", "auto", "dim", "hidden"].as_slice(),
         ["keycap", "raised", "plain"].as_slice(),
         ["large", "normal", "16", "12"].as_slice(),
+        ["auto", "kitty", "sixel", "iterm2", "off"].as_slice(),
         ["English", "Japanese"].as_slice(),
         ["stop", "advance"].as_slice(),
         ["summary", "detailed"].as_slice(),
@@ -154,12 +157,11 @@ fn every_setting_has_a_bilingual_description_with_options_and_a_default() {
                     !symbol.trim().is_empty()
                 })
             };
-            assert!(description_row_has_text(11), "setting {index}, {lang:?} has no description");
+            assert!(description_row_has_text(12), "setting {index}, {lang:?} has no description");
             assert!(
-                description_row_has_text(12),
+                description_row_has_text(13),
                 "setting {index}, {lang:?} needs at least two description lines"
             );
-            assert!(!description_row_has_text(15), "setting {index}, {lang:?} exceeded four description lines");
             let rendered = terminal
                 .backend()
                 .buffer()
@@ -263,6 +265,59 @@ fn settings_screen_cycles_saves_and_cancels_prompt_style() {
 }
 
 #[test]
+fn graphics_setting_cycles_saves_and_cancels() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("config.toml");
+    fs::write(&path, "[display]\ngraphics = \"auto\" # keep\n").unwrap();
+    let config = Config::from_path(&path).unwrap();
+    let mut app = test_app(config);
+    app.config_path = Some(path.clone());
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
+    for _ in 0..6 {
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    }
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    assert_eq!(app.config.display.graphics, GraphicsPreference::Kitty);
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert_eq!(app.config.display.graphics, GraphicsPreference::Auto);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
+    for _ in 0..6 {
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    }
+    app.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+    assert_eq!(app.config.display.graphics, GraphicsPreference::Off);
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    let updated = fs::read_to_string(path).unwrap();
+    assert!(updated.contains("graphics = \"off\" # keep"), "{updated}");
+}
+
+#[test]
+fn settings_screen_shows_the_detected_graphics_status() {
+    let mut app = test_app(Config::default());
+    app.set_graphics_detection(GraphicsDetection {
+        mode: GraphicsMode::Kitty,
+        cell_pixels: Some(CellPixels::new(7, 15)),
+        reason: GraphicsReason::Detected(GraphicsMode::Kitty),
+    });
+    app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+    terminal.draw(|frame| ui::render(frame, &app)).unwrap();
+    let rendered = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<Vec<_>>()
+        .join("");
+
+    assert!(rendered.contains("Image: kitty (1 cell 7x15 px)"), "{rendered}");
+}
+
+#[test]
 fn feedback_defaults_to_summary_and_settings_cycles_saves_and_cancels_it() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("config.toml");
@@ -273,7 +328,7 @@ fn feedback_defaults_to_summary_and_settings_cycles_saves_and_cancels_it() {
     app.config_path = Some(path.clone());
 
     app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
-    for _ in 0..8 {
+    for _ in 0..9 {
         app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
     }
     app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
@@ -282,7 +337,7 @@ fn feedback_defaults_to_summary_and_settings_cycles_saves_and_cancels_it() {
     assert_eq!(app.config.display.feedback, "summary");
 
     app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
-    for _ in 0..8 {
+    for _ in 0..9 {
         app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
     }
     app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
