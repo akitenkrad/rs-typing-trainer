@@ -1,5 +1,6 @@
 //! Incremental kana-to-romaji judge.
 
+use std::collections::BTreeMap;
 use std::collections::HashSet;
 
 use crate::engine::judge::{Judge, JudgeResult};
@@ -70,6 +71,19 @@ impl RomajiJudge {
         !self.moras.is_empty() && self.active.iter().any(|route| route.mora_index == self.moras.len())
     }
 
+    pub fn moras(&self) -> &[String] {
+        &self.moras
+    }
+
+    /// Accepted spelling variants for each mora in this reading's context.
+    pub fn spelling_variants(&self) -> Vec<(String, Vec<String>)> {
+        self.moras
+            .iter()
+            .enumerate()
+            .map(|(index, mora)| (mora.clone(), self.variants_for(index)))
+            .collect()
+    }
+
     pub fn has_spelling_using(&self, allowed: &HashSet<char>) -> bool {
         self.accepted_spellings(4096)
             .iter()
@@ -100,6 +114,48 @@ impl RomajiJudge {
             }
         }
         results
+    }
+
+    /// Split one accepted spelling into the spelling chosen for each mora.
+    pub fn spelling_segments(&self, spelling: &str) -> Option<Vec<(String, String)>> {
+        self.spelling_segments_from(0, spelling)
+    }
+
+    /// Expand the reading using the player's most-used spelling for each mora.
+    pub fn preferred_spelling(&self, preferences: &BTreeMap<String, String>) -> String {
+        let candidates = self.accepted_spellings(4_096);
+        let mut best = candidates.first().cloned().unwrap_or_default();
+        let mut best_score = 0_usize;
+        for candidate in candidates {
+            let score = self
+                .spelling_segments(&candidate)
+                .unwrap_or_default()
+                .iter()
+                .filter(|(mora, spelling)| preferences.get(mora) == Some(spelling))
+                .count();
+            if score > best_score {
+                best = candidate;
+                best_score = score;
+            }
+        }
+        best
+    }
+
+    fn spelling_segments_from(&self, mora_index: usize, remaining: &str) -> Option<Vec<(String, String)>> {
+        if mora_index == self.moras.len() {
+            return remaining.is_empty().then(Vec::new);
+        }
+        for variant in self.variants_for(mora_index) {
+            let Some(rest) = remaining.strip_prefix(&variant) else {
+                continue;
+            };
+            if let Some(mut tail) = self.spelling_segments_from(mora_index + 1, rest) {
+                let mut segments = vec![(self.moras[mora_index].clone(), variant)];
+                segments.append(&mut tail);
+                return Some(segments);
+            }
+        }
+        None
     }
 
     fn routes_for(&self, index: usize) -> Vec<Route> {

@@ -47,9 +47,13 @@ sentences_ja = "/tmp/test-ja-sentences.tsv"
 daily_rotation = false
 core_ratio = 0.7
 weekly_theme = false
+auto_difficulty = false
 [analysis]
 pause_ms = 1750
 shrinkage_k = 12.5
+half_life_days = 21.0
+min_transition_n = 7
+spelling_suggestions = false
 [adaptive]
 error_weight = 420.0
 drill_ratio = 0.25
@@ -88,8 +92,12 @@ db_path = "/tmp/test-sessions.db"
     assert!(!config.practice.daily_rotation);
     assert_eq!(config.practice.core_ratio, 0.7);
     assert!(!config.practice.weekly_theme);
+    assert!(!config.practice.auto_difficulty);
     assert_eq!(config.analysis.pause_ms, 1_750);
     assert_eq!(config.analysis.shrinkage_k, 12.5);
+    assert_eq!(config.analysis.half_life_days, 21.0);
+    assert_eq!(config.analysis.min_transition_n, 7);
+    assert!(!config.analysis.spelling_suggestions);
     assert_eq!(config.adaptive.error_weight, Some(420.0));
     assert_eq!(config.adaptive.drill_ratio, 0.25);
     assert!(config.pacer.enabled);
@@ -98,6 +106,11 @@ db_path = "/tmp/test-sessions.db"
     assert_eq!(config.unlock.target_wpm, 40.0);
     assert_eq!(config.gate.min_accuracy, 0.95);
     assert_eq!(config.storage.db_path, Some(PathBuf::from("/tmp/test-sessions.db")));
+}
+
+#[test]
+fn auto_difficulty_defaults_to_enabled() {
+    assert!(Config::default().practice.auto_difficulty);
 }
 
 #[test]
@@ -112,6 +125,13 @@ fn v1_fixture_is_mapped_to_v2() {
     assert_eq!(config.mode.random.word_length, 3);
     assert!(config.mode.random.allow_repeat);
     assert!(!config.mode.random.allow_consecutive_same_word);
+    assert_eq!(config.analysis.min_transition_n, 5);
+    assert!(config.analysis.spelling_suggestions);
+}
+
+#[test]
+fn analysis_half_life_must_be_positive() {
+    assert!(Config::from_toml("[analysis]\nhalf_life_days = 0.0\n").is_err());
 }
 
 #[test]

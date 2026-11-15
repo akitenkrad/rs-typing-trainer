@@ -50,11 +50,17 @@ pub enum Command {
     /// Show typing statistics.
     Stats {
         /// Emit machine-readable CSV for one table.
-        #[arg(long, value_enum, conflicts_with = "summary")]
+        #[arg(long, value_enum, conflicts_with_all = ["summary", "grades", "coach"])]
         csv: Option<StatsCsv>,
         /// Print the same rule-based summary shown in the first analysis tab.
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["grades", "coach"])]
         summary: bool,
+        /// Print absolute S-to-G skill grades.
+        #[arg(long)]
+        grades: bool,
+        /// Print the same personalized report shown in the Coach tab.
+        #[arg(long, conflicts_with_all = ["summary", "grades"])]
+        coach: bool,
         /// Include sessions on or after this date (YYYY-MM-DD).
         #[arg(long)]
         since: Option<String>,
@@ -79,6 +85,20 @@ pub enum StatsCsv {
     Keys,
     Bigrams,
     Fingers,
+    Errors,
+    Confusion,
+    Kana,
+    Spelling,
+    Words,
+    Form,
+    Curve,
+    Changepoints,
+    Regressions,
+    Habits,
+    Prescriptions,
+    Reviews,
+    Grades,
+    GradeHistory,
 }
 
 impl Cli {

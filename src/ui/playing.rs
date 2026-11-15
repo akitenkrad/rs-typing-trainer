@@ -256,7 +256,17 @@ fn render_adaptive_focus(frame: &mut Frame, app: &App, theme: &Theme, area: Rect
         .adaptive_focus
         .iter()
         .take(5)
-        .map(|row| format!("{}→{}", row.from, row.to))
+        .map(|row| {
+            format!(
+                "{}→{} ({})",
+                row.from,
+                row.to,
+                row.reason(match app.config.general.lang {
+                    crate::i18n::Lang::En => "en",
+                    crate::i18n::Lang::Ja => "ja",
+                })
+            )
+        })
         .collect::<Vec<_>>()
         .join("  ");
     frame.render_widget(

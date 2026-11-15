@@ -6,18 +6,26 @@ rs-typing-trainer separates practice from measurement. Practice deliberately cha
 
 ## Adaptive weak-transition practice
 
-`adaptive` estimates each observed two-key transition with the same shrinkage estimator used by the analysis screen. This prevents a transition with only one or two samples from dominating the practice plan. It assigns the transition the cost
+`adaptive` estimates each observed two-key transition with the same recent shrinkage model used by the analysis screen. For every candidate it draws one log-IKI value from the normal posterior and one error rate from the Beta posterior (Thompson sampling), then assigns the sampled cost
 
 ```text
-frequency × max(0, estimated IKI − target IKI)
-  + error weight × frequency × estimated error rate
+frequency × (max(0, sampled IKI − target IKI)
+  + error weight × sampled error rate)
 ```
 
 Frequency comes from the bundled word corpus after the daily deck has been selected. `[adaptive] lang` selects English words or Japanese romaji readings independently of the interface language. The target IKI is the median estimated IKI across the user's observed transitions. The default error weight is twice that median IKI, treating one error as two average keystrokes of time. These are initial values, not universal training thresholds.
 
-Prompts are drawn in proportion to cost. The initial mix is 70% real words containing the selected transition and 30% repeated transition drills. The five highest-cost transitions appear as “Today's focus”. The initial `max_share = 0.4` keeps one transition from occupying more than 40% of the generated set and distributes the remainder over the other focus transitions. A transition used on the previous day receives half weight so that one weakness does not occupy every day. When fewer than 50 transition types have keystroke records, the mode explains that more records are needed and behaves as ordinary `words` practice.
+Prompts are drawn in proportion to cost. Three through five transitions form “Today's focus”, each with a localized reason. Focus transitions are interleaved rather than placed consecutively. The initial mix is 70% real words and 30% repeated-transition drills. `max_share = 0.4` limits one transition to 40% of the generated set. A transition that has improved throughout prescriptions in the latest 14 days receives 1.2 times its score; one unchanged after at least three prescriptions receives 0.6 times. A transition used on the previous day still receives half weight. When fewer than 50 transition types have keystroke records, the mode explains that more records are needed and behaves as ordinary `words` practice.
+
+A mastered focus transition enters review with a one-day interval. Retaining the target multiplies the interval by 2.5 (1, 2.5, 6.25 days, and so on); a regression resets it to one day. At most two due reviews occupy the focus set. Applying spaced repetition to motor transitions is an unverified hypothesis, so prescriptions measure transfer to real words before treating it as useful.
+
+Each focus prescription stores up to three untreated controls matched on transition class, corpus-frequency quartile and starting estimate within ±20%. Active controls cannot become focus targets. Evaluation uses real-word keystrokes only, never repeated drills. After at least three prescription sessions and effective count 10 for target and controls, `effect = target log-change - mean control log-change`. Its standard error combines baseline and current posterior variances. An effect no greater than `log(0.95)` with `z <= -1.64` is effective; an absolute effect below `log(1.03)` is ineffective. Other complete cases remain pending, and an unresolved prescription closes as insufficient data after 14 days.
+
+With `practice.auto_difficulty = true`, the median accuracy of the latest three adaptive sessions changes the saved difficulty. Above 97%, pacer target rises by 3% and drill share rises by five percentage points, capped at 45%. Below 92%, they fall by 5% and five points, with a 20% drill floor. The 92–97% band is a hypothesis inspired by the “85% rule” for binary classification (Wilson et al., 2019), not established evidence for motor-skill learning.
 
 The result screen compares this session's IKI for each focus transition with its estimate before the session. A faster estimate naturally lowers future cost. The screen also repeats that adaptive-practice WPM is not an improvement measure.
+
+Goal proposals return one to three choices: the ceiling of the latest ten benchmark (or corrected-WPM) results' p75, the next `grades-v1` threshold when it is within 10%, and a target for a weak component such as accuracy. The player selects a goal; the selected value is stored separately from measured results.
 
 ```toml
 [adaptive]
@@ -27,6 +35,9 @@ drill_ratio = 0.3
 max_share = 0.4
 # Optional milliseconds. Omit to use twice the median estimated IKI.
 # error_weight = 400.0
+
+[practice]
+auto_difficulty = true
 ```
 
 ## Pacer

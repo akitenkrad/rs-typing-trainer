@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
+use crate::analysis::model::{ModelView, build_player_model};
 use crate::engine::session::{KeystrokeKind, KeystrokeLog};
 use crate::layout::KeyboardLayout;
 use crate::layout::geometry::{Finger, KeyRow, KeyboardGeometry};
@@ -11,6 +12,7 @@ use crate::record::SessionRecord;
 pub struct AnalysisSettings {
     pub pause_ms: u64,
     pub shrinkage_k: f64,
+    pub half_life_days: f64,
 }
 
 impl Default for AnalysisSettings {
@@ -18,6 +20,7 @@ impl Default for AnalysisSettings {
         Self {
             pause_ms: 2_000,
             shrinkage_k: 10.0,
+            half_life_days: 14.0,
         }
     }
 }
@@ -66,6 +69,9 @@ pub struct BigramMetric {
     pub error_rate: f64,
     pub estimated_iki_ms: f64,
     pub estimated_error_rate: f64,
+    pub estimated_iki_lo_ms: f64,
+    pub estimated_iki_hi_ms: f64,
+    pub relative_iki: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -155,6 +161,16 @@ pub fn analyze_records(
     layout: &KeyboardLayout,
     geometry: &KeyboardGeometry,
     settings: AnalysisSettings,
+) -> DetailedMetrics {
+    analyze_records_view(records, layout, geometry, settings, ModelView::Recent)
+}
+
+pub fn analyze_records_view(
+    records: &[SessionRecord],
+    layout: &KeyboardLayout,
+    geometry: &KeyboardGeometry,
+    settings: AnalysisSettings,
+    view: ModelView,
 ) -> DetailedMetrics {
     let physical = geometry
         .rows
@@ -263,7 +279,13 @@ pub fn analyze_records(
         }
     }
 
-    let class_stats = class_stats(&bigrams);
+    let as_of = records
+        .iter()
+        .filter_map(|record| chrono::DateTime::parse_from_rfc3339(&record.header.finished_at).ok())
+        .map(|time| time.with_timezone(&chrono::Utc))
+        .max()
+        .unwrap_or(chrono::DateTime::UNIX_EPOCH);
+    let player_model = build_player_model(records, layout, geometry, settings, view, as_of);
     let recovery_rows = records
         .iter()
         .filter(|record| record.header.metrics_version > 0)
@@ -301,8 +323,9 @@ pub fn analyze_records(
             .into_iter()
             .filter(|(_, acc)| !acc.intervals.is_empty())
             .map(|((from, to, class), acc)| {
-                let (class_mean, class_error_rate) = class_stats.get(&class).copied().unwrap_or((0.0, 0.0));
                 let sample_mean = mean(&acc.intervals);
+                let estimate = player_model.transition(&from, &to);
+                let estimated_iki_ms = estimate.map_or(sample_mean, |row| row.estimated_iki_ms);
                 BigramMetric {
                     from,
                     to,
@@ -312,8 +335,20 @@ pub fn analyze_records(
                     error_n: acc.error_n,
                     attempts: acc.attempts,
                     error_rate: ratio(acc.error_n, acc.attempts, 0.0),
-                    estimated_iki_ms: shrink_mean(acc.intervals.len() as u64, sample_mean, class_mean, settings.shrinkage_k),
-                    estimated_error_rate: shrink_rate(acc.attempts, acc.error_n, class_error_rate, settings.shrinkage_k),
+                    estimated_iki_ms,
+                    estimated_error_rate: estimate.map_or_else(|| ratio(acc.error_n, acc.attempts, 0.0), |row| row.estimated_error_rate),
+                    estimated_iki_lo_ms: estimate.map_or(estimated_iki_ms, |row| row.estimated_iki_lo_ms),
+                    estimated_iki_hi_ms: estimate.map_or(estimated_iki_ms, |row| row.estimated_iki_hi_ms),
+                    relative_iki: estimate.map_or_else(
+                        || {
+                            if player_model.personal_iki_median_ms > 0.0 {
+                                estimated_iki_ms / player_model.personal_iki_median_ms
+                            } else {
+                                0.0
+                            }
+                        },
+                        |row| row.relative_iki,
+                    ),
                 }
             })
             .collect(),
@@ -437,20 +472,6 @@ fn collect_spelling_choices(reading: Option<&str>, keys: &[&KeystrokeLog], choic
             }
         }
     }
-}
-
-fn class_stats(bigrams: &BTreeMap<(String, String, TransitionClass), BigramAccumulator>) -> BTreeMap<TransitionClass, (f64, f64)> {
-    let mut values = BTreeMap::<TransitionClass, (Vec<f64>, u64, u64)>::new();
-    for ((_, _, class), acc) in bigrams {
-        let entry = values.entry(*class).or_default();
-        entry.0.extend(&acc.intervals);
-        entry.1 += acc.error_n;
-        entry.2 += acc.attempts;
-    }
-    values
-        .into_iter()
-        .map(|(class, (intervals, errors, attempts))| (class, (mean(&intervals), ratio(errors, attempts, 0.0))))
-        .collect()
 }
 
 fn add_accuracy_to_groups(

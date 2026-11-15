@@ -73,7 +73,7 @@ fn every_analysis_tab_renders_and_bench_shows_previous_delta() {
     app.handle_key(key(KeyCode::Char('a')));
     assert_eq!(app.screen, Screen::Analysis);
 
-    for expected in ["総評", "推移", "キーボード", "遷移", "指・手", "ベンチ"] {
+    for expected in ["コーチ", "推移", "キーボード", "遷移", "指・手", "ベンチ"] {
         let output = render(&app);
         let compact = output.chars().filter(|character| !character.is_whitespace()).collect::<String>();
         assert!(compact.contains(expected), "tab {expected}: {output}");
@@ -92,7 +92,9 @@ fn every_analysis_tab_renders_and_bench_shows_previous_delta() {
 fn selected_transition_creates_an_ngram_practice_configuration() {
     let directory = TempDir::new().unwrap();
     let path = directory.path().join("sessions.db");
-    save_record(&path, ModeKind::Words, None, 30.0, 1);
+    for day in 1..=5 {
+        save_record(&path, ModeKind::Words, None, 30.0, day);
+    }
     let mut config = Config::default();
     config.storage.db_path = Some(path);
     let mut app = test_app(config);
@@ -107,6 +109,25 @@ fn selected_transition_creates_an_ngram_practice_configuration() {
     assert_eq!(app.config.mode.ngram.source, "pairs");
     assert_eq!(app.config.mode.keys, "as");
     assert_eq!(app.screen, Screen::KeyPicker);
+}
+
+#[test]
+fn sparse_transition_is_shown_as_insufficient_and_cannot_start_a_drill() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("sessions.db");
+    save_record(&path, ModeKind::Words, None, 30.0, 1);
+    let mut config = Config::default();
+    config.general.lang = Lang::Ja;
+    config.storage.db_path = Some(path);
+    let mut app = test_app(config);
+    app.handle_key(key(KeyCode::Char('a')));
+    for _ in 0..3 {
+        app.handle_key(key(KeyCode::Tab));
+    }
+
+    assert!(compact(&render(&app)).contains("データ不足（n<5）"));
+    app.handle_key(key(KeyCode::Enter));
+    assert_ne!(app.config.mode.kind, ModeKind::Ngram);
 }
 
 #[test]
@@ -282,7 +303,7 @@ fn unavailable_skill_axes_show_no_data_in_aligned_columns() {
 }
 
 #[test]
-fn summary_is_the_first_tab_and_scrolls_in_an_80_by_24_terminal() {
+fn coach_is_the_first_tab_and_scrolls_in_an_80_by_24_terminal() {
     let directory = TempDir::new().unwrap();
     let path = directory.path().join("sessions.db");
     save_record(&path, ModeKind::Words, None, 30.0, 14);
@@ -293,8 +314,8 @@ fn summary_is_the_first_tab_and_scrolls_in_an_80_by_24_terminal() {
     app.handle_key(key(KeyCode::Char('a')));
 
     let first = render_size(&app, 80, 24);
-    assert!(compact(&first).contains("総評"), "{first}");
-    assert!(compact(&first).contains("今の実力"), "{first}");
+    assert!(compact(&first).contains("コーチ"), "{first}");
+    assert!(compact(&first).contains("今の位置"), "{first}");
     assert!(compact(&first).contains("[P]期間"), "{first}");
 
     app.handle_key(key(KeyCode::Down));

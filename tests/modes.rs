@@ -4,6 +4,7 @@ use std::fs;
 use rs_typing_trainer::config::{Config, KeyFilter, ModeKind};
 use rs_typing_trainer::data::DataCatalog;
 use rs_typing_trainer::engine::modes::ModeGenerator;
+use rs_typing_trainer::engine::session::ItemKind;
 use rs_typing_trainer::layout::builtin_layout;
 use tempfile::TempDir;
 
@@ -33,6 +34,11 @@ fn each_mode_generates_its_kind_of_prompt() {
         }
         if kind == ModeKind::Ngram {
             assert_eq!(prompt.target.chars().count(), config.mode.ngram.n);
+            assert_eq!(prompt.kind, ItemKind::Drill);
+            assert_eq!(prompt.clone().into_item().kind, ItemKind::Drill);
+        } else {
+            assert_eq!(prompt.kind, ItemKind::Word);
+            assert_eq!(prompt.clone().into_item().kind, ItemKind::Word);
         }
     }
 }

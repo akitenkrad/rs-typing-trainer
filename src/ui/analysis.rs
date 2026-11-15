@@ -6,8 +6,8 @@ use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Axis, Block, Borders, Chart, Dataset, GraphType, Paragraph, Wrap};
-use unicode_width::UnicodeWidthStr;
+use ratatui::widgets::{Axis, Block, Borders, Chart, Dataset, GraphType, Paragraph};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::{AnalysisPeriod, App};
 use crate::i18n::{Lang, Msg};
@@ -30,7 +30,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         .split(inner);
     render_tabs(frame, app, &theme, chunks[0]);
     match app.analysis_tab {
-        0 => render_summary(frame, app, chunks[1]),
+        0 => render_summary(frame, app, &theme, chunks[1]),
         1 => render_trend(frame, app, chunks[1]),
         2 => render_keyboard(frame, app, chunks[1]),
         3 => render_transitions(frame, app, &theme, chunks[1]),
@@ -60,8 +60,8 @@ fn render_tabs(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let lang = app.config.general.lang;
     let labels = [
         match lang {
-            Lang::En => "Summary",
-            Lang::Ja => "総評",
+            Lang::En => "Coach",
+            Lang::Ja => "コーチ",
         },
         Msg::AnalysisTrend.text(lang),
         Msg::AnalysisKeyboard.text(lang),
@@ -90,13 +90,153 @@ fn render_tabs(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     frame.render_widget(Paragraph::new(Line::from(spans)).alignment(Alignment::Center), area);
 }
 
-fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
+fn render_summary(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    let base = app.analysis_coach.as_ref().map_or(&app.analysis_summary.lines, |report| &report.lines);
+    let mut lines = base.clone();
+    if app.analysis_goal_picker
+        && let Some(report) = &app.analysis_coach
+    {
+        let mut picker = vec![match app.config.general.lang {
+            Lang::En => "▼ GOAL CANDIDATES — choose with ↑/↓ and Enter".to_owned(),
+            Lang::Ja => "▼ 目標の候補 — ↑/↓ で選び Enter で保存".to_owned(),
+        }];
+        picker.extend(report.goals.iter().enumerate().map(|(index, goal)| {
+            format!(
+                "{} {}",
+                if index == app.analysis_goal_selected { "▶" } else { " " },
+                crate::analysis::coach::goal_label(goal, app.config.general.lang)
+            )
+        }));
+        picker.push(String::new());
+        picker.append(&mut lines);
+        lines = picker;
+    }
+    let body = if !app.analysis_goal_picker && area.height >= 20 {
+        render_grade_badges(frame, app, theme, area).unwrap_or(area)
+    } else {
+        area
+    };
+    let lines = wrap_coach_lines(&lines, usize::from(body.width));
     frame.render_widget(
-        Paragraph::new(app.analysis_summary.lines.iter().cloned().map(Line::from).collect::<Vec<_>>())
-            .wrap(Wrap { trim: false })
-            .scroll((app.analysis_summary_scroll, 0)),
-        area,
+        Paragraph::new(lines.into_iter().map(Line::from).collect::<Vec<_>>()).scroll((app.analysis_summary_scroll, 0)),
+        body,
     );
+}
+
+fn wrap_coach_lines(lines: &[String], width: usize) -> Vec<String> {
+    lines.iter().flat_map(|line| wrap_coach_line(line, width)).collect()
+}
+
+fn wrap_coach_line(line: &str, width: usize) -> Vec<String> {
+    if width == 0 || UnicodeWidthStr::width(line) <= width {
+        return vec![line.to_owned()];
+    }
+    let leading = line.chars().take_while(|character| character.is_whitespace()).collect::<String>();
+    let leading_width = UnicodeWidthStr::width(leading.as_str());
+    let rest = &line[leading.len()..];
+    let continuation_width = if rest.starts_with("• ") { leading_width + 2 } else { leading_width };
+    let continuation = " ".repeat(continuation_width.min(width.saturating_sub(1)));
+    let mut remaining = line;
+    let mut result = Vec::new();
+    let mut first = true;
+    while !remaining.is_empty() {
+        let prefix = if first { "" } else { continuation.as_str() };
+        let available = width.saturating_sub(UnicodeWidthStr::width(prefix)).max(1);
+        if UnicodeWidthStr::width(remaining) <= available {
+            result.push(format!("{prefix}{remaining}"));
+            break;
+        }
+
+        let mut used = 0;
+        let mut split = remaining.len();
+        let mut whitespace_split = None;
+        for (byte, character) in remaining.char_indices() {
+            let character_width = UnicodeWidthChar::width(character).unwrap_or(0);
+            if used + character_width > available {
+                split = byte;
+                break;
+            }
+            used += character_width;
+            if character.is_whitespace() {
+                whitespace_split = Some(byte + character.len_utf8());
+            }
+        }
+        if let Some(space) = whitespace_split
+            && space > split / 2
+        {
+            split = space;
+        }
+        if split == 0 {
+            split = remaining.chars().next().map_or(remaining.len(), char::len_utf8);
+        }
+        result.push(format!("{prefix}{}", remaining[..split].trim_end()));
+        remaining = remaining[split..].trim_start();
+        first = false;
+    }
+    result
+}
+
+fn render_grade_badges(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) -> Option<Rect> {
+    let report = app.analysis_coach.as_ref()?;
+    let grades = report
+        .grades
+        .languages
+        .iter()
+        .filter_map(|grade| Some((grade, grade.overall.as_ref()?)))
+        .collect::<Vec<_>>();
+    if grades.is_empty() {
+        return None;
+    }
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(8), Constraint::Min(1)])
+        .split(area);
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints((0..grades.len()).map(|_| Constraint::Ratio(1, grades.len() as u32)).collect::<Vec<_>>())
+        .split(chunks[0]);
+    for ((grade, overall), column) in grades.into_iter().zip(columns.iter().copied()) {
+        let color = grade_color(overall.grade, theme);
+        let label = match (grade.language.as_str(), app.config.general.lang) {
+            ("ja", Lang::En) => "Japanese",
+            ("ja", Lang::Ja) => "日本語",
+            (_, Lang::En) => "English",
+            (_, Lang::Ja) => "英語",
+        };
+        let mut lines = vec![Line::from(Span::styled(
+            format!("{label}  {:.2}", overall.score),
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        ))];
+        if let Ok(font) = crate::ui::bigtext::font(crate::ui::bigtext::BigTextSize::Dot12) {
+            lines.extend(
+                font.render(&[crate::ui::bigtext::StyledCharacter::new(
+                    overall.grade.as_str().chars().next().unwrap_or('?'),
+                    Style::default().fg(color).add_modifier(Modifier::BOLD),
+                )])
+                .lines,
+            );
+        } else {
+            lines.push(Line::from(Span::styled(
+                overall.grade.as_str(),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            )));
+        }
+        frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), column);
+    }
+    Some(chunks[1])
+}
+
+fn grade_color(level: crate::analysis::grades::Level, theme: &Theme) -> Color {
+    match level {
+        crate::analysis::grades::Level::S => theme.warning,
+        crate::analysis::grades::Level::A => theme.correct,
+        crate::analysis::grades::Level::B => theme.accent,
+        crate::analysis::grades::Level::C => Color::LightBlue,
+        crate::analysis::grades::Level::D => Color::LightMagenta,
+        crate::analysis::grades::Level::E => Color::Yellow,
+        crate::analysis::grades::Level::F => Color::Gray,
+        crate::analysis::grades::Level::G => theme.muted,
+    }
 }
 
 fn render_trend(frame: &mut Frame, app: &App, area: Rect) {
@@ -259,22 +399,66 @@ fn render_keyboard(frame: &mut Frame, app: &App, area: Rect) {
     if app.config.keyboard.digit6_finger == "right-index" {
         physical = physical.with_digit6_finger(crate::layout::geometry::Finger::RightIndex);
     }
-    let value = |row: &crate::analysis::metrics::KeyMetric| {
-        if app.analysis_keyboard_latency {
-            row.iki_median_ms
-        } else {
-            1.0 - row.accuracy
+    let layout = app.practice_layout();
+    let mut selected_stroke = None;
+    let heatmap = match app.analysis_keyboard_view {
+        0 | 1 => {
+            let value = |row: &crate::analysis::metrics::KeyMetric| {
+                if app.analysis_keyboard_view == 1 {
+                    row.iki_median_ms
+                } else {
+                    1.0 - row.accuracy
+                }
+            };
+            let maximum = app.analysis_details.keys.iter().map(value).fold(0.0_f64, f64::max).max(0.01);
+            app.analysis_details
+                .keys
+                .iter()
+                .map(|row| (row.code.clone(), value(row) / maximum))
+                .collect()
+        }
+        2 => app
+            .analysis_coach
+            .as_ref()
+            .into_iter()
+            .flat_map(|report| &report.map.keys)
+            .filter_map(|row| {
+                let character = row.key.chars().next()?;
+                let code = layout.stroke_for(character)?.code;
+                Some((code, (row.relative_iki / 2.0).clamp(0.0, 1.0)))
+            })
+            .collect(),
+        _ => {
+            let expected = app
+                .analysis_coach
+                .as_ref()
+                .into_iter()
+                .flat_map(|report| &report.diagnosis.errors.confusion)
+                .map(|row| row.expected.as_str())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .nth(app.analysis_confusion_selected);
+            selected_stroke = expected
+                .and_then(|value| value.chars().next())
+                .and_then(|character| layout.stroke_for(character));
+            let rows = app
+                .analysis_coach
+                .as_ref()
+                .into_iter()
+                .flat_map(|report| &report.diagnosis.errors.confusion)
+                .filter(|row| Some(row.expected.as_str()) == expected)
+                .collect::<Vec<_>>();
+            let maximum = rows.iter().map(|row| row.n).max().unwrap_or(1) as f64;
+            rows.into_iter()
+                .filter_map(|row| {
+                    let code = layout.stroke_for(row.typed.chars().next()?)?.code;
+                    Some((code, row.n as f64 / maximum))
+                })
+                .collect()
         }
     };
-    let maximum = app.analysis_details.keys.iter().map(value).fold(0.0_f64, f64::max).max(0.01);
-    let heatmap = app
-        .analysis_details
-        .keys
-        .iter()
-        .map(|row| (row.code.clone(), value(row) / maximum))
-        .collect();
     let state = KeyboardState {
-        next: None,
+        next: selected_stroke,
         last: None,
         heatmap,
         fade: Default::default(),
@@ -292,20 +476,28 @@ fn render_keyboard(frame: &mut Frame, app: &App, area: Rect) {
             finger_guide: true,
         },
     );
-    let label = if app.analysis_keyboard_latency {
-        Msg::KeyboardIkiHeatmapHint.text(app.config.general.lang)
-    } else {
-        Msg::KeyboardErrorHeatmapHint.text(app.config.general.lang)
+    let label = match (app.analysis_keyboard_view, app.config.general.lang) {
+        (0, Lang::En) => "Error-rate heatmap  [Enter] next",
+        (0, Lang::Ja) => "誤り率の地図  [Enter] 次へ",
+        (1, Lang::En) => "Median IKI heatmap  [Enter] next",
+        (1, Lang::Ja) => "IKI 中央値の地図  [Enter] 次へ",
+        (2, Lang::En) => "Relative speed (personal median = 1.0)  [Enter] next",
+        (2, Lang::Ja) => "相対速度（本人の中央値 = 1.0）  [Enter] 次へ",
+        (3, Lang::En) => "Confusion by expected key  [←/→] key  [Enter] next",
+        (3, Lang::Ja) => "取り違え（期待したキー別）  [←/→] キー  [Enter] 次へ",
+        _ => unreachable!(),
     };
     frame.render_widget(Paragraph::new(label), Rect::new(area.x, area.y, area.width, 1));
 }
 
 fn render_transitions(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let lang = app.config.general.lang;
+    let minimum = app.config.analysis.min_transition_n;
     let mut slow = app.analysis_details.bigrams.clone();
     slow.sort_by(|left, right| right.estimated_iki_ms.total_cmp(&left.estimated_iki_ms));
-    let slow_lines = slow
+    let mut slow_lines = slow
         .iter()
+        .filter(|row| row.n >= minimum)
         .take(20)
         .enumerate()
         .map(|(index, row)| {
@@ -327,10 +519,24 @@ fn render_transitions(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             })
         })
         .collect::<Vec<_>>();
+    let insufficient = slow.iter().filter(|row| row.n < minimum).take(5).collect::<Vec<_>>();
+    if !insufficient.is_empty() {
+        slow_lines.push(Line::from(""));
+        slow_lines.push(Line::from(match lang {
+            crate::i18n::Lang::En => format!("insufficient data (n < {minimum})"),
+            crate::i18n::Lang::Ja => format!("データ不足（n < {minimum}）"),
+        }));
+        slow_lines.extend(
+            insufficient
+                .into_iter()
+                .map(|row| Line::from(format!("    {}→{}  n={}", row.from, row.to, row.n))),
+        );
+    }
     let mut error_prone = app.analysis_details.bigrams.clone();
     error_prone.sort_by(|left, right| right.estimated_error_rate.total_cmp(&left.estimated_error_rate));
     let error_lines = error_prone
         .iter()
+        .filter(|row| row.n >= minimum)
         .take(20)
         .enumerate()
         .map(|(index, row)| {

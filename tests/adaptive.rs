@@ -1,15 +1,20 @@
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use rs_typing_trainer::analysis::metrics::{AnalysisSettings, analyze_records};
+use rs_typing_trainer::analysis::metrics::{AnalysisSettings, BigramMetric, DetailedMetrics, TransitionClass, analyze_records};
 use rs_typing_trainer::config::ErrorMode;
 use rs_typing_trainer::config::{Config, ModeKind};
-use rs_typing_trainer::engine::session::{ItemLog, ItemOutcome, KeystrokeKind, KeystrokeLog, SessionLog};
+use rs_typing_trainer::data::DataCatalog;
+use rs_typing_trainer::engine::modes::ModeGenerator;
+use rs_typing_trainer::engine::session::{ItemKind, ItemLog, ItemOutcome, KeystrokeKind, KeystrokeLog, SessionLog};
 use rs_typing_trainer::layout::builtin_layout;
 use rs_typing_trainer::layout::geometry::geometry;
-use rs_typing_trainer::practice::adaptive::{AdaptiveItemKind, AdaptiveOptions, build_plan, generate_items, transition_share};
+use rs_typing_trainer::practice::adaptive::{
+    AdaptiveHistory, AdaptiveItemKind, AdaptiveOptions, FocusReason, build_plan, build_plan_seeded, generate_items, transition_share,
+};
 use rs_typing_trainer::record::{SessionHeader, SessionRecord};
 use rs_typing_trainer::ui;
+use tempfile::TempDir;
 
 mod common;
 use common::test_app;
@@ -51,6 +56,7 @@ fn synthetic_record() -> SessionRecord {
                 idx: item_idx,
                 text,
                 reading: None,
+                kind: None,
                 shown_us: clock,
                 done_us: Some(clock + interval + 10_000),
                 outcome: ItemOutcome::Completed,
@@ -139,10 +145,38 @@ fn plan(previous: &[(&str, &str)], minimum: usize) -> rs_typing_trainer::practic
             error_weight_ms: None,
             drill_ratio: 0.3,
             min_transition_types: minimum,
+            min_transition_n: 5,
             max_share: 0.4,
         },
         &previous,
     )
+}
+
+#[test]
+fn sparse_transition_is_excluded_from_adaptive_cost_candidates() {
+    let mut metrics = analyze_records(
+        &[synthetic_record()],
+        &builtin_layout("qwerty").unwrap(),
+        &geometry("ansi").unwrap(),
+        AnalysisSettings::default(),
+    );
+    let sparse = metrics.bigrams.iter_mut().find(|row| row.from == "t" && row.to == "h").unwrap();
+    sparse.n = 1;
+    sparse.estimated_iki_ms = 10_000.0;
+    let plan = build_plan(
+        &metrics,
+        &["the".to_owned()],
+        AdaptiveOptions {
+            error_weight_ms: None,
+            drill_ratio: 0.3,
+            min_transition_types: 1,
+            min_transition_n: 5,
+            max_share: 0.4,
+        },
+        &[],
+    );
+
+    assert!(plan.transitions.iter().all(|row| !(row.from == "t" && row.to == "h")));
 }
 
 #[test]
@@ -184,6 +218,23 @@ fn generated_mix_is_seventy_percent_words_and_thirty_percent_drills() {
 }
 
 #[test]
+fn adaptive_prompts_preserve_word_and_drill_kinds_in_items() {
+    let config = Config::default();
+    let home = TempDir::new().unwrap();
+    let data = DataCatalog::load(&config.data, home.path()).unwrap();
+    let mut generator = ModeGenerator::new_adaptive(config.mode.clone(), data, builtin_layout("qwerty").unwrap(), 7, &plan(&[], 50), false);
+
+    let prompts = (0..100).map(|_| generator.next_prompt()).collect::<Vec<_>>();
+    assert!(prompts.iter().any(|prompt| prompt.kind == ItemKind::Drill));
+    assert!(prompts.iter().any(|prompt| prompt.kind == ItemKind::Word));
+    for prompt in prompts {
+        let expected = if prompt.fallback { ItemKind::Drill } else { ItemKind::Word };
+        assert_eq!(prompt.kind, expected);
+        assert_eq!(prompt.into_item().kind, expected);
+    }
+}
+
+#[test]
 fn insufficient_history_falls_back_to_words() {
     let plan = plan(&[], 51);
     assert!(plan.fallback_to_words);
@@ -198,6 +249,147 @@ fn previous_focus_halves_the_transition_weight() {
     let normal = normal.transitions.iter().find(|row| row.from == "t" && row.to == "h").unwrap();
     let discounted = discounted.transitions.iter().find(|row| row.from == "t" && row.to == "h").unwrap();
     assert!((discounted.weight - normal.weight * 0.5).abs() < 1e-9);
+}
+
+#[test]
+fn thompson_plan_is_seeded_applies_progress_and_mixes_focus_transitions() {
+    let metrics = analyze_records(
+        &[synthetic_record()],
+        &builtin_layout("qwerty").unwrap(),
+        &geometry("ansi").unwrap(),
+        AnalysisSettings::default(),
+    );
+    let corpus = ["the", "other", "math", "rust", "cargo", "type", "error", "speed", "word", "quick"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let options = AdaptiveOptions {
+        error_weight_ms: None,
+        drill_ratio: 0.3,
+        min_transition_types: 50,
+        min_transition_n: 5,
+        max_share: 0.4,
+    };
+    let history = AdaptiveHistory {
+        improving: vec![("t".into(), "h".into())],
+        stalled: vec![("h".into(), "e".into())],
+        ..AdaptiveHistory::default()
+    };
+    let first = build_plan_seeded(&metrics, &corpus, options, &[], 123, &history);
+    let second = build_plan_seeded(&metrics, &corpus, options, &[], 123, &history);
+    assert_eq!(first, second);
+    assert_eq!(
+        first
+            .transitions
+            .iter()
+            .find(|row| row.from == "t" && row.to == "h")
+            .unwrap()
+            .progress_multiplier,
+        1.2
+    );
+    assert_eq!(
+        first
+            .transitions
+            .iter()
+            .find(|row| row.from == "h" && row.to == "e")
+            .unwrap()
+            .progress_multiplier,
+        0.6
+    );
+    assert!(first.transitions.iter().take(5).all(|row| !row.reason("en").is_empty()));
+    assert!(first.transitions.iter().any(|row| row.reason_kind == FocusReason::Improving));
+
+    let generated = generate_items(&first, &corpus.iter().map(String::as_str).collect::<Vec<_>>(), 200, 9);
+    assert!(generated.windows(2).all(|pair| pair[0].transition != pair[1].transition));
+}
+
+#[test]
+fn at_most_two_due_reviews_occupy_the_focus_slots() {
+    let metrics = analyze_records(
+        &[synthetic_record()],
+        &builtin_layout("qwerty").unwrap(),
+        &geometry("ansi").unwrap(),
+        AnalysisSettings::default(),
+    );
+    let corpus = ["the", "other", "math", "rust", "cargo", "type", "error", "speed", "word", "quick"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let options = AdaptiveOptions {
+        error_weight_ms: None,
+        drill_ratio: 0.3,
+        min_transition_types: 50,
+        min_transition_n: 5,
+        max_share: 0.4,
+    };
+    let initial = build_plan_seeded(&metrics, &corpus, options, &[], 9, &AdaptiveHistory::default());
+    let due_reviews = initial
+        .transitions
+        .iter()
+        .take(4)
+        .map(|row| (row.from.clone(), row.to.clone(), 3))
+        .collect();
+    let plan = build_plan_seeded(
+        &metrics,
+        &corpus,
+        options,
+        &[],
+        9,
+        &AdaptiveHistory {
+            due_reviews,
+            ..AdaptiveHistory::default()
+        },
+    );
+    assert_eq!(
+        plan.transitions
+            .iter()
+            .take(5)
+            .filter(|row| row.reason_kind == FocusReason::Review)
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn thompson_sampling_explores_an_uncertain_transition_across_seeds() {
+    let row = |from: &str, to: &str, estimate: f64, lo: f64, hi: f64| BigramMetric {
+        from: from.into(),
+        to: to.into(),
+        class: TransitionClass::AlternatingHands,
+        n: 5,
+        median_ms: estimate,
+        error_n: 0,
+        attempts: 5,
+        error_rate: 0.0,
+        estimated_iki_ms: estimate,
+        estimated_error_rate: 0.01,
+        estimated_iki_lo_ms: lo,
+        estimated_iki_hi_ms: hi,
+        relative_iki: 1.0,
+    };
+    let metrics = DetailedMetrics {
+        bigrams: vec![
+            row("a", "b", 160.0, 150.0, 171.0),
+            row("c", "d", 130.0, 60.0, 282.0),
+            row("e", "f", 120.0, 115.0, 125.0),
+        ],
+        ..DetailedMetrics::default()
+    };
+    let corpus = vec!["ab cd ef ab cd ef".to_owned()];
+    let options = AdaptiveOptions {
+        error_weight_ms: Some(0.0),
+        drill_ratio: 0.3,
+        min_transition_types: 0,
+        min_transition_n: 5,
+        max_share: 0.4,
+    };
+    let explored = (0..100)
+        .filter(|seed| {
+            let plan = build_plan_seeded(&metrics, &corpus, options, &[], *seed, &AdaptiveHistory::default());
+            plan.transitions.first().is_some_and(|row| row.from == "c" && row.to == "d")
+        })
+        .count();
+    assert!(explored > 0 && explored < 100, "uncertain transition selected {explored} times");
 }
 
 #[test]

@@ -31,6 +31,10 @@ const CLEANUP_DRAIN_LIMIT: Duration = Duration::from_millis(75);
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let lang = cli.lang.unwrap_or_default();
+    if let Err(error) = rs_typing_trainer::analysis::grades::bundled_thresholds() {
+        eprintln!("{}: invalid bundled grade thresholds: {error}", Msg::AppTitle.text(lang));
+        return ExitCode::from(1);
+    }
     let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
 
     match cli.command.as_ref() {
@@ -48,7 +52,14 @@ fn main() -> ExitCode {
                 ExitCode::from(1)
             }
         },
-        Some(Command::Stats { csv, summary, since, mode }) => match run_stats(&cli, &home, *csv, *summary, since.as_deref(), mode.as_deref()) {
+        Some(Command::Stats {
+            csv,
+            summary,
+            grades,
+            coach,
+            since,
+            mode,
+        }) => match run_stats(&cli, &home, *csv, *summary, *grades, *coach, since.as_deref(), mode.as_deref()) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("{}: {error}", Msg::AppTitle.text(lang));
@@ -138,11 +149,14 @@ fn run_replay_tui(mut replay: rs_typing_trainer::replay::Replay, lang: rs_typing
     result
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_stats(
     cli: &Cli,
     home: &std::path::Path,
     csv: Option<rs_typing_trainer::cli::StatsCsv>,
     summary: bool,
+    grades: bool,
+    coach: bool,
     since: Option<&str>,
     mode: Option<&str>,
 ) -> Result<()> {
@@ -154,9 +168,12 @@ fn run_stats(
         .map_err(|_| color_eyre::eyre::eyre!("--since must use YYYY-MM-DD"))?;
     let output = rs_typing_trainer::analysis::stats::render(
         &config.resolve_db_path(home),
+        home,
         &config,
         csv,
         summary,
+        grades,
+        coach,
         since,
         mode,
         cli.effective_lang(config.general.lang),

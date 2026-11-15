@@ -131,9 +131,9 @@ pub fn generate_with_metrics(
     lines.push(String::new());
     strengths_and_weaknesses(&mut lines, &axes, lang);
     lines.push(String::new());
-    weak_keys_and_transitions(&mut lines, details, lang);
+    weak_keys_and_transitions(&mut lines, details, config.analysis.min_transition_n, lang);
     lines.push(String::new());
-    recommendations(&mut lines, &recent, records, details, &axes, lang);
+    recommendations(&mut lines, &recent, records, details, &axes, config.analysis.min_transition_n, lang);
     lines.push(String::new());
     data_status(&mut lines, records, details, &axes, as_of, lang);
     SummaryReport { lines }
@@ -334,9 +334,9 @@ fn strengths_and_weaknesses(lines: &mut Vec<String>, axes: &[SkillAxisValue], la
     });
 }
 
-fn weak_keys_and_transitions(lines: &mut Vec<String>, details: &DetailedMetrics, lang: Lang) {
+fn weak_keys_and_transitions(lines: &mut Vec<String>, details: &DetailedMetrics, min_transition_n: u64, lang: Lang) {
     lines.push(heading("Weak keys and transitions", "弱いキーと遷移", lang));
-    let mut transitions = details.bigrams.iter().collect::<Vec<_>>();
+    let mut transitions = details.bigrams.iter().filter(|row| row.n >= min_transition_n).collect::<Vec<_>>();
     transitions.sort_by(|left, right| right.estimated_iki_ms.total_cmp(&left.estimated_iki_ms));
     if transitions.is_empty() {
         lines.push(no_data_line(lang));
@@ -399,6 +399,7 @@ fn recommendations(
     records: &[SessionRecord],
     details: &DetailedMetrics,
     axes: &[SkillAxisValue],
+    min_transition_n: u64,
     lang: Lang,
 ) {
     lines.push(heading("Recommended practice", "おすすめの練習", lang));
@@ -413,6 +414,7 @@ fn recommendations(
     let slowest = details
         .bigrams
         .iter()
+        .filter(|row| row.n >= min_transition_n)
         .max_by(|left, right| left.estimated_iki_ms.total_cmp(&right.estimated_iki_ms));
     if let Some(row) = slowest
         && (weak_axis(axes, SkillAxis::Transitions) || (details.iki_median_ms > 0.0 && row.estimated_iki_ms >= details.iki_median_ms * 1.25))
@@ -548,7 +550,12 @@ fn axis_value(axis: SkillAxis, record: &SessionRecord, layout: &KeyboardLayout, 
             let details = analyze_records(std::slice::from_ref(record), layout, &keyboard_geometry, analysis_settings(config));
             match axis {
                 SkillAxis::Transitions => {
-                    let mut values = details.bigrams.iter().map(|row| row.estimated_iki_ms).collect::<Vec<_>>();
+                    let mut values = details
+                        .bigrams
+                        .iter()
+                        .filter(|row| row.n >= config.analysis.min_transition_n)
+                        .map(|row| row.estimated_iki_ms)
+                        .collect::<Vec<_>>();
                     values.sort_by(|left, right| right.total_cmp(left));
                     let top = values.iter().take(20).copied().collect::<Vec<_>>();
                     (!top.is_empty()).then(|| top.iter().sum::<f64>() / top.len() as f64 - details.iki_median_ms)
@@ -604,6 +611,7 @@ fn analysis_settings(config: &Config) -> AnalysisSettings {
     AnalysisSettings {
         pause_ms: config.analysis.pause_ms,
         shrinkage_k: config.analysis.shrinkage_k,
+        half_life_days: config.analysis.half_life_days,
     }
 }
 

@@ -15,6 +15,7 @@ pub enum GhostCondition {
 pub struct GhostTrack {
     events: Vec<(u32, u64)>,
     sentence_text: Option<String>,
+    opponent: String,
 }
 
 impl GhostTrack {
@@ -30,6 +31,10 @@ impl GhostTrack {
 
     pub fn applies_to_sentence(&self, text: &str) -> bool {
         self.sentence_text.as_deref() == Some(text)
+    }
+
+    pub fn opponent(&self) -> &str {
+        &self.opponent
     }
 }
 
@@ -51,6 +56,13 @@ pub fn select_ghost(records: &[SessionRecord], condition: &GhostCondition) -> Op
             (record, None)
         }
     };
+    let opponent = record.header.id.map_or_else(
+        || match condition {
+            GhostCondition::Sentence { text } => format!("sentence:{text}"),
+            GhostCondition::Bench { bench_id } => format!("bench:{bench_id}"),
+        },
+        |id| format!("session:{id}"),
+    );
     Some(GhostTrack {
         events: record
             .log
@@ -67,6 +79,7 @@ pub fn select_ghost(records: &[SessionRecord], condition: &GhostCondition) -> Op
             GhostCondition::Sentence { text } => Some(text.clone()),
             GhostCondition::Bench { .. } => None,
         },
+        opponent,
     })
 }
 

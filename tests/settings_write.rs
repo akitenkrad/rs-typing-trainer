@@ -99,7 +99,7 @@ fn settings_values_share_one_column() {
         .map(|(index, _)| index as u16 % buffer.area.width)
         .collect::<Vec<_>>();
 
-    assert_eq!(value_columns.len(), 8);
+    assert_eq!(value_columns.len(), 9);
     assert!(value_columns.windows(2).all(|pair| pair[0] == pair[1]), "{value_columns:?}");
     let arrow_columns = buffer
         .content()
@@ -122,6 +122,7 @@ fn every_setting_has_a_bilingual_description_with_options_and_a_default() {
         ("Large text (large)", "大きな文字（large）"),
         ("interface language", "画面の表示言語"),
         ("mistyped character", "誤入力した文字"),
+        ("Post-session coaching", "練習後の気づき"),
     ];
     let options = [
         ["qwerty", "dvorak", "colemak-dh-ansi", "workman"].as_slice(),
@@ -132,6 +133,7 @@ fn every_setting_has_a_bilingual_description_with_options_and_a_default() {
         ["large", "normal", "16", "12"].as_slice(),
         ["English", "Japanese"].as_slice(),
         ["stop", "advance"].as_slice(),
+        ["summary", "detailed"].as_slice(),
     ];
 
     for (lang, default_word) in [
@@ -258,6 +260,35 @@ fn settings_screen_cycles_saves_and_cancels_prompt_style() {
     assert!(updated.contains("prompt_style = \"normal\" # keep"), "{updated}");
     assert!(!updated.contains("prompt_size"), "{updated}");
     assert_eq!(Config::from_path(&path).unwrap().display.prompt_style, "normal");
+}
+
+#[test]
+fn feedback_defaults_to_summary_and_settings_cycles_saves_and_cancels_it() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("config.toml");
+    fs::write(&path, "[display]\nfeedback = \"summary\" # keep\n").unwrap();
+    let config = Config::from_path(&path).unwrap();
+    assert_eq!(config.display.feedback, "summary");
+    let mut app = test_app(config);
+    app.config_path = Some(path.clone());
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
+    for _ in 0..8 {
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    }
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    assert_eq!(app.config.display.feedback, "detailed");
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert_eq!(app.config.display.feedback, "summary");
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
+    for _ in 0..8 {
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    }
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    let updated = fs::read_to_string(&path).unwrap();
+    assert!(updated.contains("feedback = \"detailed\" # keep"), "{updated}");
 }
 
 #[test]

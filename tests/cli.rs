@@ -46,6 +46,8 @@ fn parses_stats_subcommand() {
         Some(Command::Stats {
             csv: None,
             summary: false,
+            grades: false,
+            coach: false,
             since: None,
             mode: None,
         })
@@ -60,11 +62,49 @@ fn parses_stats_summary_and_rejects_csv_at_the_same_time() {
         Some(Command::Stats {
             csv: None,
             summary: true,
+            grades: false,
+            coach: false,
             since: None,
             mode: None,
         })
     );
     assert!(Cli::try_parse_from(["rs-typing-trainer", "stats", "--summary", "--csv", "sessions"]).is_err());
+}
+
+#[test]
+fn parses_stats_grades_and_rejects_other_output_modes() {
+    let cli = Cli::try_parse_from(["rs-typing-trainer", "stats", "--grades"]).unwrap();
+    assert_eq!(
+        cli.command,
+        Some(Command::Stats {
+            csv: None,
+            summary: false,
+            grades: true,
+            coach: false,
+            since: None,
+            mode: None,
+        })
+    );
+    assert!(Cli::try_parse_from(["rs-typing-trainer", "stats", "--grades", "--summary"]).is_err());
+    assert!(Cli::try_parse_from(["rs-typing-trainer", "stats", "--grades", "--csv", "grades"]).is_err());
+}
+
+#[test]
+fn parses_stats_coach_and_rejects_other_output_modes() {
+    let cli = Cli::try_parse_from(["rs-typing-trainer", "stats", "--coach"]).unwrap();
+    assert_eq!(
+        cli.command,
+        Some(Command::Stats {
+            csv: None,
+            summary: false,
+            grades: false,
+            coach: true,
+            since: None,
+            mode: None,
+        })
+    );
+    assert!(Cli::try_parse_from(["rs-typing-trainer", "stats", "--coach", "--summary"]).is_err());
+    assert!(Cli::try_parse_from(["rs-typing-trainer", "stats", "--coach", "--csv", "grades"]).is_err());
 }
 
 #[test]

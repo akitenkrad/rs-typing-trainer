@@ -23,11 +23,24 @@ pub enum KeystrokeKind {
     Backspace,
 }
 
+/// The role of a displayed item in training and later evaluation.
+///
+/// `None` in persisted [`ItemLog`] values means that the record predates this
+/// field; callers must not invent a kind for such records.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ItemKind {
+    Drill,
+    Word,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ItemLog {
     pub idx: u32,
     pub text: String,
     pub reading: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<ItemKind>,
     pub shown_us: u64,
     pub done_us: Option<u64>,
     pub outcome: ItemOutcome,
@@ -160,6 +173,7 @@ impl Session {
             idx: self.current_idx,
             text: self.current.text.clone(),
             reading: self.current.reading.clone(),
+            kind: Some(self.current.kind),
             shown_us,
             done_us: None,
             outcome: ItemOutcome::Aborted,

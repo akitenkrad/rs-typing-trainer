@@ -41,6 +41,11 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | Result | `Space` / `Enter` | Start another session |
 | Result | `H` | Open history |
 | Result | `Q` / `Esc` | Quit |
+| Coach | `↑` / `↓` (`k` / `j`) | Scroll the report |
+| Coach | `T` | Open or close goal candidates |
+| Goal candidates | `↑` / `↓`, `Enter` | Select and save a goal |
+| Analysis keyboard | `Enter` | Cycle error rate, median IKI, relative speed and confusion |
+| Analysis confusion | `←` / `→` | Select the expected key |
 | History | `↑` / `↓` (`k` / `j`) | Move the selection |
 | History | `PgUp` / `PgDn` / `Home` / `End` | Jump through the list |
 | History | `S` | Cycle the sort order |
@@ -81,13 +86,19 @@ When the new default file does not exist but `~/.cache/rs-typing-trainer/session
 
 Press `H` on the title screen to open history. Press `S` to cycle through newest date, oldest date, WPM, accuracy, maximum combo and completed-word sort orders. Score-based orders show a rank. `Enter` opens the original result, including the mistype heatmap and reaction-time distribution.
 
+## Coaching and grades
+
+Press `A` to open the analysis screen. Its first tab is Coach: current English and Japanese grades, the latest adaptive prescription result, one to three concrete opportunities, and stable habit findings. Large terminals draw the overall grade as a coloured badge; compact terminals keep the grade letter and value in normal text. The report always names its source (official, interim, provisional, or provisional with difficulty uncorrected), keeps evidence counts, and states when evidence is insufficient. `T` opens goal candidates derived from recent records; `Enter` persists the selected goal and its remaining gap is shown in the first section.
+
+The mode-selection heading carries a compact English/Japanese grade. Completing benchmark A or C shows that language's official or interim grade and any promotion or demotion on the result screen; ordinary practice does not show a grade change. After any completed session, the result screen may show the clearest session-specific observation. `[display].feedback = "summary"` limits this to one line, while `"detailed"` allows up to three; nothing is displayed when the session lacks usable evidence.
+
 ## Configuration
 
 If `--config` is omitted, rs-typing-trainer reads the first existing file from `./config.toml` and `~/.config/rs-typing-trainer/config.toml`. If neither exists, it uses defaults. `--lang` takes precedence over `[general] lang`. The original `[game]`, `[characters]`, and `[metrics]` names remain accepted; an explicit v2 section takes precedence.
 
 `item_timeout_seconds = 0` disables the per-item timer and its bar. Sentence mode always disables that timer. An empty `mode.keys` value means no filtering in `words`, `romaji`, and `sentence`; `random` and `ngram` ask for keys on the key-selection screen.
 
-The settings screen edits layout, input layout, geometry, keyboard visibility (including `auto`), keyboard appearance, prompt text (large or normal), language and error mode. It preserves existing comments and unrelated TOML values. See the [configuration reference](configuration.md) for every key and default, [Training tools](training.md) for training behavior, and [Keyboard layouts and display](keyboard.md) for remapping, custom layouts and key-release support.
+The settings screen edits layout, input layout, geometry, keyboard visibility (including `auto`), keyboard appearance, prompt text (large or normal), language, error mode and result feedback. It preserves existing comments and unrelated TOML values. See the [configuration reference](configuration.md) for every key and default, [Training tools](training.md) for training behavior, and [Keyboard layouts and display](keyboard.md) for remapping, custom layouts and key-release support.
 
 ## If the terminal remains in a bad state
 

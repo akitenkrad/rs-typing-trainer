@@ -11,6 +11,38 @@ pub mod db;
 pub mod storage;
 pub mod ttrec;
 
+/// Optional assistance settings embedded in `SessionHeader::mode_params`.
+///
+/// Every field is optional so records written before schema v6 can be read
+/// without inventing settings that were not recorded.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SessionModeParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pacer_enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview_items: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blind: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ghost: Option<GhostModeParams>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keyboard_show: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keyboard_style: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_style: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accuracy_gate: Option<f64>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GhostModeParams {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opponent: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SessionHeader {
     pub id: Option<i64>,
@@ -65,6 +97,13 @@ impl SessionRecord {
             "pacer_enabled": config.pacer.enabled,
             "pacer_target_wpm": config.pacer.target_wpm,
             "score_eligible": crate::practice::gate::is_eligible(config.gate.min_accuracy, metrics.accuracy),
+            "preview_items": config.session.preview_items,
+            "blind": config.session.blind,
+            "ghost": GhostModeParams::default(),
+            "keyboard_show": config.keyboard.show,
+            "keyboard_style": config.keyboard.style,
+            "prompt_style": config.display.prompt_style,
+            "accuracy_gate": config.gate.min_accuracy,
         })
         .to_string();
         Self {
@@ -106,5 +145,15 @@ impl SessionRecord {
             },
             log,
         }
+    }
+
+    pub fn set_ghost_opponent(&mut self, opponent: Option<String>) {
+        let mut params = serde_json::from_str::<serde_json::Value>(&self.header.mode_params).unwrap_or_else(|_| serde_json::json!({}));
+        params["ghost"] = serde_json::to_value(GhostModeParams {
+            enabled: opponent.is_some(),
+            opponent,
+        })
+        .expect("ghost mode parameters serialize");
+        self.header.mode_params = params.to_string();
     }
 }

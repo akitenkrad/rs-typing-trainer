@@ -10,6 +10,10 @@ use rand::{Rng, thread_rng};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 
 use crate::analysis::metrics::{AnalysisSettings, DetailedMetrics, analyze_records};
+use crate::analysis::prescription::{
+    ControlCandidate, DifficultyState, Evidence, Posterior, PrescriptionBaseline, PrescriptionTarget, adjust_difficulty,
+    evaluate_stored_prescription, prescription_trends, real_word_records_since, record_prescription_session, select_controls,
+};
 use crate::bench::{BenchPart, BenchResultSummary, BenchSettings, generate_version, next_parallel_index};
 use crate::config::{Config, KeyFilter, KeyboardConfig, ModeConfig, ModeKind, SessionConfig};
 use crate::data::{DataCatalog, DataKind, TrainingDataSource};
@@ -22,11 +26,12 @@ use crate::game::word::{ExitKind, Word, WordSlot, WordState};
 use crate::i18n::{Lang, Msg};
 use crate::layout::{KeyboardLayout, builtin_layout, builtin_layout_names, remap_char};
 use crate::metrics::stats::{GameResult, LiveMetrics};
-use crate::practice::adaptive::{AdaptiveOptions, TransitionCost, build_plan};
+use crate::practice::adaptive::{AdaptiveHistory, AdaptiveOptions, TransitionCost, build_plan_seeded};
 use crate::practice::deck::{DeckOptions, KeySelection, WeeklyTheme, build_daily_deck, weekly_theme};
 use crate::practice::ghost::{GhostCondition, GhostTrack, select_ghost};
 use crate::practice::reading_report::{ReadingReportKind, append_reading_report, load_reading_exclusions};
 use crate::practice::recovery::RecoveryMetrics;
+use crate::practice::review::update_review;
 use crate::practice::session_variants::{BurstSeries, EnduranceComparison};
 use crate::practice::unlock::{UnlockState, apply_result, initial_keys, mode_config, unlock_sequence};
 use crate::record::SessionRecord;
@@ -121,6 +126,9 @@ pub struct App {
     pub result_origin: ResultOrigin,
     pub last_save_id: Option<i64>,
     pub last_save_error: Option<String>,
+    pub result_insights: Vec<String>,
+    pub result_grade_line: Option<String>,
+    pub mode_grade_line: Option<String>,
     pub history: Vec<SessionSummary>,
     pub history_selected: usize,
     pub history_sort: HistorySort,
@@ -152,10 +160,15 @@ pub struct App {
     pub analysis_records: Vec<SessionRecord>,
     pub analysis_details: DetailedMetrics,
     pub analysis_summary: crate::analysis::summary::SummaryReport,
+    pub analysis_coach: Option<crate::analysis::coach::CoachReport>,
     pub analysis_summary_scroll: u16,
     pub analysis_transition_selected: usize,
-    pub analysis_keyboard_latency: bool,
+    pub analysis_keyboard_view: usize,
+    pub analysis_confusion_selected: usize,
+    pub analysis_goal_picker: bool,
+    pub analysis_goal_selected: usize,
     pub adaptive_focus: Vec<TransitionCost>,
+    adaptive_candidates: Vec<TransitionCost>,
     pub adaptive_result: Vec<AdaptiveResultRow>,
     pub next_pacer_target_wpm: Option<f64>,
     pub gate_failed: bool,
@@ -171,7 +184,7 @@ pub struct App {
     pub recommend_rhythm: bool,
     analysis_as_of: chrono::NaiveDate,
     bench_run: Option<BenchRun>,
-    settings_original: Option<(KeyboardConfig, String, Lang, crate::config::ErrorMode)>,
+    settings_original: Option<(KeyboardConfig, crate::config::DisplayConfig, Lang, crate::config::ErrorMode)>,
 }
 
 pub struct GameState {
@@ -253,6 +266,9 @@ impl App {
             result_origin: ResultOrigin::JustPlayed,
             last_save_id: None,
             last_save_error: None,
+            result_insights: Vec::new(),
+            result_grade_line: None,
+            mode_grade_line: None,
             history: Vec::new(),
             history_selected: 0,
             history_sort: HistorySort::DateDesc,
@@ -284,10 +300,15 @@ impl App {
             analysis_records: Vec::new(),
             analysis_details: DetailedMetrics::default(),
             analysis_summary: crate::analysis::summary::SummaryReport::default(),
+            analysis_coach: None,
             analysis_summary_scroll: 0,
             analysis_transition_selected: 0,
-            analysis_keyboard_latency: false,
+            analysis_keyboard_view: 0,
+            analysis_confusion_selected: 0,
+            analysis_goal_picker: false,
+            analysis_goal_selected: 0,
             adaptive_focus: Vec::new(),
+            adaptive_candidates: Vec::new(),
             adaptive_result: Vec::new(),
             next_pacer_target_wpm: None,
             gate_failed: false,
@@ -545,6 +566,7 @@ impl App {
                     AnalysisSettings {
                         pause_ms: self.config.analysis.pause_ms,
                         shrinkage_k: self.config.analysis.shrinkage_k,
+                        half_life_days: self.config.analysis.half_life_days,
                     },
                 );
                 (details.reaction_median_ms > 0.0).then_some(-details.reaction_median_ms)
@@ -637,7 +659,7 @@ impl App {
                 self.settings_save_error = None;
                 self.settings_original = Some((
                     self.config.keyboard.clone(),
-                    self.config.display.prompt_style.clone(),
+                    self.config.display.clone(),
                     self.config.general.lang,
                     self.config.session.error_mode,
                 ));
@@ -654,7 +676,25 @@ impl App {
 
     fn open_mode_select(&mut self) {
         self.mode_selected = mode_index(self.config.mode.kind);
+        self.refresh_mode_grade();
         self.screen = Screen::ModeSelect;
+    }
+
+    fn refresh_mode_grade(&mut self) {
+        let records = db::load_records_filtered(&self.db_path(), None, None).unwrap_or_default();
+        let prescriptions = db::load_prescriptions(&self.db_path()).unwrap_or_default();
+        let selected_goal = db::load_selected_goal(&self.db_path()).unwrap_or_default();
+        self.mode_grade_line = crate::analysis::coach::build(
+            &records,
+            &self.config,
+            &self.home_dir,
+            &prescriptions,
+            selected_goal,
+            self.analysis_as_of,
+            self.config.general.lang,
+        )
+        .ok()
+        .and_then(|report| crate::analysis::coach::compact_grades(&report.grades, self.config.general.lang));
     }
 
     fn activate_title_selection(&mut self) {
@@ -672,7 +712,7 @@ impl App {
                 self.settings_save_error = None;
                 self.settings_original = Some((
                     self.config.keyboard.clone(),
-                    self.config.display.prompt_style.clone(),
+                    self.config.display.clone(),
                     self.config.general.lang,
                     self.config.session.error_mode,
                 ));
@@ -776,25 +816,80 @@ impl App {
 
     fn handle_analysis_key(&mut self, key: KeyEvent, action: InputAction) {
         match key.code {
+            KeyCode::Up | KeyCode::Char('k') if self.analysis_tab == 0 && self.analysis_goal_picker => {
+                self.analysis_goal_selected = self.analysis_goal_selected.saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') if self.analysis_tab == 0 && self.analysis_goal_picker => {
+                let count = self.analysis_coach.as_ref().map_or(0, |report| report.goals.len());
+                self.analysis_goal_selected = (self.analysis_goal_selected + 1).min(count.saturating_sub(1));
+            }
+            KeyCode::Enter if self.analysis_tab == 0 && self.analysis_goal_picker => {
+                if let Some(goal) = self
+                    .analysis_coach
+                    .as_ref()
+                    .and_then(|report| report.goals.get(self.analysis_goal_selected))
+                    .cloned()
+                {
+                    let _ = db::save_selected_goal(&self.db_path(), &goal);
+                }
+                self.analysis_goal_picker = false;
+                self.reload_analysis();
+            }
+            KeyCode::Esc if self.analysis_tab == 0 && self.analysis_goal_picker => {
+                self.analysis_goal_picker = false;
+            }
+            KeyCode::Left if self.analysis_tab == 2 && self.analysis_keyboard_view == 3 => {
+                self.analysis_confusion_selected = self.analysis_confusion_selected.saturating_sub(1);
+            }
+            KeyCode::Right if self.analysis_tab == 2 && self.analysis_keyboard_view == 3 => {
+                let count = self.analysis_coach.as_ref().map_or(0, |report| {
+                    report
+                        .diagnosis
+                        .errors
+                        .confusion
+                        .iter()
+                        .map(|row| row.expected.as_str())
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .len()
+                });
+                self.analysis_confusion_selected = (self.analysis_confusion_selected + 1).min(count.saturating_sub(1));
+            }
             KeyCode::Tab | KeyCode::Right => self.analysis_tab = (self.analysis_tab + 1) % 6,
             KeyCode::BackTab | KeyCode::Left => self.analysis_tab = (self.analysis_tab + 5) % 6,
             KeyCode::Up | KeyCode::Char('k') if self.analysis_tab == 0 => {
                 self.analysis_summary_scroll = self.analysis_summary_scroll.saturating_sub(1);
             }
             KeyCode::Down | KeyCode::Char('j') if self.analysis_tab == 0 => {
-                let maximum = self.analysis_summary.lines.len().saturating_sub(1).min(u16::MAX as usize) as u16;
+                let maximum = self
+                    .analysis_coach
+                    .as_ref()
+                    .map_or(self.analysis_summary.lines.len(), |report| report.lines.len())
+                    .saturating_sub(1)
+                    .min(u16::MAX as usize) as u16;
                 self.analysis_summary_scroll = (self.analysis_summary_scroll + 1).min(maximum);
             }
             KeyCode::Up | KeyCode::Char('k') if self.analysis_tab == 3 => {
                 self.analysis_transition_selected = self.analysis_transition_selected.saturating_sub(1);
             }
             KeyCode::Down | KeyCode::Char('j') if self.analysis_tab == 3 => {
-                self.analysis_transition_selected =
-                    (self.analysis_transition_selected + 1).min(self.analysis_details.bigrams.len().saturating_sub(1));
+                let eligible = self
+                    .analysis_details
+                    .bigrams
+                    .iter()
+                    .filter(|row| row.n >= self.config.analysis.min_transition_n)
+                    .count();
+                self.analysis_transition_selected = (self.analysis_transition_selected + 1).min(eligible.saturating_sub(1));
             }
             KeyCode::Enter if self.analysis_tab == 3 => self.practice_selected_transition(),
             KeyCode::Enter if self.analysis_tab == 2 => {
-                self.analysis_keyboard_latency = !self.analysis_keyboard_latency;
+                self.analysis_keyboard_view = (self.analysis_keyboard_view + 1) % 4;
+                self.analysis_confusion_selected = 0;
+            }
+            KeyCode::Char('t') | KeyCode::Char('T') if self.analysis_tab == 0 => {
+                if self.analysis_coach.as_ref().is_some_and(|report| !report.goals.is_empty()) {
+                    self.analysis_goal_picker = !self.analysis_goal_picker;
+                    self.analysis_goal_selected = 0;
+                }
             }
             KeyCode::Char('p') | KeyCode::Char('P') => {
                 self.analysis_period = match self.analysis_period {
@@ -836,7 +931,10 @@ impl App {
         self.analysis_period = AnalysisPeriod::All;
         self.analysis_mode_filter = None;
         self.analysis_transition_selected = 0;
-        self.analysis_keyboard_latency = false;
+        self.analysis_keyboard_view = 0;
+        self.analysis_confusion_selected = 0;
+        self.analysis_goal_picker = false;
+        self.analysis_goal_selected = 0;
         self.analysis_summary_scroll = 0;
         self.reload_analysis();
         self.screen = Screen::Analysis;
@@ -860,6 +958,7 @@ impl App {
             AnalysisSettings {
                 pause_ms: self.config.analysis.pause_ms,
                 shrinkage_k: self.config.analysis.shrinkage_k,
+                half_life_days: self.config.analysis.half_life_days,
             },
         );
         self.analysis_summary = crate::analysis::summary::generate_with_metrics(
@@ -870,14 +969,38 @@ impl App {
             today,
             self.config.general.lang,
         );
+        let mut prescriptions = db::load_prescriptions(&self.db_path()).unwrap_or_default();
+        if let Some(since) = since {
+            prescriptions.retain(|row| row.created_at.date_naive() >= since);
+        }
+        if self.analysis_mode_filter.as_deref().is_some_and(|mode| mode != "adaptive") {
+            prescriptions.clear();
+        }
+        let selected_goal = db::load_selected_goal(&self.db_path()).unwrap_or_default();
+        self.analysis_coach = crate::analysis::coach::build(
+            &self.analysis_records,
+            &self.config,
+            &self.home_dir,
+            &prescriptions,
+            selected_goal,
+            today,
+            self.config.general.lang,
+        )
+        .ok();
         self.analysis_summary_scroll = 0;
-        self.analysis_transition_selected = self
-            .analysis_transition_selected
-            .min(self.analysis_details.bigrams.len().saturating_sub(1));
+        self.analysis_transition_selected = self.analysis_transition_selected.min(
+            self.analysis_details
+                .bigrams
+                .iter()
+                .filter(|row| row.n >= self.config.analysis.min_transition_n)
+                .count()
+                .saturating_sub(1),
+        );
     }
 
     fn practice_selected_transition(&mut self) {
         let mut rows = self.analysis_details.bigrams.clone();
+        rows.retain(|row| row.n >= self.config.analysis.min_transition_n);
         rows.sort_by(|left, right| right.estimated_iki_ms.total_cmp(&left.estimated_iki_ms));
         let Some(row) = rows.get(self.analysis_transition_selected) else {
             return;
@@ -1080,7 +1203,7 @@ impl App {
                 self.settings_selected = self.settings_selected.saturating_sub(1);
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.settings_selected = (self.settings_selected + 1).min(7);
+                self.settings_selected = (self.settings_selected + 1).min(8);
             }
             KeyCode::Left | KeyCode::Char('h') => self.cycle_setting(-1),
             KeyCode::Right | KeyCode::Char('l') => self.cycle_setting(1),
@@ -1108,9 +1231,9 @@ impl App {
     }
 
     fn cancel_settings(&mut self) {
-        if let Some((keyboard, prompt_style, language, error_mode)) = self.settings_original.take() {
+        if let Some((keyboard, display, language, error_mode)) = self.settings_original.take() {
             self.config.keyboard = keyboard;
-            self.config.display.prompt_style = prompt_style;
+            self.config.display = display;
             self.config.general.lang = language;
             self.config.session.error_mode = error_mode;
         }
@@ -1157,6 +1280,11 @@ impl App {
                     crate::config::ErrorMode::Advance => crate::config::ErrorMode::Stop,
                 };
             }
+            8 => cycle_string(
+                &mut self.config.display.feedback,
+                &["summary".to_owned(), "detailed".to_owned()],
+                direction,
+            ),
             _ => {}
         }
     }
@@ -1465,6 +1593,7 @@ impl App {
         let mut generator_config = self.config.mode.clone();
         self.new_unlocked_key = None;
         self.adaptive_focus.clear();
+        self.adaptive_candidates.clear();
         self.adaptive_result.clear();
         self.mode_warning = None;
         self.rhythm_deviation_ms = None;
@@ -1478,6 +1607,7 @@ impl App {
                 AnalysisSettings {
                     pause_ms: self.config.analysis.pause_ms,
                     shrinkage_k: self.config.analysis.shrinkage_k,
+                    half_life_days: self.config.analysis.half_life_days,
                 },
             );
             crate::practice::keyboard_fade::key_fade_states(&details, self.config.analysis.shrinkage_k)
@@ -1558,9 +1688,40 @@ impl App {
                 AnalysisSettings {
                     pause_ms: self.config.analysis.pause_ms,
                     shrinkage_k: self.config.analysis.shrinkage_k,
+                    half_life_days: self.config.analysis.half_life_days,
                 },
             );
             let previous = db::load_adaptive_focus(&db_path, date.pred_opt().unwrap_or(date), &self.config.keyboard.layout).unwrap_or_default();
+            let difficulty = db::load_adaptive_difficulty(&db_path).ok().flatten().unwrap_or(DifficultyState {
+                pacer_multiplier: 1.0,
+                drill_ratio: self.config.adaptive.drill_ratio,
+            });
+            let recent_accuracy = records
+                .iter()
+                .filter(|record| record.header.mode == "adaptive")
+                .map(|record| record.header.accuracy)
+                .collect::<Vec<_>>();
+            let difficulty = adjust_difficulty(difficulty, &recent_accuracy, self.config.practice.auto_difficulty);
+            let _ = db::save_adaptive_difficulty(&db_path, &difficulty);
+            self.config.pacer.target_wpm = self.config.pacer.target_wpm.map(|target| target * difficulty.pacer_multiplier);
+            let as_of = date.and_hms_opt(23, 59, 59).expect("valid end of day").and_utc();
+            let due_reviews = db::load_review_schedules(&db_path, &self.config.keyboard.layout)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|row| row.next_due <= as_of)
+                .map(|row| {
+                    let days = (date - row.last_reviewed_at.date_naive()).num_days().max(1);
+                    (row.from, row.to, days)
+                })
+                .collect::<Vec<_>>();
+            let prescriptions = db::load_prescriptions(&db_path).unwrap_or_default();
+            let trends = prescription_trends(&prescriptions, as_of);
+            let history = AdaptiveHistory {
+                improving: trends.improving,
+                stalled: trends.stalled,
+                excluded_controls: trends.controls,
+                due_reviews,
+            };
             let corpus = if japanese {
                 catalog
                     .words_ja()
@@ -1570,18 +1731,26 @@ impl App {
             } else {
                 catalog.words_en().to_vec()
             };
-            let plan = build_plan(
+            let plan = build_plan_seeded(
                 &details,
                 &corpus,
                 AdaptiveOptions {
                     error_weight_ms: self.config.adaptive.error_weight,
-                    drill_ratio: self.config.adaptive.drill_ratio,
+                    drill_ratio: difficulty.drill_ratio,
                     min_transition_types: 50,
+                    min_transition_n: self.config.analysis.min_transition_n,
                     max_share: self.config.adaptive.max_share,
                 },
                 &previous,
+                seed,
+                &history,
             );
-            self.adaptive_focus = plan.transitions.iter().take(5).cloned().collect();
+            self.adaptive_candidates = plan.transitions.clone();
+            self.adaptive_focus = if plan.fallback_to_words {
+                Vec::new()
+            } else {
+                plan.transitions.iter().take(5).cloned().collect()
+            };
             let focus = plan.focus();
             let _ = db::save_adaptive_focus(&db_path, date, &self.config.keyboard.layout, &focus);
             if plan.fallback_to_words {
@@ -1830,6 +1999,7 @@ impl App {
     fn finish_game(&mut self, _now: Instant) {
         let Some(game) = self.game.take() else { return };
         let started_wall = game.started_wall;
+        let ghost_opponent = game.ghost.as_ref().map(|ghost| ghost.opponent().to_owned());
         let log = game.session.into_log();
         let db_path = self.db_path();
         if self.active_bench_id.is_none()
@@ -1859,6 +2029,7 @@ impl App {
         }
         let mut result = GameResult::from_log(&self.config, &log);
         let mut record = SessionRecord::from_log(&self.config, log, started_wall);
+        record.set_ghost_opponent(ghost_opponent);
         self.recovery_metrics = crate::practice::recovery::recovery_metrics(&record.log);
         if self.config.mode.kind == ModeKind::Rhythm
             && let Some(bpm) = self.rhythm_bpm
@@ -1895,6 +2066,7 @@ impl App {
                 AnalysisSettings {
                     pause_ms: self.config.analysis.pause_ms,
                     shrinkage_k: self.config.analysis.shrinkage_k,
+                    half_life_days: self.config.analysis.half_life_days,
                 },
             );
             self.adaptive_result = self
@@ -1953,8 +2125,44 @@ impl App {
 
         match db::save(&db_path, &record) {
             Ok(id) => {
+                record.header.id = Some(id);
                 self.last_save_id = Some(id);
                 self.last_save_error = None;
+                if let Some(geometry) = crate::layout::geometry::geometry(&record.header.geometry) {
+                    let layout = self.practice_layout().clone();
+                    let _ = db::update_transition_model_cache(
+                        &db_path,
+                        &record,
+                        &layout,
+                        &geometry,
+                        AnalysisSettings {
+                            pause_ms: self.config.analysis.pause_ms,
+                            shrinkage_k: self.config.analysis.shrinkage_k,
+                            half_life_days: self.config.analysis.half_life_days,
+                        },
+                    );
+                }
+                if record.header.mode == "adaptive" {
+                    let geometry = crate::layout::geometry::geometry(&record.header.geometry)
+                        .or_else(|| crate::layout::geometry::geometry("ansi"))
+                        .expect("bundled keyboard geometry");
+                    let practice_layout = self.practice_layout().clone();
+                    let _ = record_adaptive_state(AdaptiveRecordContext {
+                        db_path: &db_path,
+                        layout: &record.header.layout,
+                        practice_layout: &practice_layout,
+                        geometry: &geometry,
+                        settings: AnalysisSettings {
+                            pause_ms: self.config.analysis.pause_ms,
+                            shrinkage_k: self.config.analysis.shrinkage_k,
+                            half_life_days: self.config.analysis.half_life_days,
+                        },
+                        focus: &self.adaptive_focus,
+                        candidates: &self.adaptive_candidates,
+                        results: &self.adaptive_result,
+                        finished_at: &record.header.finished_at,
+                    });
+                }
             }
             Err(e) => {
                 self.last_save_id = None;
@@ -1966,12 +2174,215 @@ impl App {
                 );
             }
         }
+        self.refresh_result_coaching(&record);
         self.refresh_recommendations();
         self.last_result = Some(result);
         self.legacy_wpm = None;
         self.result_origin = ResultOrigin::JustPlayed;
         self.screen = Screen::Result;
     }
+
+    fn refresh_result_coaching(&mut self, record: &SessionRecord) {
+        self.result_insights.clear();
+        self.result_grade_line = None;
+        let records = db::load_records_filtered(&self.db_path(), None, None).unwrap_or_else(|_| vec![record.clone()]);
+        let prescriptions = db::load_prescriptions(&self.db_path()).unwrap_or_default();
+        let selected_goal = db::load_selected_goal(&self.db_path()).unwrap_or_default();
+        let Ok(report) = crate::analysis::coach::build(
+            &records,
+            &self.config,
+            &self.home_dir,
+            &prescriptions,
+            selected_goal,
+            self.analysis_as_of,
+            self.config.general.lang,
+        ) else {
+            return;
+        };
+        if let Ok(session_report) = crate::analysis::coach::build(
+            std::slice::from_ref(record),
+            &self.config,
+            &self.home_dir,
+            &[],
+            None,
+            self.analysis_as_of,
+            self.config.general.lang,
+        ) {
+            self.result_insights = crate::analysis::coach::session_insights(&session_report, record, self.config.general.lang);
+        }
+        if self.result_insights.len() < 3
+            && let Some(insight) = crate::analysis::coach::form_insight(&report, record, self.config.general.lang)
+        {
+            self.result_insights.push(insight);
+        }
+        if record.header.mode == "bench" {
+            let language = if record.header.bench_id.as_deref().is_some_and(|id| id.contains("/C/")) {
+                "ja"
+            } else {
+                "en"
+            };
+            self.result_grade_line = crate::analysis::coach::benchmark_grade_line(&report.grades, language, self.config.general.lang);
+        }
+    }
+}
+
+struct AdaptiveRecordContext<'a> {
+    db_path: &'a std::path::Path,
+    layout: &'a str,
+    practice_layout: &'a KeyboardLayout,
+    geometry: &'a crate::layout::geometry::KeyboardGeometry,
+    settings: AnalysisSettings,
+    focus: &'a [TransitionCost],
+    candidates: &'a [TransitionCost],
+    results: &'a [AdaptiveResultRow],
+    finished_at: &'a str,
+}
+
+fn record_adaptive_state(context: AdaptiveRecordContext<'_>) -> AppResult<()> {
+    let AdaptiveRecordContext {
+        db_path,
+        layout,
+        practice_layout,
+        geometry,
+        settings,
+        focus,
+        candidates,
+        results,
+        finished_at,
+    } = context;
+    let at = chrono::DateTime::parse_from_rfc3339(finished_at)
+        .map_err(|error| crate::error::AppError::Record(format!("invalid adaptive finish time: {error}")))?
+        .with_timezone(&chrono::Utc);
+    let mut prescriptions = db::load_prescriptions(db_path)?;
+    let excluded = focus.iter().map(|row| (row.from.clone(), row.to.clone())).collect::<Vec<_>>();
+    for target_row in focus
+        .iter()
+        .filter(|row| row.reason_kind != crate::practice::adaptive::FocusReason::Review)
+    {
+        let pool = candidates
+            .iter()
+            .filter(|row| row.from != target_row.from || row.to != target_row.to)
+            .map(|row| ControlCandidate::new(&row.from, &row.to, &row.kind, row.frequency_quartile, row.estimated_iki_ms))
+            .collect::<Vec<_>>();
+        let controls = select_controls(
+            &target_row.kind,
+            target_row.frequency_quartile,
+            target_row.estimated_iki_ms,
+            &pool,
+            &excluded,
+        );
+        let control_baselines = controls
+            .iter()
+            .filter_map(|control| {
+                candidates
+                    .iter()
+                    .find(|row| row.from == control.from && row.to == control.to)
+                    .map(transition_posterior)
+            })
+            .collect::<Vec<_>>();
+        if control_baselines.len() != controls.len() || controls.is_empty() {
+            continue;
+        }
+        let target = PrescriptionTarget {
+            from: target_row.from.clone(),
+            to: target_row.to.clone(),
+            kind: target_row.kind.clone(),
+            frequency_quartile: target_row.frequency_quartile,
+        };
+        let prescription = record_prescription_session(
+            &prescriptions,
+            at,
+            layout,
+            &target,
+            &controls,
+            &PrescriptionBaseline {
+                target: transition_posterior(target_row),
+                controls: control_baselines,
+            },
+        );
+        let id = db::save_prescription(db_path, &prescription)?;
+        let mut saved = prescription;
+        saved.id = Some(id);
+        if let Some(index) = prescriptions.iter().position(|row| row.id == Some(id)) {
+            prescriptions[index] = saved;
+        } else {
+            prescriptions.push(saved);
+        }
+    }
+
+    let all_records = db::load_records_filtered(db_path, None, None)?;
+    for prescription in prescriptions.iter().filter(|row| row.status == "active") {
+        let Ok(target) = serde_json::from_value::<PrescriptionTarget>(prescription.target.clone()) else {
+            continue;
+        };
+        let Ok(controls) = serde_json::from_value::<Vec<ControlCandidate>>(prescription.control.clone()) else {
+            continue;
+        };
+        let Ok(baseline) = serde_json::from_value::<PrescriptionBaseline>(prescription.baseline.clone()) else {
+            continue;
+        };
+        if controls.len() != baseline.controls.len() {
+            continue;
+        }
+        let evidence_records = real_word_records_since(&all_records, prescription.created_at);
+        let details = analyze_records(&evidence_records, practice_layout, geometry, settings);
+        let target_current = posterior_from_metrics(&details, &target.from, &target.to, baseline.target);
+        let control_current = controls
+            .iter()
+            .zip(&baseline.controls)
+            .map(|(control, fallback)| posterior_from_metrics(&details, &control.from, &control.to, *fallback))
+            .collect::<Vec<_>>();
+        if let Some(updated) = evaluate_stored_prescription(prescription, &Evidence::real_words(target_current, control_current), at) {
+            db::save_prescription(db_path, &updated)?;
+        }
+    }
+
+    let schedules = db::load_review_schedules(db_path, layout)?;
+    for target in focus {
+        let previous = schedules.iter().find(|row| row.from == target.from && row.to == target.to).cloned();
+        let mastered = target.estimated_iki_ms <= target.target_iki_ms * 1.05;
+        let session_iki = results
+            .iter()
+            .find(|row| row.from == target.from && row.to == target.to)
+            .and_then(|row| row.session_iki_ms);
+        let due_review = target.reason_kind == crate::practice::adaptive::FocusReason::Review;
+        if previous.is_none() && mastered {
+            db::save_review_schedule(db_path, &update_review(None, layout, &target.from, &target.to, at, true, false))?;
+        } else if due_review && let Some(session_iki) = session_iki {
+            let retained = session_iki <= target.target_iki_ms * 1.05;
+            db::save_review_schedule(
+                db_path,
+                &update_review(previous, layout, &target.from, &target.to, at, retained, !retained),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn transition_posterior(row: &TransitionCost) -> Posterior {
+    Posterior {
+        estimated_ms: row.estimated_iki_ms,
+        log_variance: row.posterior_log_variance,
+        effective_n: row.observation_n as f64,
+    }
+}
+
+fn posterior_from_metrics(metrics: &DetailedMetrics, from: &str, to: &str, fallback: Posterior) -> Posterior {
+    metrics.bigrams.iter().find(|row| row.from == from && row.to == to).map_or(
+        Posterior {
+            effective_n: 0.0,
+            ..fallback
+        },
+        |row| Posterior {
+            estimated_ms: row.estimated_iki_ms,
+            log_variance: if row.estimated_iki_lo_ms > 0.0 && row.estimated_iki_hi_ms > row.estimated_iki_lo_ms {
+                ((row.estimated_iki_hi_ms.ln() - row.estimated_iki_lo_ms.ln()) / (2.0 * 1.644_853_626_951_472_2)).powi(2)
+            } else {
+                fallback.log_variance
+            },
+            effective_n: row.n as f64,
+        },
+    )
 }
 
 const MODES: [ModeKind; 10] = [
@@ -2068,7 +2479,11 @@ fn replay_prompt(item: &ItemLog) -> GeneratedPrompt {
         .as_deref()
         .map(|reading| RomajiJudge::new(reading).guide().to_owned())
         .unwrap_or_else(|| item.text.clone());
-    GeneratedPrompt::fixed(item.text.clone(), item.reading.clone(), target)
+    let mut prompt = GeneratedPrompt::fixed(item.text.clone(), item.reading.clone(), target);
+    if let Some(kind) = item.kind {
+        prompt.kind = kind;
+    }
+    prompt
 }
 
 fn word_from_text(text: &str) -> Word {

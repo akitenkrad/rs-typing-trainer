@@ -7,13 +7,72 @@ use chrono::{DateTime, Local};
 use rand::RngCore;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
+use crate::analysis::metrics::AnalysisSettings;
+use crate::analysis::model::{
+    MODEL_VERSION, ModelView, Prescription, SufficientStatistics, TransitionStatistic, build_sufficient_statistics, session_language,
+    update_sufficient_statistics,
+};
 use crate::config::Config;
-use crate::engine::session::{ItemLog, ItemOutcome, KeystrokeKind, KeystrokeLog, SessionLog};
+use crate::engine::session::{ItemKind, ItemLog, ItemOutcome, KeystrokeKind, KeystrokeLog, SessionLog};
 use crate::error::{AppError, AppResult};
 use crate::metrics::stats::GameResult;
 use crate::record::{SessionHeader, SessionRecord};
 
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 7;
+
+const V6_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS transition_model (
+  layout TEXT NOT NULL,
+  language TEXT NOT NULL,
+  view TEXT NOT NULL,
+  from_key TEXT NOT NULL,
+  to_key TEXT NOT NULL,
+  from_hand TEXT NOT NULL,
+  to_hand TEXT NOT NULL,
+  from_finger TEXT NOT NULL,
+  to_finger TEXT NOT NULL,
+  weight REAL NOT NULL,
+  log_iki_sum REAL NOT NULL,
+  log_iki_sq_sum REAL NOT NULL,
+  error_weight REAL NOT NULL,
+  attempt_weight REAL NOT NULL,
+  observations INTEGER NOT NULL,
+  errors INTEGER NOT NULL,
+  last_added_at TEXT NOT NULL,
+  as_of TEXT NOT NULL,
+  last_session_id INTEGER,
+  half_life_days REAL NOT NULL,
+  model_version INTEGER NOT NULL,
+  PRIMARY KEY (layout, language, view, from_key, to_key)
+);
+CREATE TABLE IF NOT EXISTS prescriptions (
+  id INTEGER PRIMARY KEY,
+  created_at TEXT NOT NULL,
+  layout TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  target_json TEXT NOT NULL,
+  control_json TEXT NOT NULL,
+  hypothesis_json TEXT NOT NULL,
+  baseline_json TEXT NOT NULL,
+  status TEXT NOT NULL,
+  evaluated_at TEXT,
+  result_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_prescriptions_created_at ON prescriptions(created_at DESC);
+"#;
+
+const V7_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS review_schedule (
+  layout TEXT NOT NULL,
+  from_key TEXT NOT NULL,
+  to_key TEXT NOT NULL,
+  next_due TEXT NOT NULL,
+  interval_days REAL NOT NULL,
+  last_reviewed_at TEXT NOT NULL,
+  PRIMARY KEY (layout, from_key, to_key)
+);
+CREATE INDEX IF NOT EXISTS idx_review_schedule_due ON review_schedule(layout, next_due);
+"#;
 
 pub const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS sessions (
@@ -50,6 +109,7 @@ CREATE TABLE IF NOT EXISTS items (
   idx INTEGER NOT NULL,
   text TEXT NOT NULL,
   reading TEXT,
+  kind TEXT,
   shown_us INTEGER NOT NULL,
   done_us INTEGER,
   outcome TEXT NOT NULL,
@@ -154,12 +214,13 @@ pub fn save(path: &Path, record: &SessionRecord) -> AppResult<i64> {
     let id = tx.last_insert_rowid();
     for item in &record.log.items {
         tx.execute(
-            "INSERT INTO items (session_id, idx, text, reading, shown_us, done_us, outcome) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO items (session_id, idx, text, reading, kind, shown_us, done_us, outcome) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 id,
                 i64::from(item.idx),
                 item.text,
                 item.reading,
+                item.kind.map(item_kind),
                 as_i64(item.shown_us),
                 item.done_us.map(as_i64),
                 item_outcome(item.outcome),
@@ -465,6 +526,303 @@ pub fn load_adaptive_focus(path: &Path, day: chrono::NaiveDate, layout: &str) ->
     value.map_or_else(|| Ok(Vec::new()), |json| serde_json::from_str(&json).map_err(Into::into))
 }
 
+fn save_meta_json<T: serde::Serialize>(path: &Path, key: &str, value: &T) -> AppResult<()> {
+    let conn = open(path)?;
+    let json = serde_json::to_vec(value)?;
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        params![key, json],
+    )?;
+    Ok(())
+}
+
+fn load_meta_json<T: serde::de::DeserializeOwned>(path: &Path, key: &str) -> AppResult<Option<T>> {
+    let conn = open(path)?;
+    let value = conn
+        .query_row("SELECT value FROM meta WHERE key = ?1", [key], |row| row.get::<_, Vec<u8>>(0))
+        .optional()?;
+    value.map(|bytes| serde_json::from_slice(&bytes).map_err(Into::into)).transpose()
+}
+
+pub fn save_adaptive_difficulty(path: &Path, state: &crate::analysis::prescription::DifficultyState) -> AppResult<()> {
+    save_meta_json(path, "adaptive_difficulty", state)
+}
+
+pub fn load_adaptive_difficulty(path: &Path) -> AppResult<Option<crate::analysis::prescription::DifficultyState>> {
+    load_meta_json(path, "adaptive_difficulty")
+}
+
+pub fn save_selected_goal(path: &Path, goal: &crate::analysis::prescription::GoalSuggestion) -> AppResult<()> {
+    save_meta_json(path, "selected_goal", goal)
+}
+
+pub fn load_selected_goal(path: &Path) -> AppResult<Option<crate::analysis::prescription::GoalSuggestion>> {
+    load_meta_json(path, "selected_goal")
+}
+
+/// Replace one cached model scope transactionally.
+///
+/// Replacing instead of adding makes retries idempotent. The cache can be
+/// discarded at any time because every value is derived from keystroke logs.
+pub fn save_transition_model(path: &Path, statistics: &SufficientStatistics) -> AppResult<()> {
+    let mut conn = open(path)?;
+    let tx = conn.transaction()?;
+    tx.execute(
+        "DELETE FROM transition_model WHERE layout = ?1 AND language = ?2 AND view = ?3",
+        params![statistics.layout, statistics.language, statistics.view.as_str()],
+    )?;
+    for row in &statistics.rows {
+        tx.execute(
+            "INSERT INTO transition_model (layout, language, view, from_key, to_key, from_hand, to_hand, from_finger, to_finger, weight, log_iki_sum, log_iki_sq_sum, error_weight, attempt_weight, observations, errors, last_added_at, as_of, last_session_id, half_life_days, model_version) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+            params![
+                statistics.layout,
+                statistics.language,
+                statistics.view.as_str(),
+                row.from,
+                row.to,
+                row.from_hand,
+                row.to_hand,
+                row.from_finger,
+                row.to_finger,
+                row.weight,
+                row.log_iki_sum,
+                row.log_iki_sq_sum,
+                row.error_weight,
+                row.attempt_weight,
+                as_i64(row.observations),
+                as_i64(row.errors),
+                row.last_added_at.to_rfc3339(),
+                statistics.as_of.to_rfc3339(),
+                statistics.last_session_id,
+                statistics.half_life_days,
+                statistics.model_version,
+            ],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Load a valid cache scope. A model-version mismatch returns `None`, which
+/// tells the caller to rebuild it from the authoritative keystroke log.
+pub fn load_transition_model(path: &Path, layout: &str, language: &str, view: ModelView) -> AppResult<Option<SufficientStatistics>> {
+    let conn = open(path)?;
+    let mut statement = conn.prepare(
+        "SELECT from_key, to_key, from_hand, to_hand, from_finger, to_finger, weight, log_iki_sum, log_iki_sq_sum, error_weight, attempt_weight, observations, errors, last_added_at, as_of, last_session_id, half_life_days, model_version FROM transition_model WHERE layout = ?1 AND language = ?2 AND view = ?3 ORDER BY from_key, to_key",
+    )?;
+    let stored = statement
+        .query_map(params![layout, language, view.as_str()], |row| {
+            Ok((
+                TransitionStatistic {
+                    from: row.get(0)?,
+                    to: row.get(1)?,
+                    from_hand: row.get(2)?,
+                    to_hand: row.get(3)?,
+                    from_finger: row.get(4)?,
+                    to_finger: row.get(5)?,
+                    weight: row.get(6)?,
+                    log_iki_sum: row.get(7)?,
+                    log_iki_sq_sum: row.get(8)?,
+                    error_weight: row.get(9)?,
+                    attempt_weight: row.get(10)?,
+                    observations: row.get::<_, i64>(11)?.max(0) as u64,
+                    errors: row.get::<_, i64>(12)?.max(0) as u64,
+                    last_added_at: parse_utc_sql(row.get::<_, String>(13)?)?,
+                },
+                row.get::<_, String>(14)?,
+                row.get::<_, Option<i64>>(15)?,
+                row.get::<_, f64>(16)?,
+                row.get::<_, i64>(17)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    let Some((_, as_of, last_session_id, half_life_days, model_version)) = stored.first() else {
+        return Ok(None);
+    };
+    if *model_version != MODEL_VERSION {
+        return Ok(None);
+    }
+    Ok(Some(SufficientStatistics {
+        model_version: *model_version,
+        layout: layout.to_owned(),
+        language: language.to_owned(),
+        view,
+        half_life_days: *half_life_days,
+        as_of: parse_utc_record(as_of)?,
+        last_session_id: *last_session_id,
+        rows: stored.into_iter().map(|(row, _, _, _, _)| row).collect(),
+    }))
+}
+
+pub fn update_transition_model_cache(
+    path: &Path,
+    record: &SessionRecord,
+    layout: &crate::layout::KeyboardLayout,
+    geometry: &crate::layout::geometry::KeyboardGeometry,
+    settings: AnalysisSettings,
+) -> AppResult<()> {
+    let language = session_language(record);
+    let as_of = parse_utc_record(&record.header.finished_at)?;
+    for view in [ModelView::Recent, ModelView::AllTime] {
+        let statistics = load_transition_model(path, layout.name(), language, view)?;
+        let statistics = if let Some(mut statistics) = statistics {
+            update_sufficient_statistics(&mut statistics, std::slice::from_ref(record), layout, geometry, settings, as_of);
+            statistics
+        } else {
+            let records = load_records_filtered(path, None, None)?
+                .into_iter()
+                .filter(|candidate| candidate.header.layout == layout.name() && session_language(candidate) == language)
+                .collect::<Vec<_>>();
+            let rebuild_as_of = records
+                .iter()
+                .filter_map(|candidate| parse_utc_record(&candidate.header.finished_at).ok())
+                .max()
+                .unwrap_or(as_of);
+            build_sufficient_statistics(&records, layout, geometry, settings, view, rebuild_as_of)
+        };
+        save_transition_model(path, &statistics)?;
+    }
+    Ok(())
+}
+
+pub fn save_prescription(path: &Path, prescription: &Prescription) -> AppResult<i64> {
+    let conn = open(path)?;
+    let target = serde_json::to_string(&prescription.target)?;
+    let control = serde_json::to_string(&prescription.control)?;
+    let hypothesis = serde_json::to_string(&prescription.hypothesis)?;
+    let baseline = serde_json::to_string(&prescription.baseline)?;
+    let evaluated_at = prescription.evaluated_at.map(|value| value.to_rfc3339());
+    let result = prescription.result.as_ref().map(serde_json::to_string).transpose()?;
+    if let Some(id) = prescription.id {
+        let changed = conn.execute(
+            "UPDATE prescriptions SET created_at = ?1, layout = ?2, kind = ?3, target_json = ?4, control_json = ?5, hypothesis_json = ?6, baseline_json = ?7, status = ?8, evaluated_at = ?9, result_json = ?10 WHERE id = ?11",
+            params![
+                prescription.created_at.to_rfc3339(),
+                prescription.layout,
+                prescription.kind,
+                target,
+                control,
+                hypothesis,
+                baseline,
+                prescription.status,
+                evaluated_at,
+                result,
+                id,
+            ],
+        )?;
+        if changed == 0 {
+            return Err(AppError::Record(format!("prescription #{id} does not exist")));
+        }
+        return Ok(id);
+    }
+    conn.execute(
+        "INSERT INTO prescriptions (created_at, layout, kind, target_json, control_json, hypothesis_json, baseline_json, status, evaluated_at, result_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![
+            prescription.created_at.to_rfc3339(),
+            prescription.layout,
+            prescription.kind,
+            target,
+            control,
+            hypothesis,
+            baseline,
+            prescription.status,
+            evaluated_at,
+            result,
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+pub fn load_prescriptions(path: &Path) -> AppResult<Vec<Prescription>> {
+    let conn = open(path)?;
+    let mut statement = conn.prepare(
+        "SELECT id, created_at, layout, kind, target_json, control_json, hypothesis_json, baseline_json, status, evaluated_at, result_json FROM prescriptions ORDER BY created_at, id",
+    )?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, String>(8)?,
+                row.get::<_, Option<String>>(9)?,
+                row.get::<_, Option<String>>(10)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    rows.into_iter()
+        .map(
+            |(id, created_at, layout, kind, target, control, hypothesis, baseline, status, evaluated_at, result)| {
+                Ok(Prescription {
+                    id: Some(id),
+                    created_at: parse_utc_record(&created_at)?,
+                    layout,
+                    kind,
+                    target: serde_json::from_str(&target)?,
+                    control: serde_json::from_str(&control)?,
+                    hypothesis: serde_json::from_str(&hypothesis)?,
+                    baseline: serde_json::from_str(&baseline)?,
+                    status,
+                    evaluated_at: evaluated_at.map(|value| parse_utc_record(&value)).transpose()?,
+                    result: result.map(|value| serde_json::from_str(&value)).transpose()?,
+                })
+            },
+        )
+        .collect()
+}
+
+pub fn save_review_schedule(path: &Path, schedule: &crate::practice::review::ReviewSchedule) -> AppResult<()> {
+    let conn = open(path)?;
+    conn.execute(
+        "INSERT INTO review_schedule (layout, from_key, to_key, next_due, interval_days, last_reviewed_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(layout, from_key, to_key) DO UPDATE SET next_due=excluded.next_due, interval_days=excluded.interval_days, last_reviewed_at=excluded.last_reviewed_at",
+        params![
+            schedule.layout,
+            schedule.from,
+            schedule.to,
+            schedule.next_due.to_rfc3339(),
+            schedule.interval_days,
+            schedule.last_reviewed_at.to_rfc3339(),
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn load_review_schedules(path: &Path, layout: &str) -> AppResult<Vec<crate::practice::review::ReviewSchedule>> {
+    let conn = open(path)?;
+    let mut statement = conn.prepare(
+        "SELECT layout, from_key, to_key, next_due, interval_days, last_reviewed_at FROM review_schedule WHERE layout = ?1 ORDER BY next_due, from_key, to_key",
+    )?;
+    let rows = statement
+        .query_map([layout], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, f64>(4)?,
+                row.get::<_, String>(5)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    rows.into_iter()
+        .map(|(layout, from, to, next_due, interval_days, last_reviewed_at)| {
+            Ok(crate::practice::review::ReviewSchedule {
+                layout,
+                from,
+                to,
+                next_due: parse_utc_record(&next_due)?,
+                interval_days,
+                last_reviewed_at: parse_utc_record(&last_reviewed_at)?,
+            })
+        })
+        .collect()
+}
+
 fn initialize_or_migrate(conn: &mut Connection) -> AppResult<()> {
     let tx = conn.transaction()?;
     if is_v1(&tx)? {
@@ -478,12 +836,39 @@ fn initialize_or_migrate(conn: &mut Connection) -> AppResult<()> {
         tx.execute_batch(SCHEMA)?;
     }
     ensure_score_eligible(&tx)?;
+    ensure_item_kind(&tx)?;
     let version: i64 = tx.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if version < SCHEMA_VERSION {
         recompute_legacy_metrics(&tx)?;
+        if version < 6 {
+            migrate_v6(&tx)?;
+        }
+        if version < 7 {
+            migrate_v7(&tx)?;
+        }
         tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
     tx.commit()?;
+    Ok(())
+}
+
+fn migrate_v6(tx: &Transaction<'_>) -> AppResult<()> {
+    tx.execute_batch(V6_SCHEMA)?;
+    Ok(())
+}
+
+fn migrate_v7(tx: &Transaction<'_>) -> AppResult<()> {
+    tx.execute_batch(V7_SCHEMA)?;
+    ensure_item_kind(tx)?;
+    Ok(())
+}
+
+fn ensure_item_kind(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    let mut statement = tx.prepare("PRAGMA table_info(items)")?;
+    let columns = statement.query_map([], |row| row.get::<_, String>(1))?.collect::<Result<Vec<_>, _>>()?;
+    if !columns.iter().any(|name| name == "kind") {
+        tx.execute("ALTER TABLE items ADD COLUMN kind TEXT", [])?;
+    }
     Ok(())
 }
 
@@ -728,15 +1113,17 @@ fn load_record_from(conn: &Connection, id: i64) -> AppResult<Option<SessionRecor
         return Ok(None);
     };
     let items = {
-        let mut stmt = conn.prepare("SELECT idx, text, reading, shown_us, done_us, outcome FROM items WHERE session_id = ?1 ORDER BY idx")?;
+        let mut stmt = conn.prepare("SELECT idx, text, reading, kind, shown_us, done_us, outcome FROM items WHERE session_id = ?1 ORDER BY idx")?;
         stmt.query_map(params![id], |row| {
-            let outcome: String = row.get(5)?;
+            let kind: Option<String> = row.get(3)?;
+            let outcome: String = row.get(6)?;
             Ok(ItemLog {
                 idx: row.get::<_, i64>(0)?.max(0) as u32,
                 text: row.get(1)?,
                 reading: row.get(2)?,
-                shown_us: row.get::<_, i64>(3)?.max(0) as u64,
-                done_us: row.get::<_, Option<i64>>(4)?.map(|value| value.max(0) as u64),
+                kind: kind.as_deref().and_then(parse_item_kind),
+                shown_us: row.get::<_, i64>(4)?.max(0) as u64,
+                done_us: row.get::<_, Option<i64>>(5)?.map(|value| value.max(0) as u64),
                 outcome: parse_outcome(&outcome),
             })
         })?
@@ -802,6 +1189,21 @@ fn parse_outcome(value: &str) -> ItemOutcome {
     }
 }
 
+fn item_kind(value: ItemKind) -> &'static str {
+    match value {
+        ItemKind::Drill => "drill",
+        ItemKind::Word => "word",
+    }
+}
+
+fn parse_item_kind(value: &str) -> Option<ItemKind> {
+    match value {
+        "drill" => Some(ItemKind::Drill),
+        "word" => Some(ItemKind::Word),
+        _ => None,
+    }
+}
+
 fn key_kind(value: KeystrokeKind) -> &'static str {
     match value {
         KeystrokeKind::Char => "char",
@@ -813,4 +1215,16 @@ fn parse_local(value: &str) -> DateTime<Local> {
     DateTime::parse_from_rfc3339(value)
         .map(|time| time.with_timezone(&Local))
         .unwrap_or_else(|_| Local::now())
+}
+
+fn parse_utc_sql(value: String) -> rusqlite::Result<DateTime<chrono::Utc>> {
+    DateTime::parse_from_rfc3339(&value)
+        .map(|time| time.with_timezone(&chrono::Utc))
+        .map_err(|error| rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error)))
+}
+
+fn parse_utc_record(value: &str) -> AppResult<DateTime<chrono::Utc>> {
+    DateTime::parse_from_rfc3339(value)
+        .map(|time| time.with_timezone(&chrono::Utc))
+        .map_err(|error| AppError::Record(format!("invalid RFC 3339 timestamp {value:?}: {error}")))
 }

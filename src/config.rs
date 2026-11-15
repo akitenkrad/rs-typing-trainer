@@ -83,6 +83,8 @@ pub struct DisplayConfig {
     /// fits, falling back to `normal`); `normal` draws it as terminal text in
     /// a card.
     pub prompt_style: String,
+    /// Amount of post-session coaching shown on the result screen.
+    pub feedback: String,
 }
 
 /// `[display]` as written on disk. Older files use `prompt_size`
@@ -95,6 +97,8 @@ struct RawDisplayConfig {
     prompt_style: Option<String>,
     #[serde(default)]
     prompt_size: Option<String>,
+    #[serde(default = "default_feedback")]
+    feedback: String,
 }
 
 impl From<RawDisplayConfig> for DisplayConfig {
@@ -104,7 +108,10 @@ impl From<RawDisplayConfig> for DisplayConfig {
             Some(_) => "large".to_owned(),
             None => default_prompt_style(),
         });
-        Self { prompt_style }
+        Self {
+            prompt_style,
+            feedback: raw.feedback,
+        }
     }
 }
 
@@ -267,6 +274,8 @@ pub struct PracticeConfig {
     pub core_ratio: f64,
     #[serde(default = "default_true")]
     pub weekly_theme: bool,
+    #[serde(default = "default_true")]
+    pub auto_difficulty: bool,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -275,6 +284,12 @@ pub struct AnalysisConfig {
     pub pause_ms: u64,
     #[serde(default = "default_shrinkage_k")]
     pub shrinkage_k: f64,
+    #[serde(default = "default_half_life_days")]
+    pub half_life_days: f64,
+    #[serde(default = "default_min_transition_n")]
+    pub min_transition_n: u64,
+    #[serde(default = "default_true")]
+    pub spelling_suggestions: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -348,6 +363,9 @@ impl Default for AnalysisConfig {
         Self {
             pause_ms: default_pause_ms(),
             shrinkage_k: default_shrinkage_k(),
+            half_life_days: default_half_life_days(),
+            min_transition_n: default_min_transition_n(),
+            spelling_suggestions: true,
         }
     }
 }
@@ -405,6 +423,7 @@ impl Default for PracticeConfig {
             daily_rotation: true,
             core_ratio: default_core_ratio(),
             weekly_theme: true,
+            auto_difficulty: true,
         }
     }
 }
@@ -553,6 +572,7 @@ impl Default for DisplayConfig {
     fn default() -> Self {
         Self {
             prompt_style: default_prompt_style(),
+            feedback: default_feedback(),
         }
     }
 }
@@ -563,6 +583,10 @@ fn default_layout() -> String {
 
 fn default_prompt_style() -> String {
     "large".to_owned()
+}
+
+fn default_feedback() -> String {
+    "summary".to_owned()
 }
 
 fn default_duration_seconds() -> u64 {
@@ -615,6 +639,14 @@ fn default_pause_ms() -> u64 {
 
 fn default_shrinkage_k() -> f64 {
     10.0
+}
+
+fn default_half_life_days() -> f64 {
+    14.0
+}
+
+fn default_min_transition_n() -> u64 {
+    5
 }
 
 fn default_drill_ratio() -> f64 {
@@ -834,6 +866,12 @@ impl Config {
                 value: self.display.prompt_style.clone(),
             });
         }
+        if !matches!(self.display.feedback.as_str(), "summary" | "detailed") {
+            return Err(ConfigError::UnknownKeyboardSetting {
+                field: "display.feedback",
+                value: self.display.feedback.clone(),
+            });
+        }
         if !matches!(self.keyboard.show.as_str(), "full" | "dim" | "hidden" | "auto") {
             return Err(ConfigError::UnknownKeyboardSetting {
                 field: "show",
@@ -862,6 +900,18 @@ impl Config {
             return Err(ConfigError::UnknownKeyboardSetting {
                 field: "adaptive.drill_ratio",
                 value: self.adaptive.drill_ratio.to_string(),
+            });
+        }
+        if !self.analysis.half_life_days.is_finite() || self.analysis.half_life_days <= 0.0 {
+            return Err(ConfigError::InvalidAnalysisSetting {
+                field: "analysis.half_life_days",
+                value: self.analysis.half_life_days,
+            });
+        }
+        if !self.analysis.shrinkage_k.is_finite() || self.analysis.shrinkage_k < 0.0 {
+            return Err(ConfigError::InvalidAnalysisSetting {
+                field: "analysis.shrinkage_k",
+                value: self.analysis.shrinkage_k,
             });
         }
         if !matches!(self.adaptive.lang.as_str(), "en" | "ja")
@@ -924,6 +974,7 @@ pub fn save_settings(path: &Path, config: &Config) -> AppResult<()> {
     };
     set_string_preserving_decor(&mut document["general"]["lang"], language);
     set_prompt_style(&mut document, &config.display.prompt_style);
+    set_string_preserving_decor(&mut document["display"]["feedback"], &config.display.feedback);
     set_string_preserving_decor(
         &mut document["session"]["error_mode"],
         match config.session.error_mode {

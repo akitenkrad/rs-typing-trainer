@@ -5,15 +5,97 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::analysis::errors::{ErrorDiagnosis, diagnose_errors};
+use crate::analysis::japanese::{JapaneseDiagnosis, analyze_japanese};
+use crate::analysis::metrics::AnalysisSettings;
+use crate::analysis::model::{ModelView, PlayerModel, build_player_model};
+use crate::analysis::style::{TypingStyleDiagnosis, diagnose_style};
+use crate::data::JapaneseText;
 use crate::engine::session::{ItemOutcome, KeystrokeKind, SessionLog};
+use crate::layout::KeyboardLayout;
+use crate::layout::geometry::KeyboardGeometry;
 use crate::metrics::stats::{LiveMetrics, percentile};
+use crate::record::SessionRecord;
 
+pub mod coach;
+pub mod errors;
+pub mod grades;
+pub mod habits;
+pub mod japanese;
 pub mod metrics;
+pub mod model;
+pub mod prescription;
+pub mod progress;
 pub mod stats;
+pub mod style;
 pub mod summary;
 
 pub const METRICS_VERSION: i64 = 2;
 pub const IKI_PAUSE_THRESHOLD: Duration = Duration::from_secs(2);
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DiagnosisOptions {
+    pub model: AnalysisSettings,
+    pub min_transition_n: u64,
+    pub spelling_suggestions: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Diagnosis {
+    pub player_model: PlayerModel,
+    pub errors: ErrorDiagnosis,
+    pub style: TypingStyleDiagnosis,
+    pub japanese: JapaneseDiagnosis,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn diagnose(
+    records: &[SessionRecord],
+    layout: &KeyboardLayout,
+    geometry: &KeyboardGeometry,
+    options: DiagnosisOptions,
+    as_of: chrono::DateTime<chrono::Utc>,
+    japanese_corpus: &[JapaneseText],
+) -> Diagnosis {
+    let player_model = build_player_model(records, layout, geometry, options.model, ModelView::Recent, as_of);
+    let errors = diagnose_errors(records, layout, geometry, options.model, as_of);
+    let style = diagnose_style(records, &player_model);
+    let error_count = records
+        .iter()
+        .flat_map(|record| &record.log.keystrokes)
+        .filter(|key| key.kind == KeystrokeKind::Char && !key.correct)
+        .count() as u64;
+    let mut error_cost_ms = 0.0;
+    let mut has_error_cost = false;
+    if let Some(slowdown) = &errors.post_error_slowdown {
+        error_cost_ms += slowdown.excess_ms.max(0.0);
+        has_error_cost = true;
+    }
+    if error_count > 0 && errors.correction.correction_time_ms > 0.0 {
+        error_cost_ms += errors.correction.correction_time_ms / error_count as f64;
+        has_error_cost = true;
+    }
+    if !has_error_cost {
+        error_cost_ms = 300.0;
+    }
+    let japanese = analyze_japanese(
+        records,
+        layout,
+        geometry,
+        options.model,
+        as_of,
+        japanese_corpus,
+        options.min_transition_n,
+        options.spelling_suggestions,
+        error_cost_ms,
+    );
+    Diagnosis {
+        player_model,
+        errors,
+        style,
+        japanese,
+    }
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Analysis {

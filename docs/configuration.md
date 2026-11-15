@@ -10,6 +10,7 @@ Every supported key is listed here. “Unset” means that the application deriv
 |---|---|---|---|
 | `general.lang` | `en` / `ja` | `"en"` | Interface language. |
 | `display.prompt_style` | `large` / `normal` | `"large"` | How the prompt is drawn. `large` uses bitmap glyphs (16-dot, or 12-dot when 16 does not fit) and falls back to normal text when neither fits; `normal` draws terminal-size text in a framed card with wider letter spacing. Also toggled with `Z` on the mode selection screen. The older `prompt_size` key is still read (`normal` → `normal`, anything else → `large`); saving from the app writes `prompt_style`. |
+| `display.feedback` | `summary` / `detailed` | `"summary"` | Post-session coaching. `summary` shows the single clearest observation; `detailed` shows up to three. Insufficient evidence produces no invented value or message. |
 | `keyboard.layout` | string | `"qwerty"` | Practice layout; bundled or user-defined name. |
 | `keyboard.input_layout` | string | `"same"` | OS input layout used for physical-key remapping. |
 | `keyboard.geometry` | `ansi` / `jis` | `"ansi"` | Physical keyboard geometry. |
@@ -44,8 +45,12 @@ Every supported key is listed here. “Unset” means that the application deriv
 | `practice.daily_rotation` | boolean | `true` | Use deterministic daily decks. |
 | `practice.core_ratio` | number | `0.65` | High-frequency share of a daily deck. |
 | `practice.weekly_theme` | boolean | `true` | Enable weekday themes. |
+| `practice.auto_difficulty` | boolean | `true` | Adjust the adaptive pacer and drill share from the median accuracy of the latest three adaptive sessions. |
 | `analysis.pause_ms` | integer | `2000` | IKI gap treated as a pause. |
 | `analysis.shrinkage_k` | number | `10.0` | Transition/key shrinkage strength. |
+| `analysis.half_life_days` | number | `14.0` | Half-life for the recent transition model. |
+| `analysis.min_transition_n` | integer | `5` | Minimum raw observations for a transition to be ranked as a high-cost candidate. |
+| `analysis.spelling_suggestions` | boolean | `true` | Enable personalized romaji spelling suggestions. |
 | `adaptive.error_weight` | number | `—` | Mistype cost in milliseconds; unset derives it from IKI. |
 | `adaptive.drill_ratio` | number | `0.3` | Share of generated drills. |
 | `adaptive.lang` | `en` / `ja` | `"en"` | Adaptive-practice language. |
@@ -73,4 +78,4 @@ Every supported key is listed here. “Unset” means that the application deriv
 | `characters.allow_consecutive_same_word` | boolean | `false` | v1 alias for the random-mode setting. |
 | `metrics.db_path` | path | `—` | v1 database-path alias; `storage.db_path` wins. |
 
-The settings screen edits layout, input layout, geometry, keyboard visibility, keyboard appearance, prompt size, language, and error mode while preserving comments and unrelated TOML keys. See [Training modes](modes.md), [Training tools](training.md), and [Keyboard layouts](keyboard.md) for behavior behind these values.
+The settings screen edits layout, input layout, geometry, keyboard visibility, keyboard appearance, prompt size, language, error mode, and result feedback while preserving comments and unrelated TOML keys. See [Training modes](modes.md), [Training tools](training.md), and [Keyboard layouts](keyboard.md) for behavior behind these values.

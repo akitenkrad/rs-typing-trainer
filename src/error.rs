@@ -48,6 +48,9 @@ pub enum ConfigError {
 
     #[error("unknown keyboard {field}: {value}")]
     UnknownKeyboardSetting { field: &'static str, value: String },
+
+    #[error("invalid analysis setting {field}: {value}")]
+    InvalidAnalysisSetting { field: &'static str, value: f64 },
 }
 
 pub type AppResult<T> = Result<T, AppError>;

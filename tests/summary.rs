@@ -1,4 +1,5 @@
 use chrono::NaiveDate;
+use rs_typing_trainer::analysis::metrics::{BigramMetric, DetailedMetrics, TransitionClass};
 use rs_typing_trainer::analysis::summary;
 use rs_typing_trainer::config::{Config, ErrorMode};
 use rs_typing_trainer::engine::session::{ItemLog, ItemOutcome, KeystrokeKind, KeystrokeLog, SessionLog};
@@ -59,6 +60,7 @@ fn record(date: &str, mode: &str, bench_id: Option<&str>, wpm: f64, accuracy: f6
                 idx: 0,
                 text: "asdf".into(),
                 reading: None,
+                kind: None,
                 shown_us: 0,
                 done_us: Some(1_100_000),
                 outcome: ItemOutcome::Completed,
@@ -79,6 +81,7 @@ fn japanese_summary_applies_accuracy_transition_and_stale_bench_rules() {
         record("2026-10-01", "bench", Some("bench-v1/A/01"), 50.0, 0.98),
         record("2026-10-15", "bench", Some("bench-v1/A/02"), 51.0, 0.98),
         record("2026-11-07", "bench", Some("bench-v1/A/03"), 52.0, 0.98),
+        record("2026-11-13", "words", None, 41.0, 0.90),
         record("2026-11-14", "words", None, 40.0, 0.88),
     ];
 
@@ -97,7 +100,7 @@ fn japanese_summary_applies_accuracy_transition_and_stale_bench_rules() {
 
 #[test]
 fn english_summary_uses_english_rules_and_labels() {
-    let records = vec![record("2026-11-14", "words", None, 40.0, 0.88)];
+    let records = (0..5).map(|_| record("2026-11-14", "words", None, 40.0, 0.88)).collect::<Vec<_>>();
     let text = summary::generate(&records, &Config::default(), NaiveDate::from_ymd_opt(2026, 11, 15).unwrap(), Lang::En).to_text();
 
     assert!(text.contains("Current ability"), "{text}");
@@ -113,4 +116,58 @@ fn empty_summary_says_that_no_records_exist_in_both_languages() {
 
     assert!(summary::generate(&[], &config, date, Lang::Ja).to_text().contains("まだ記録がありません"));
     assert!(summary::generate(&[], &config, date, Lang::En).to_text().contains("No records yet"));
+}
+
+#[test]
+fn sparse_transitions_are_not_ranked_as_high_cost_candidates() {
+    let records = vec![record("2026-11-14", "words", None, 40.0, 0.98)];
+    let details = DetailedMetrics {
+        iki_median_ms: 100.0,
+        bigrams: vec![
+            BigramMetric {
+                from: "z".into(),
+                to: "z".into(),
+                class: TransitionClass::SameFinger,
+                n: 1,
+                median_ms: 900.0,
+                error_n: 0,
+                attempts: 1,
+                error_rate: 0.0,
+                estimated_iki_ms: 500.0,
+                estimated_error_rate: 0.01,
+                estimated_iki_lo_ms: 150.0,
+                estimated_iki_hi_ms: 1_200.0,
+                relative_iki: 5.0,
+            },
+            BigramMetric {
+                from: "a".into(),
+                to: "s".into(),
+                class: TransitionClass::SameHandAdjacent,
+                n: 5,
+                median_ms: 250.0,
+                error_n: 0,
+                attempts: 5,
+                error_rate: 0.0,
+                estimated_iki_ms: 225.0,
+                estimated_error_rate: 0.01,
+                estimated_iki_lo_ms: 180.0,
+                estimated_iki_hi_ms: 280.0,
+                relative_iki: 2.25,
+            },
+        ],
+        ..DetailedMetrics::default()
+    };
+    let config = Config::default();
+    let text = summary::generate_with_metrics(
+        &records,
+        &config,
+        &builtin_layout("qwerty").unwrap(),
+        &details,
+        NaiveDate::from_ymd_opt(2026, 11, 15).unwrap(),
+        Lang::Ja,
+    )
+    .to_text();
+
+    assert!(text.contains("a→s"), "{text}");
+    assert!(!text.contains("z→z"), "{text}");
 }

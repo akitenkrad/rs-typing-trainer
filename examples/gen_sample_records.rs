@@ -10,7 +10,7 @@ use rand::{Rng, SeedableRng};
 use rs_typing_trainer::config::{Config, ErrorMode, ModeKind};
 use rs_typing_trainer::data::{DataCatalog, DataKind};
 use rs_typing_trainer::engine::romaji::RomajiJudge;
-use rs_typing_trainer::engine::session::{ItemLog, ItemOutcome, KeystrokeKind, KeystrokeLog, SessionLog};
+use rs_typing_trainer::engine::session::{ItemKind, ItemLog, ItemOutcome, KeystrokeKind, KeystrokeLog, SessionLog};
 use rs_typing_trainer::layout::builtin_layout;
 use rs_typing_trainer::layout::geometry::{Finger, geometry};
 use rs_typing_trainer::record::{SessionRecord, ttrec};
@@ -193,6 +193,7 @@ fn synthesize(
             idx: item_index as u32,
             text: prompt.text,
             reading: prompt.reading,
+            kind: Some(if mode == ModeKind::Ngram { ItemKind::Drill } else { ItemKind::Word }),
             shown_us,
             done_us: Some(time_us),
             outcome: ItemOutcome::Completed,

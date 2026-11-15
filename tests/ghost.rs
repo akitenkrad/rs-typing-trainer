@@ -28,10 +28,12 @@ fn record(text: &str, times_ms: &[u64], wpm: f64, bench_id: Option<&str>, second
 #[test]
 fn sentence_ghost_requires_the_same_sentence_and_uses_the_best_run() {
     let slow = record("rust", &[100, 300, 500, 700], 40.0, None, 1);
-    let fast = record("rust", &[100, 200, 300, 400], 60.0, None, 2);
+    let mut fast = record("rust", &[100, 200, 300, 400], 60.0, None, 2);
+    fast.header.id = Some(42);
     let other = record("type", &[100, 200, 300, 400], 80.0, None, 3);
     let ghost = select_ghost(&[slow, fast, other], &GhostCondition::Sentence { text: "rust".into() }).unwrap();
     assert_eq!(ghost.position_at(Duration::from_millis(250)), 2);
+    assert_eq!(ghost.opponent(), "session:42");
     assert!(select_ghost(&[], &GhostCondition::Sentence { text: "rust".into() }).is_none());
 }
 
@@ -48,6 +50,7 @@ fn benchmark_ghost_requires_the_same_version_and_uses_the_previous_run() {
     )
     .unwrap();
     assert_eq!(ghost.position_at(Duration::from_millis(450)), 2);
+    assert_eq!(ghost.opponent(), "bench:bench-v1/A/03");
     assert!(
         select_ghost(
             &[],

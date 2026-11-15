@@ -27,6 +27,7 @@ proptest! {
         let spellings = RomajiJudge::new(&reading).accepted_spellings(128);
         prop_assert!(!spellings.is_empty());
         for spelling in spellings {
+            prop_assert!(RomajiJudge::new(&reading).spelling_segments(&spelling).is_some());
             let mut judge = RomajiJudge::new(&reading);
             for character in spelling.chars() {
                 prop_assert_ne!(

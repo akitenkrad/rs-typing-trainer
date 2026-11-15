@@ -10,6 +10,7 @@
 |---|---|---|---|
 | `general.lang` | `en` / `ja` | `"en"` | 表示言語． |
 | `display.prompt_style` | `large` / `normal` | `"large"` | 問題文の描き方．`large` は大きな字形（16ドット，入らなければ12ドット）で描き，どちらも入らなければ通常の文字にする．`normal` は端末の文字の大きさのまま，枠で囲んだカードに字間を広げて描く．モード選択画面の `Z` でも切り替えられる．旧キー `prompt_size` も読み込む（`normal` → `normal`，それ以外 → `large`）．アプリから保存すると `prompt_style` で書き戻す． |
+| `display.feedback` | `summary` / `detailed` | `"summary"` | セッション後の気づき．`summary` は最も目立つ内容を 1 行，`detailed` は最大 3 行を示す．根拠が足りないときは値や文言を補わない． |
 | `keyboard.layout` | 文字列 | `"qwerty"` | 同梱または利用者定義の練習レイアウト名． |
 | `keyboard.input_layout` | 文字列 | `"same"` | 物理キーの読み替えに使う OS 側のレイアウト． |
 | `keyboard.geometry` | `ansi` / `jis` | `"ansi"` | キーボードの物理配置． |
@@ -44,8 +45,12 @@
 | `practice.daily_rotation` | 真偽値 | `true` | 決定的な日替わり出題を使う． |
 | `practice.core_ratio` | 数値 | `0.65` | 日替わり出題に占める頻度上位群の割合． |
 | `practice.weekly_theme` | 真偽値 | `true` | 曜日テーマを有効にする． |
+| `practice.auto_difficulty` | 真偽値 | `true` | 直近 3 回の adaptive の正確さの中央値から，ペーサーとドリル割合を自動調節する． |
 | `analysis.pause_ms` | 整数 | `2000` | 休止として扱う IKI の間隔． |
 | `analysis.shrinkage_k` | 数値 | `10.0` | 遷移・キーの縮小推定の強さ． |
+| `analysis.half_life_days` | 数値 | `14.0` | «最近» の遷移モデルに使う半減期（日）． |
+| `analysis.min_transition_n` | 整数 | `5` | コストの高い遷移の候補に入れるために必要な生の観測数． |
+| `analysis.spelling_suggestions` | 真偽値 | `true` | 本人向けのローマ字綴り案を有効にする． |
 | `adaptive.error_weight` | 数値 | `—` | 誤打のコスト（ms）．未設定なら IKI から求める． |
 | `adaptive.drill_ratio` | 数値 | `0.3` | 生成ドリルの割合． |
 | `adaptive.lang` | `en` / `ja` | `"en"` | 適応練習の言語． |
@@ -73,4 +78,4 @@
 | `characters.allow_consecutive_same_word` | 真偽値 | `false` | v1 の random モード用設定． |
 | `metrics.db_path` | パス | `—` | v1 の DB 保存先．`storage.db_path` が優先． |
 
-設定画面では，レイアウト，入力レイアウト，物理配置，キーボード表示，キーボードの見た目，出題文字の大きさ，言語，誤入力の扱いを変更し，コメントと関係のない TOML キーを保ちます．各値の動作は[訓練モード](modes.ja.md)，[訓練機能](training.ja.md)，[キーボードの配列](keyboard.ja.md)を参照してください．
+設定画面では，レイアウト，入力レイアウト，物理配置，キーボード表示，キーボードの見た目，出題文字の大きさ，言語，誤入力の扱い，結果の気づきを変更し，コメントと関係のない TOML キーを保ちます．各値の動作は[訓練モード](modes.ja.md)，[訓練機能](training.ja.md)，[キーボードの配列](keyboard.ja.md)を参照してください．

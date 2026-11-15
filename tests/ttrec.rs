@@ -4,7 +4,7 @@ use std::time::Duration;
 use chrono::{TimeZone, Utc};
 use rs_typing_trainer::config::Config;
 use rs_typing_trainer::engine::item::Item;
-use rs_typing_trainer::engine::session::Session;
+use rs_typing_trainer::engine::session::{ItemKind, Session};
 use rs_typing_trainer::record::SessionRecord;
 use rs_typing_trainer::record::ttrec;
 
@@ -23,15 +23,40 @@ fn record() -> SessionRecord {
 
 #[test]
 fn write_then_read_roundtrip() {
-    let expected = record();
+    let mut expected = record();
+    expected.log.items[0].kind = Some(ItemKind::Drill);
     let mut bytes = Vec::new();
     ttrec::write(&expected, &mut bytes).unwrap();
     let text = String::from_utf8(bytes.clone()).unwrap();
     assert!(text.lines().next().unwrap().contains(r#""type":"session""#));
     assert!(text.lines().next().unwrap().contains(r#""format_version":1"#));
+    assert!(text.contains(r#""kind":"drill""#));
 
     let actual = ttrec::read(Cursor::new(bytes)).unwrap();
     assert_eq!(actual, expected);
+}
+
+#[test]
+fn old_file_without_item_kind_is_still_readable() {
+    let expected = record();
+    let mut bytes = Vec::new();
+    ttrec::write(&expected, &mut bytes).unwrap();
+    let lines = String::from_utf8(bytes)
+        .unwrap()
+        .lines()
+        .map(|line| {
+            let mut value = serde_json::from_str::<serde_json::Value>(line).unwrap();
+            if value["type"] == "item" {
+                value.as_object_mut().unwrap().remove("kind");
+            }
+            serde_json::to_string(&value).unwrap()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let actual = ttrec::read(Cursor::new(lines)).unwrap();
+    assert_eq!(actual.log.items[0].kind, None);
+    assert_eq!(actual.log.keystrokes, expected.log.keystrokes);
 }
 
 #[test]

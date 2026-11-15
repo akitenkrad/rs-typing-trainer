@@ -10,6 +10,7 @@ use crate::config::{KeyFilter, ModeConfig, ModeKind};
 use crate::data::{DataCatalog, TrainingDataSource};
 use crate::engine::item::Item;
 use crate::engine::romaji::{RomajiJudge, RomajiOptions};
+use crate::engine::session::ItemKind;
 use crate::layout::KeyboardLayout;
 use crate::practice::adaptive::{AdaptivePlan, AdaptiveSource, generate_from_sources};
 
@@ -19,6 +20,7 @@ pub struct GeneratedPrompt {
     pub reading: Option<String>,
     pub target: String,
     pub fallback: bool,
+    pub kind: ItemKind,
     weight: usize,
     romaji_options: Option<RomajiOptions>,
 }
@@ -30,20 +32,23 @@ impl GeneratedPrompt {
             reading,
             target,
             fallback: false,
+            kind: ItemKind::Word,
             weight: 1,
             romaji_options: Some(RomajiOptions::default()),
         }
     }
 
     pub fn into_item(self) -> Item {
+        let kind = self.kind;
         if let Some(reading) = self.reading {
             Item::new(
                 self.text,
                 Some(reading.clone()),
                 Box::new(RomajiJudge::with_options(&reading, self.romaji_options.unwrap_or_default())),
             )
+            .with_kind(kind)
         } else {
-            Item::exact(self.text)
+            Item::exact(self.text).with_kind(kind)
         }
     }
 }
@@ -86,6 +91,7 @@ impl ModeGenerator {
                         reading: Some(entry.reading.clone()),
                         target: judge.guide().to_owned(),
                         fallback: false,
+                        kind: ItemKind::Word,
                         weight: romaji_weight(&judge, &selected),
                         romaji_options: Some(romaji_options),
                     }
@@ -101,6 +107,7 @@ impl ModeGenerator {
                         reading: Some(entry.reading.clone()),
                         target: judge.guide().to_owned(),
                         fallback: false,
+                        kind: ItemKind::Word,
                         weight: 1,
                         romaji_options: Some(romaji_options),
                     }
@@ -187,6 +194,11 @@ impl ModeGenerator {
                 reading: item.reading,
                 target: item.target,
                 fallback: item.kind == crate::practice::adaptive::AdaptiveItemKind::Drill,
+                kind: if item.kind == crate::practice::adaptive::AdaptiveItemKind::Drill {
+                    ItemKind::Drill
+                } else {
+                    ItemKind::Word
+                },
                 weight: 1,
                 romaji_options: japanese.then_some(RomajiOptions::default()),
             })
@@ -260,6 +272,7 @@ fn exact_prompt(text: &str, fallback: bool, weight: usize) -> GeneratedPrompt {
         reading: None,
         target: text.to_owned(),
         fallback,
+        kind: ItemKind::Word,
         weight,
         romaji_options: None,
     }
@@ -353,7 +366,14 @@ fn ngram_prompts(config: &ModeConfig, data: &DataCatalog, selected: &HashSet<cha
         let alphabet = selected.iter().copied().collect::<Vec<_>>();
         build_ngrams(&alphabet, n, String::new(), &mut values);
     }
-    values.into_iter().map(|value| exact_prompt(&value, false, 1)).collect()
+    values
+        .into_iter()
+        .map(|value| {
+            let mut prompt = exact_prompt(&value, false, 1);
+            prompt.kind = ItemKind::Drill;
+            prompt
+        })
+        .collect()
 }
 
 fn build_ngrams(alphabet: &[char], remaining: usize, prefix: String, values: &mut HashSet<String>) {
@@ -392,6 +412,7 @@ fn supplement_with_pseudo_words(candidates: &mut Vec<GeneratedPrompt>, config: &
             reading: None,
             target: text,
             fallback: true,
+            kind: ItemKind::Word,
             weight: 1,
             romaji_options: None,
         });

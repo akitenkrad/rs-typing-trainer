@@ -40,6 +40,14 @@ pub fn render(frame: &mut Frame, app: &App) {
         .direction(Direction::Vertical)
         .constraints([Constraint::Fill(1), Constraint::Length(12), Constraint::Length(4), Constraint::Fill(1)])
         .split(inner);
+    if let Some(grade) = &app.mode_grade_line {
+        frame.render_widget(
+            Paragraph::new(grade.clone())
+                .alignment(ratatui::layout::Alignment::Center)
+                .style(Style::default().fg(theme.accent).add_modifier(Modifier::BOLD)),
+            chunks[0],
+        );
+    }
     let lines = MODES
         .iter()
         .enumerate()

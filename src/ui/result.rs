@@ -55,7 +55,9 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     render_big_summary(frame, result, app.legacy_wpm, &theme, chunks[0], lang);
     render_secondary_box(frame, app, result, &theme, chunks[2], lang);
-    if app.config.mode.kind == crate::config::ModeKind::Adaptive && app.result_origin == ResultOrigin::JustPlayed {
+    if app.result_origin == ResultOrigin::JustPlayed && !app.result_insights.is_empty() && area.height < 34 {
+        render_result_insights(frame, app, &theme, left_inset(chunks[4]));
+    } else if app.config.mode.kind == crate::config::ModeKind::Adaptive && app.result_origin == ResultOrigin::JustPlayed {
         render_adaptive_result(frame, app, &theme, left_inset(chunks[4]), lang);
     } else {
         render_mistype_heatmap(frame, result, &theme, left_inset(chunks[4]), lang);
@@ -106,6 +108,10 @@ fn render_benchmark_result(frame: &mut Frame, app: &App, theme: &Theme, area: Re
         )),
         Line::from(format!("{}: {previous}", Msg::PreviousDelta.text(lang))),
         Line::from(format!("{}: {recent}", Msg::RecentThreeDelta.text(lang))),
+        Line::from(Span::styled(
+            app.result_grade_line.clone().unwrap_or_default(),
+            Style::default().fg(theme.warning).add_modifier(Modifier::BOLD),
+        )),
         Line::from(""),
         Line::from(Span::styled(next_line, Style::default().fg(theme.accent).add_modifier(Modifier::BOLD))),
         Line::from(Msg::BenchAbortNote.text(lang)),
@@ -355,34 +361,35 @@ fn render_reaction_and_save(frame: &mut Frame, app: &App, r: &GameResult, theme:
         .constraints([Constraint::Min(0), Constraint::Length(1)])
         .split(area);
 
-    let mut buckets = [0u32; 4]; // <0.3, 0.3-0.5, 0.5-0.8, >0.8
-    for d in &r.metrics.reaction_times {
-        let s = d.as_secs_f64();
-        if s < 0.3 {
-            buckets[0] += 1
-        } else if s < 0.5 {
-            buckets[1] += 1
-        } else if s < 0.8 {
-            buckets[2] += 1
-        } else {
-            buckets[3] += 1
+    let mut lines = if app.result_origin == ResultOrigin::JustPlayed && !app.result_insights.is_empty() {
+        insight_lines(app, theme)
+    } else {
+        let mut buckets = [0u32; 4];
+        for duration in &r.metrics.reaction_times {
+            match duration.as_secs_f64() {
+                value if value < 0.3 => buckets[0] += 1,
+                value if value < 0.5 => buckets[1] += 1,
+                value if value < 0.8 => buckets[2] += 1,
+                _ => buckets[3] += 1,
+            }
         }
-    }
-    let max_b = buckets.iter().copied().max().unwrap_or(1).max(1);
-    let labels = ["<0.3s    ", "0.3-0.5s ", "0.5-0.8s ", ">0.8s    "];
-    let mut lines = vec![Line::from(Span::styled(
-        Msg::ReactionTimeDistribution.text(app.config.general.lang),
-        Style::default().fg(theme.muted),
-    ))];
-    for (i, count) in buckets.iter().enumerate() {
-        let bar_len = (12 * (*count) / max_b).max(if *count > 0 { 1 } else { 0 });
-        let bar: String = "█".repeat(bar_len as usize);
-        lines.push(Line::from(vec![
-            Span::styled(format!("  {} ", labels[i]), Style::default().fg(theme.fg)),
-            Span::styled(bar, Style::default().fg(theme.accent)),
-            Span::styled(format!("  {}", count), Style::default().fg(theme.muted)),
-        ]));
-    }
+        let maximum = buckets.iter().copied().max().unwrap_or(1).max(1);
+        let labels = ["<0.3s    ", "0.3-0.5s ", "0.5-0.8s ", ">0.8s    "];
+        let mut lines = vec![Line::from(Span::styled(
+            Msg::ReactionTimeDistribution.text(app.config.general.lang),
+            Style::default().fg(theme.muted),
+        ))];
+        for (index, count) in buckets.iter().enumerate() {
+            let bar_len = (12 * (*count) / maximum).max(u32::from(*count > 0));
+            lines.push(Line::from(vec![
+                Span::styled(format!("  {} ", labels[index]), Style::default().fg(theme.fg)),
+                Span::styled("█".repeat(bar_len as usize), Style::default().fg(theme.accent)),
+                Span::styled(format!("  {count}"), Style::default().fg(theme.muted)),
+            ]));
+        }
+        lines
+    };
+    lines.truncate(usize::from(chunks[0].height));
     frame.render_widget(Paragraph::new(lines), chunks[0]);
 
     let save_line = match app.result_origin {
@@ -422,6 +429,23 @@ fn render_reaction_and_save(frame: &mut Frame, app: &App, r: &GameResult, theme:
         }
     };
     frame.render_widget(Paragraph::new(save_line), left_inset(chunks[1]));
+}
+
+fn render_result_insights(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    frame.render_widget(Paragraph::new(insight_lines(app, theme)), area);
+}
+
+fn insight_lines(app: &App, theme: &Theme) -> Vec<Line<'static>> {
+    let limit = if app.config.display.feedback == "detailed" { 3 } else { 1 };
+    let mut lines = vec![Line::from(Span::styled(
+        match app.config.general.lang {
+            Lang::En => "This session's observation",
+            Lang::Ja => "今回の気づき",
+        },
+        Style::default().fg(theme.warning).add_modifier(Modifier::BOLD),
+    ))];
+    lines.extend(app.result_insights.iter().take(limit).cloned().map(Line::from));
+    lines
 }
 
 fn render_hint(frame: &mut Frame, theme: &Theme, area: Rect, lang: Lang) {

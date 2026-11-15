@@ -61,6 +61,7 @@ fn record(metrics_version: i64, keystrokes: Vec<KeystrokeLog>) -> SessionRecord 
                     idx: 0,
                     text: "asddf".into(),
                     reading: None,
+                    kind: None,
                     shown_us: 0,
                     done_us: Some(3_000_000),
                     outcome: ItemOutcome::Completed,
@@ -69,6 +70,7 @@ fn record(metrics_version: i64, keystrokes: Vec<KeystrokeLog>) -> SessionRecord 
                     idx: 1,
                     text: "gh".into(),
                     reading: None,
+                    kind: None,
                     shown_us: 4_000_000,
                     done_us: Some(4_400_000),
                     outcome: ItemOutcome::Completed,
@@ -77,6 +79,7 @@ fn record(metrics_version: i64, keystrokes: Vec<KeystrokeLog>) -> SessionRecord 
                     idx: 2,
                     text: "fg".into(),
                     reading: None,
+                    kind: None,
                     shown_us: 4_500_000,
                     done_us: Some(4_750_000),
                     outcome: ItemOutcome::Completed,
@@ -111,6 +114,7 @@ fn detailed_metrics_follow_item_correctness_pause_and_version_rules() {
         AnalysisSettings {
             pause_ms: 2_000,
             shrinkage_k: 10.0,
+            half_life_days: 14.0,
         },
     );
 

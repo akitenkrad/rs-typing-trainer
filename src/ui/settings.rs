@@ -24,8 +24,8 @@ pub fn render(frame: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),
-            Constraint::Length(8),
+            Constraint::Length(0),
+            Constraint::Length(9),
             Constraint::Length(1),
             Constraint::Length(5),
             Constraint::Min(0),
@@ -52,6 +52,7 @@ pub fn render(frame: &mut Frame, app: &App) {
                 crate::config::ErrorMode::Advance => "advance",
             },
         ),
+        (Msg::SettingFeedback, feedback_label(&app.config.display.feedback, lang)),
     ];
     let label_width = rows.iter().map(|(label, _)| UnicodeWidthStr::width(label.text(lang))).max().unwrap_or(0) + 3;
     let lines = rows
@@ -147,7 +148,22 @@ fn setting_description(index: usize, lang: Lang) -> &'static str {
         (7, Lang::Ja) => {
             "誤入力した文字の扱い．stop は正しいキーを打つまでその位置で止まります．advance は誤入力を記録して先へ進み，Backspace で戻れます．既定: stop．"
         }
+        (8, Lang::En) => {
+            "Post-session coaching. summary shows the single clearest observation. detailed shows up to three observations. Nothing is shown when the evidence is insufficient. Default: summary."
+        }
+        (8, Lang::Ja) => {
+            "練習後の気づき．summary は最も目立つ内容を 1 行，detailed は最大 3 行を示します．根拠が足りないときは表示しません．既定: summary．"
+        }
         _ => "",
+    }
+}
+
+pub fn feedback_label(value: &str, lang: Lang) -> &'static str {
+    match (value, lang) {
+        ("detailed", Lang::En) => "Detailed (up to 3)",
+        ("detailed", Lang::Ja) => "詳しく（最大 3 行）",
+        (_, Lang::En) => "Summary (1 line)",
+        (_, Lang::Ja) => "まとめ（1 行）",
     }
 }
 
