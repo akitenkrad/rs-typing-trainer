@@ -163,13 +163,21 @@ CREATE TABLE IF NOT EXISTS adaptive_focus (
 #[derive(Debug, Clone)]
 pub struct SessionSummary {
     pub id: i64,
+    pub started_at: DateTime<Local>,
     pub finished_at: DateTime<Local>,
     pub duration: Duration,
+    pub mode: String,
+    pub mode_params: String,
+    pub bench_id: Option<String>,
+    pub layout: String,
+    pub input_layout: String,
+    pub error_mode: String,
     pub wpm: f64,
     pub accuracy: f64,
     pub max_combo: u32,
     pub completed_words: u32,
     pub metrics_version: i64,
+    pub score_eligible: bool,
 }
 
 pub fn save(path: &Path, record: &SessionRecord) -> AppResult<i64> {
@@ -252,28 +260,16 @@ pub fn save(path: &Path, record: &SessionRecord) -> AppResult<i64> {
 pub fn list(path: &Path) -> AppResult<Vec<SessionSummary>> {
     let conn = open(path)?;
     let mut stmt = conn.prepare(
-        "SELECT id, finished_at, duration_ms, net_wpm, accuracy, max_combo, completed_words, metrics_version FROM sessions ORDER BY datetime(finished_at) DESC, id DESC",
+        "SELECT id, started_at, finished_at, duration_ms, mode, mode_params, bench_id, layout, input_layout, error_mode, net_wpm, accuracy, max_combo, completed_words, metrics_version, score_eligible FROM sessions ORDER BY datetime(finished_at) DESC, id DESC",
     )?;
-    let rows = stmt.query_map([], |row| {
-        let raw: String = row.get(1)?;
-        Ok(SessionSummary {
-            id: row.get(0)?,
-            finished_at: parse_local(&raw),
-            duration: Duration::from_millis(row.get::<_, i64>(2)?.max(0) as u64),
-            wpm: row.get(3)?,
-            accuracy: row.get(4)?,
-            max_combo: row.get::<_, i64>(5)?.max(0) as u32,
-            completed_words: row.get::<_, i64>(6)?.max(0) as u32,
-            metrics_version: row.get(7)?,
-        })
-    })?;
+    let rows = stmt.query_map([], summary_from_row)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
 pub fn ranked_sessions(path: &Path) -> AppResult<Vec<SessionSummary>> {
     let conn = open(path)?;
     let mut stmt = conn.prepare(
-        "SELECT id, finished_at, duration_ms, net_wpm, accuracy, max_combo, completed_words, metrics_version \
+        "SELECT id, started_at, finished_at, duration_ms, mode, mode_params, bench_id, layout, input_layout, error_mode, net_wpm, accuracy, max_combo, completed_words, metrics_version, score_eligible \
          FROM sessions WHERE score_eligible = 1 ORDER BY net_wpm DESC, datetime(finished_at) DESC, id DESC",
     )?;
     let rows = stmt.query_map([], summary_from_row)?;
@@ -283,7 +279,7 @@ pub fn ranked_sessions(path: &Path) -> AppResult<Vec<SessionSummary>> {
 pub fn personal_best(path: &Path, mode: &str) -> AppResult<Option<SessionSummary>> {
     let conn = open(path)?;
     conn.query_row(
-        "SELECT id, finished_at, duration_ms, net_wpm, accuracy, max_combo, completed_words, metrics_version \
+        "SELECT id, started_at, finished_at, duration_ms, mode, mode_params, bench_id, layout, input_layout, error_mode, net_wpm, accuracy, max_combo, completed_words, metrics_version, score_eligible \
          FROM sessions WHERE score_eligible = 1 AND mode = ?1 ORDER BY net_wpm DESC, datetime(finished_at) DESC, id DESC LIMIT 1",
         params![mode],
         summary_from_row,
@@ -293,16 +289,25 @@ pub fn personal_best(path: &Path, mode: &str) -> AppResult<Option<SessionSummary
 }
 
 fn summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionSummary> {
-    let raw: String = row.get(1)?;
+    let started_at: String = row.get(1)?;
+    let finished_at: String = row.get(2)?;
     Ok(SessionSummary {
         id: row.get(0)?,
-        finished_at: parse_local(&raw),
-        duration: Duration::from_millis(row.get::<_, i64>(2)?.max(0) as u64),
-        wpm: row.get(3)?,
-        accuracy: row.get(4)?,
-        max_combo: row.get::<_, i64>(5)?.max(0) as u32,
-        completed_words: row.get::<_, i64>(6)?.max(0) as u32,
-        metrics_version: row.get(7)?,
+        started_at: parse_local(&started_at),
+        finished_at: parse_local(&finished_at),
+        duration: Duration::from_millis(row.get::<_, i64>(3)?.max(0) as u64),
+        mode: row.get(4)?,
+        mode_params: row.get(5)?,
+        bench_id: row.get(6)?,
+        layout: row.get(7)?,
+        input_layout: row.get(8)?,
+        error_mode: row.get(9)?,
+        wpm: row.get(10)?,
+        accuracy: row.get(11)?,
+        max_combo: row.get::<_, i64>(12)?.max(0) as u32,
+        completed_words: row.get::<_, i64>(13)?.max(0) as u32,
+        metrics_version: row.get(14)?,
+        score_eligible: row.get::<_, i64>(15)? != 0,
     })
 }
 
@@ -317,6 +322,120 @@ pub fn latest_bench_parallel(path: &Path, series: &str) -> AppResult<Option<u8>>
         )
         .optional()?;
     Ok(value.and_then(|id| id.rsplit('/').next()?.parse::<u8>().ok()))
+}
+
+pub fn incomplete_benchmark(path: &Path, series: &str, today: chrono::NaiveDate) -> AppResult<Option<crate::bench::BenchResume>> {
+    let records = load_records_filtered(path, None, Some("bench"))?;
+    let today_records = records
+        .iter()
+        .enumerate()
+        .filter_map(|(position, record)| {
+            let finished = DateTime::parse_from_rfc3339(&record.header.finished_at).ok()?;
+            if finished.with_timezone(&Local).date_naive() != today {
+                return None;
+            }
+            let (part, parallel_index) = parse_bench_id(record.header.bench_id.as_deref()?, series)?;
+            Some((position, record, part, parallel_index))
+        })
+        .collect::<Vec<_>>();
+    let parallel_index = today_records.last().map(|row| row.3);
+    let Some(parallel_index) = parallel_index else {
+        return Ok(None);
+    };
+    let completed = bench_results_for_records(&records, &today_records, series, parallel_index);
+    let part = [crate::bench::BenchPart::A, crate::bench::BenchPart::B, crate::bench::BenchPart::C]
+        .into_iter()
+        .find(|part| !completed.iter().any(|result| result.part == *part));
+    Ok(part.map(|part| crate::bench::BenchResume {
+        part,
+        parallel_index,
+        completed,
+    }))
+}
+
+pub fn bench_results_for_day_form(
+    path: &Path,
+    series: &str,
+    today: chrono::NaiveDate,
+    parallel_index: u8,
+) -> AppResult<Vec<crate::bench::BenchResultSummary>> {
+    let records = load_records_filtered(path, None, Some("bench"))?;
+    let today_records = records
+        .iter()
+        .enumerate()
+        .filter_map(|(position, record)| {
+            let finished = DateTime::parse_from_rfc3339(&record.header.finished_at).ok()?;
+            if finished.with_timezone(&Local).date_naive() != today {
+                return None;
+            }
+            let (part, index) = parse_bench_id(record.header.bench_id.as_deref()?, series)?;
+            Some((position, record, part, index))
+        })
+        .collect::<Vec<_>>();
+    Ok(bench_results_for_records(&records, &today_records, series, parallel_index))
+}
+
+fn bench_results_for_records(
+    records: &[SessionRecord],
+    today_records: &[(usize, &SessionRecord, crate::bench::BenchPart, u8)],
+    series: &str,
+    parallel_index: u8,
+) -> Vec<crate::bench::BenchResultSummary> {
+    let mut selected = std::collections::BTreeMap::new();
+    for (position, record, part, index) in today_records {
+        if *index == parallel_index {
+            selected.insert(*part, (*position, *record));
+        }
+    }
+    selected
+        .into_iter()
+        .map(|(part, (position, record))| {
+            let prior = records[..position]
+                .iter()
+                .filter(|candidate| {
+                    candidate
+                        .header
+                        .bench_id
+                        .as_deref()
+                        .and_then(|id| parse_bench_id(id, series))
+                        .is_some_and(|(candidate_part, _)| candidate_part == part)
+                })
+                .map(|candidate| (candidate.header.net_wpm, candidate.header.accuracy))
+                .collect::<Vec<_>>();
+            let previous = prior.last().copied();
+            let recent = prior.iter().rev().take(3).copied().collect::<Vec<_>>();
+            let recent_wpm = (!recent.is_empty()).then(|| median_f64(recent.iter().map(|row| row.0).collect()));
+            let recent_accuracy = (!recent.is_empty()).then(|| median_f64(recent.iter().map(|row| row.1).collect()));
+            crate::bench::BenchResultSummary {
+                id: record.header.bench_id.clone().unwrap_or_default(),
+                part,
+                wpm: record.header.net_wpm,
+                accuracy: record.header.accuracy,
+                comparison: crate::bench::BenchComparison {
+                    previous_wpm_delta: previous.map(|row| record.header.net_wpm - row.0),
+                    previous_accuracy_delta: previous.map(|row| record.header.accuracy - row.1),
+                    recent_three_wpm_delta: recent_wpm.map(|value| record.header.net_wpm - value),
+                    recent_three_accuracy_delta: recent_accuracy.map(|value| record.header.accuracy - value),
+                },
+            }
+        })
+        .collect()
+}
+
+fn parse_bench_id(id: &str, series: &str) -> Option<(crate::bench::BenchPart, u8)> {
+    let mut fields = id.split('/');
+    if fields.next()? != series {
+        return None;
+    }
+    let part = match fields.next()? {
+        "A" => crate::bench::BenchPart::A,
+        "B" => crate::bench::BenchPart::B,
+        "C" => crate::bench::BenchPart::C,
+        "D" => crate::bench::BenchPart::D,
+        _ => return None,
+    };
+    let parallel_index = fields.next()?.parse().ok()?;
+    (fields.next().is_none() && (1..=crate::bench::PARALLEL_VERSION_COUNT).contains(&parallel_index)).then_some((part, parallel_index))
 }
 
 pub fn bench_comparison(path: &Path, bench_id: &str, current_wpm: f64, current_accuracy: f64) -> AppResult<crate::bench::BenchComparison> {

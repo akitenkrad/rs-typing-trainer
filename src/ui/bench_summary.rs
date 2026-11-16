@@ -39,10 +39,17 @@ pub fn render(frame: &mut Frame, app: &App) {
         lines.push(Line::from(format!("    {}: {}", Msg::BenchVersion.text(lang), result.id)));
     }
     frame.render_widget(Paragraph::new(lines), left_inset(chunks[0]));
-    frame.render_widget(
-        Paragraph::new(Msg::BenchSummaryHint.text(lang)).style(Style::default().fg(theme.accent).add_modifier(Modifier::BOLD)),
-        left_inset(chunks[1]),
+    let remaining = app.result_input_delay_remaining();
+    let hint = remaining.map_or_else(
+        || Msg::BenchSummaryHint.text(lang).to_owned(),
+        |remaining| format!("{}  … {:.1}s", Msg::BenchSummaryHint.text(lang), remaining.as_secs_f32()),
     );
+    let style = if remaining.is_some() {
+        Style::default().fg(theme.muted)
+    } else {
+        Style::default().fg(theme.accent).add_modifier(Modifier::BOLD)
+    };
+    frame.render_widget(Paragraph::new(hint).style(style), left_inset(chunks[1]));
 }
 
 pub(crate) fn part_label(part: BenchPart, lang: crate::i18n::Lang) -> &'static str {

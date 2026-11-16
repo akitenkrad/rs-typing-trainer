@@ -518,7 +518,11 @@ fn render_sub_stats(frame: &mut Frame, game: &crate::app::GameState, theme: &The
 
 fn render_footer(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let Some(game) = app.game.as_ref() else { return };
-    let abort = Msg::AbortHint.text(app.config.general.lang);
+    let abort = if app.abort_confirmation_active() {
+        Msg::AbortConfirmHint.text(app.config.general.lang)
+    } else {
+        Msg::AbortHint.text(app.config.general.lang)
+    };
     let blind_notice = if app.active_bench_id.is_none() && app.config.session.blind {
         match app.config.general.lang {
             crate::i18n::Lang::En => "Blind: advance forced    ",

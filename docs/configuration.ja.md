@@ -27,6 +27,7 @@
 | `session.preview_items` | 整数 | `1` | 先読み項目数．0〜3． |
 | `session.blind` | 真偽値 | `false` | 項目終了まで入力済み部分を隠す． |
 | `session.retry_on_error` | 真偽値 | `false` | 誤打した項目を 1 回出し直す． |
+| `session.result_input_delay_ms` | 整数 | `1500` | 終了直後の結果画面とベンチまとめ画面で，この時間（ms）だけ押下・リピート入力を無視する．0 で無効．10000 を超える値は 10000 に丸める． |
 | `mode.kind` | モード名 | `"random"` | 起動時の練習モード． |
 | `mode.keys` | 文字列 | `"bmwvz"` | 絞り込み・生成に使う文字． |
 | `mode.key_filter` | `include` / `only` | `"include"` | 出題を絞り込む方法． |

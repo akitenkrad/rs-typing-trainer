@@ -52,9 +52,14 @@ pub fn render(frame: &mut Frame, app: &App, remaining: f32) {
     let para = Paragraph::new(big_lines).alignment(Alignment::Center);
     frame.render_widget(para, chunks[1]);
 
-    let hint = Paragraph::new(Msg::CountdownHint.text(lang))
+    let (hint_text, hint_color) = if app.abort_confirmation_active() {
+        (Msg::AbortConfirmHint.text(lang), theme.warning)
+    } else {
+        (Msg::CountdownHint.text(lang), theme.muted)
+    };
+    let hint = Paragraph::new(hint_text)
         .alignment(Alignment::Center)
-        .style(Style::default().fg(theme.muted));
+        .style(Style::default().fg(hint_color));
     frame.render_widget(hint, chunks[3]);
 }
 

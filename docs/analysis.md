@@ -17,7 +17,9 @@ Every part has eight deterministic parallel forms (`bench-v1/A/01` through `08`)
 
 Benchmark settings are fixed: stop-on-error, no item timeout and one preview item. User session settings do not alter them. Benchmark material is loaded from the complete bundled data before daily decks, exposure counts, user salts, weekday themes or reported-reading exclusions are applied. Japanese benchmark items must have `tier = core`.
 
-Each part is stored as a separate session with `mode = bench` and its full form ID in `bench_id`. Comparisons only use the same `bench-v1` part. Each part result names the part and form, shows the preceding-result and recent-three comparisons, and names the next part. The last part leads to a run summary. `Esc` ends the run while retaining completed-part records.
+Each part is stored as a separate session with `mode = bench` and its full form ID in `bench_id`. Comparisons only use the same `bench-v1` part. Each part result names the part and form, shows the preceding-result and recent-three comparisons, and names the next part. The last part leads to a run summary. Pressing `Esc` twice within two seconds ends the run while retaining completed-part records.
+
+An interrupted run is reconstructed only from the database. Among benchmark records saved on the current local date, the application takes the form number from the latest record, collects parts saved today with that number, and offers the first missing required part in A → B → C order. Part D is optional, so A through C count as complete. A resumed run keeps the form number fixed, and its summary combines the earlier completed parts with the newly completed parts. Ignoring the resume entry and starting a new run continues to use the normal next-form rule.
 
 ## Metrics
 

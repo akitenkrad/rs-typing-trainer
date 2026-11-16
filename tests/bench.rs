@@ -20,7 +20,7 @@ use rs_typing_trainer::ui;
 use tempfile::TempDir;
 
 mod common;
-use common::test_app;
+use common::{test_app, test_app_at};
 
 fn catalog() -> (TempDir, DataCatalog) {
     let home = TempDir::new().unwrap();
@@ -116,6 +116,10 @@ fn save_bench_record(path: &std::path::Path, bench_id: &str, wpm: f64, accuracy:
     record.header.net_wpm = wpm;
     record.header.accuracy = accuracy;
     db::save(path, &record).unwrap();
+}
+
+fn compact_render(app: &rs_typing_trainer::app::App) -> String {
+    render(app).chars().filter(|character| !character.is_whitespace()).collect()
 }
 
 #[test]
@@ -273,7 +277,7 @@ fn completing_last_required_part_opens_benchmark_summary() {
             .unwrap();
         app.on_tick_at(Duration::from_secs(60), base + Duration::from_secs(60)).unwrap();
         assert_eq!(app.screen, Screen::Result);
-        app.handle_key_at(key(KeyCode::Enter), base + Duration::from_secs(61));
+        app.handle_key_at(key(KeyCode::Enter), base + Duration::from_secs(62));
     }
 
     assert_ne!(app.screen, Screen::Title);
@@ -298,13 +302,153 @@ fn escape_from_benchmark_result_returns_to_title_without_quitting_and_keeps_comp
     app.on_tick_at(Duration::from_secs(60), started + Duration::from_secs(60)).unwrap();
     assert_eq!(app.screen, Screen::Result);
 
-    app.handle_key_at(key(KeyCode::Esc), started + Duration::from_secs(61));
+    app.handle_key_at(key(KeyCode::Esc), started + Duration::from_millis(61_500));
+    assert_eq!(app.screen, Screen::Result);
+    app.handle_key_at(key(KeyCode::Esc), started + Duration::from_millis(61_600));
 
     assert_eq!(app.screen, Screen::Title);
     assert!(!app.should_quit);
     let records = db::load_records_filtered(&app.db_path(), None, Some("bench")).unwrap();
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].header.bench_id.as_deref(), Some("bench-v1/A/01"));
+}
+
+#[test]
+fn benchmark_result_disables_history_and_quit_and_requires_confirmed_escape() {
+    let mut config = Config::default();
+    config.session.duration_seconds = 17;
+    config.session.item_timeout_seconds = 4;
+    config.session.error_mode = ErrorMode::Advance;
+    config.session.preview_items = 3;
+    config.mode.kind = ModeKind::Sentence;
+    let original_mode = config.mode.kind;
+    let mut app = test_app(config);
+    let started = Instant::now();
+    app.handle_key_at(key(KeyCode::Char('b')), started);
+    app.handle_key_at(key(KeyCode::Enter), started);
+    app.on_tick_at_date(Duration::from_secs(3), started, chrono::NaiveDate::from_ymd_opt(2026, 11, 14).unwrap())
+        .unwrap();
+    app.on_tick_at(Duration::from_secs(60), started + Duration::from_secs(60)).unwrap();
+    assert_eq!(app.screen, Screen::Result);
+
+    app.handle_key_at(key(KeyCode::Char('h')), started + Duration::from_millis(61_500));
+    app.handle_key_at(key(KeyCode::Char('q')), started + Duration::from_millis(61_600));
+    assert_eq!(app.screen, Screen::Result);
+    assert!(!app.should_quit);
+
+    app.handle_key_at(key(KeyCode::Esc), started + Duration::from_millis(61_700));
+    assert_eq!(app.screen, Screen::Result);
+    assert!(render(&app).contains("Press Esc again to quit"));
+    app.handle_key_at(key(KeyCode::Esc), started + Duration::from_millis(61_800));
+
+    assert_eq!(app.screen, Screen::Title);
+    assert_eq!(app.config.session.duration_seconds, 17);
+    assert_eq!(app.config.session.item_timeout_seconds, 4);
+    assert_eq!(app.config.session.error_mode, ErrorMode::Advance);
+    assert_eq!(app.config.session.preview_items, 3);
+    assert_eq!(app.config.mode.kind, original_mode);
+    assert!(app.active_bench_id.is_none());
+}
+
+#[test]
+fn benchmark_summary_ignores_enter_and_escape_during_result_delay() {
+    let mut config = Config::default();
+    config.session.duration_seconds = 17;
+    config.mode.kind = ModeKind::Sentence;
+    let mut app = test_app(config);
+    let started = Instant::now();
+    app.handle_key_at(key(KeyCode::Char('b')), started);
+    app.handle_key_at(key(KeyCode::Enter), started);
+
+    let mut summary_entered_at = started;
+    for offset in 0..3 {
+        let base = started + Duration::from_secs(offset * 70);
+        app.on_tick_at_date(Duration::from_secs(3), base, chrono::NaiveDate::from_ymd_opt(2026, 11, 14).unwrap())
+            .unwrap();
+        app.on_tick_at(Duration::from_secs(60), base + Duration::from_secs(60)).unwrap();
+        summary_entered_at = base + Duration::from_secs(62);
+        app.handle_key_at(key(KeyCode::Enter), summary_entered_at);
+    }
+    assert_eq!(app.screen, Screen::BenchSummary);
+    assert_eq!(app.config.session.duration_seconds, 17);
+    assert_eq!(app.config.mode.kind, ModeKind::Sentence);
+    assert!(app.active_bench_id.is_none());
+
+    app.handle_key_at(key(KeyCode::Enter), summary_entered_at);
+    app.handle_key_at(key(KeyCode::Esc), summary_entered_at + Duration::from_millis(100));
+    assert_eq!(app.screen, Screen::BenchSummary);
+}
+
+#[test]
+fn benchmark_selection_offers_resume_from_first_missing_part_of_latest_form_today() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("sessions.db");
+    save_bench_record(&path, "bench-v1/A/03", 40.0, 0.90, 14);
+    let mut config = Config::default();
+    config.general.lang = Lang::Ja;
+    config.storage.db_path = Some(path);
+    let today = chrono::NaiveDate::from_ymd_opt(2026, 11, 14).unwrap();
+    let mut app = test_app_at(config, today);
+
+    app.handle_key(key(KeyCode::Char('b')));
+    let output = compact_render(&app);
+    assert!(output.contains("パートBから続ける（版03）"), "{output}");
+
+    app.handle_key(key(KeyCode::Enter));
+    assert!(matches!(app.screen, Screen::Countdown { .. }));
+    assert_eq!(app.active_bench_id.as_deref(), Some("bench-v1/B/03"));
+}
+
+#[test]
+fn benchmark_selection_does_not_offer_resume_for_complete_or_old_forms() {
+    let today = chrono::NaiveDate::from_ymd_opt(2026, 11, 14).unwrap();
+
+    let complete_directory = TempDir::new().unwrap();
+    let complete_path = complete_directory.path().join("sessions.db");
+    for part in ['A', 'B', 'C'] {
+        save_bench_record(&complete_path, &format!("bench-v1/{part}/03"), 40.0, 0.90, 14);
+    }
+    let mut complete_config = Config::default();
+    complete_config.storage.db_path = Some(complete_path);
+    let mut complete = test_app_at(complete_config, today);
+    complete.handle_key(key(KeyCode::Char('b')));
+    assert!(!render(&complete).contains("Resume from part"));
+
+    let old_directory = TempDir::new().unwrap();
+    let old_path = old_directory.path().join("sessions.db");
+    save_bench_record(&old_path, "bench-v1/A/03", 40.0, 0.90, 13);
+    let mut old_config = Config::default();
+    old_config.storage.db_path = Some(old_path);
+    let mut old = test_app_at(old_config, today);
+    old.handle_key(key(KeyCode::Char('b')));
+    assert!(!render(&old).contains("Resume from part"));
+}
+
+#[test]
+fn resumed_benchmark_summary_includes_parts_completed_earlier_today() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("sessions.db");
+    save_bench_record(&path, "bench-v1/A/03", 40.0, 0.90, 16);
+    let mut config = Config::default();
+    config.storage.db_path = Some(path);
+    let today = chrono::NaiveDate::from_ymd_opt(2026, 11, 16).unwrap();
+    let mut app = test_app_at(config, today);
+    let started = Instant::now();
+    app.handle_key_at(key(KeyCode::Char('b')), started);
+    app.handle_key_at(key(KeyCode::Enter), started);
+    assert_eq!(app.active_bench_id.as_deref(), Some("bench-v1/B/03"));
+
+    for offset in 0..2 {
+        let base = started + Duration::from_secs(offset * 70);
+        app.on_tick_at_date(Duration::from_secs(3), base, today).unwrap();
+        app.on_tick_at(Duration::from_secs(60), base + Duration::from_secs(60)).unwrap();
+        app.handle_key_at(key(KeyCode::Enter), base + Duration::from_secs(62));
+    }
+    assert_eq!(app.screen, Screen::BenchSummary);
+    let output = render(&app);
+    assert!(output.contains("Part A English words"), "{output}");
+    assert!(output.contains("Part B Coverage"), "{output}");
+    assert!(output.contains("Part C Japanese"), "{output}");
 }
 
 #[test]
@@ -378,7 +522,7 @@ fn title_starts_a_fixed_benchmark_session() {
     assert_eq!(saved.header.bench_id.as_deref(), Some("bench-v1/A/01"));
     assert_eq!(saved.header.error_mode, "stop");
 
-    app.handle_key_at(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now + Duration::from_secs(61));
+    app.handle_key_at(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now + Duration::from_secs(62));
     assert!(matches!(app.screen, Screen::Countdown { .. }));
     assert_eq!(app.active_bench_id.as_deref(), Some("bench-v1/B/01"));
 }

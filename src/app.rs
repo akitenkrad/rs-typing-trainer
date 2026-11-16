@@ -2,7 +2,7 @@
 //! in-progress game, and the last completed result.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -15,7 +15,7 @@ use crate::analysis::prescription::{
     ControlCandidate, DifficultyState, Evidence, Posterior, PrescriptionBaseline, PrescriptionTarget, adjust_difficulty,
     evaluate_stored_prescription, prescription_trends, real_word_records_since, record_prescription_session, select_controls,
 };
-use crate::bench::{BenchPart, BenchResultSummary, BenchSettings, generate_version, next_parallel_index};
+use crate::bench::{BenchPart, BenchResultSummary, BenchResume, BenchSettings, generate_version, next_parallel_index};
 use crate::config::{Config, KeyFilter, KeyboardConfig, ModeConfig, ModeKind, SessionConfig};
 use crate::data::{DataCatalog, DataKind, TrainingDataSource};
 use crate::engine::modes::{GeneratedPrompt, ModeGenerator};
@@ -48,6 +48,7 @@ use unicode_segmentation::UnicodeSegmentation;
 pub const WORD_ENTER_DURATION: Duration = Duration::from_millis(200);
 pub const WORD_EXIT_DURATION: Duration = Duration::from_millis(200);
 pub const COUNTDOWN_DURATION: Duration = Duration::from_millis(3000);
+const ABORT_CONFIRMATION_DURATION: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Screen {
@@ -59,6 +60,7 @@ pub enum Screen {
     Result,
     History,
     HistoryDetail,
+    Replay,
     Settings,
     BenchSelect,
     BenchSummary,
@@ -81,8 +83,57 @@ pub enum HistorySort {
     DateAsc,
     WpmDesc,
     AccuracyDesc,
-    MaxComboDesc,
-    WordsDesc,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HistoryKindFilter {
+    #[default]
+    All,
+    Practice,
+    Bench,
+}
+
+impl HistoryKindFilter {
+    fn next(self) -> Self {
+        match self {
+            Self::All => Self::Practice,
+            Self::Practice => Self::Bench,
+            Self::Bench => Self::All,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HistoryOrigin {
+    #[default]
+    Title,
+    Result,
+}
+
+#[derive(Clone, Debug)]
+pub enum HistoryEntry {
+    Session(SessionSummary),
+    BenchRun {
+        id: i64,
+        series: String,
+        form: String,
+        parts: Vec<SessionSummary>,
+    },
+    BenchPart {
+        run_id: i64,
+        series: String,
+        form: String,
+        summary: SessionSummary,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub struct HistoryDetailData {
+    pub summary: SessionSummary,
+    pub record: SessionRecord,
+    pub personal_best_wpm: Option<f64>,
+    pub previous_wpm_delta: Option<f64>,
+    pub export_notice: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -99,8 +150,6 @@ impl HistorySort {
             HistorySort::DateAsc => Msg::SortDateOldest.text(lang),
             HistorySort::WpmDesc => Msg::SortWpm.text(lang),
             HistorySort::AccuracyDesc => Msg::SortAccuracy.text(lang),
-            HistorySort::MaxComboDesc => Msg::SortMaxCombo.text(lang),
-            HistorySort::WordsDesc => Msg::SortWords.text(lang),
         }
     }
 
@@ -109,17 +158,23 @@ impl HistorySort {
             HistorySort::DateDesc => HistorySort::DateAsc,
             HistorySort::DateAsc => HistorySort::WpmDesc,
             HistorySort::WpmDesc => HistorySort::AccuracyDesc,
-            HistorySort::AccuracyDesc => HistorySort::MaxComboDesc,
-            HistorySort::MaxComboDesc => HistorySort::WordsDesc,
-            HistorySort::WordsDesc => HistorySort::DateDesc,
+            HistorySort::AccuracyDesc => HistorySort::DateDesc,
         }
     }
 
     /// True if the sort is by an aggregate score (vs. by date), so the UI
     /// should prefix entries with their rank number.
     pub fn is_ranking(self) -> bool {
-        !matches!(self, HistorySort::DateDesc | HistorySort::DateAsc)
+        self == HistorySort::WpmDesc
     }
+}
+
+#[derive(Clone)]
+struct HistoryReturnState {
+    result: Option<GameResult>,
+    legacy_wpm: Option<f64>,
+    last_save_id: Option<i64>,
+    last_save_error: Option<String>,
 }
 
 pub struct App {
@@ -139,10 +194,23 @@ pub struct App {
     pub result_insights: Vec<String>,
     pub result_grade_line: Option<String>,
     pub mode_grade_line: Option<String>,
-    pub history: Vec<SessionSummary>,
+    pub history: Vec<HistoryEntry>,
+    history_sessions: Vec<SessionSummary>,
+    pub history_ranks: Vec<Option<usize>>,
     pub history_selected: usize,
     pub history_sort: HistorySort,
+    pub history_kind_filter: HistoryKindFilter,
+    pub history_mode_filter: Option<String>,
+    pub history_language_filter: Option<String>,
+    pub history_period: AnalysisPeriod,
+    pub history_expanded: HashSet<i64>,
+    pub history_origin: HistoryOrigin,
     pub history_load_error: Option<String>,
+    pub history_detail: Option<HistoryDetailData>,
+    pub history_replay: Option<Box<crate::replay::Replay>>,
+    history_replay_started: Option<Instant>,
+    pub history_export_dir: Option<PathBuf>,
+    history_return_state: Option<HistoryReturnState>,
     pub should_quit: bool,
     pub storage_notice: bool,
     pub elapsed_total: Duration,
@@ -164,6 +232,7 @@ pub struct App {
     pub active_bench_id: Option<String>,
     pub bench_comparison: Option<crate::bench::BenchComparison>,
     pub bench_results: Vec<BenchResultSummary>,
+    pub bench_resume: Option<BenchResume>,
     pub analysis_tab: usize,
     pub analysis_period: AnalysisPeriod,
     pub analysis_mode_filter: Option<String>,
@@ -194,6 +263,9 @@ pub struct App {
     pub recommend_rhythm: bool,
     analysis_as_of: chrono::NaiveDate,
     bench_run: Option<BenchRun>,
+    ui_now: Instant,
+    input_blocked_until: Option<Instant>,
+    abort_confirm_until: Option<Instant>,
     settings_original: Option<(KeyboardConfig, crate::config::DisplayConfig, Lang, crate::config::ErrorMode)>,
 }
 
@@ -261,6 +333,7 @@ impl App {
     }
 
     fn new_without_storage(config: Config, home_dir: PathBuf, date: chrono::NaiveDate) -> Self {
+        let now = Instant::now();
         let mode_selected = mode_index(config.mode.kind);
         let practice_theme = weekly_theme(date, config.practice.weekly_theme);
         let layouts = builtin_layout_names()
@@ -284,9 +357,22 @@ impl App {
             result_grade_line: None,
             mode_grade_line: None,
             history: Vec::new(),
+            history_sessions: Vec::new(),
+            history_ranks: Vec::new(),
             history_selected: 0,
             history_sort: HistorySort::DateDesc,
+            history_kind_filter: HistoryKindFilter::All,
+            history_mode_filter: None,
+            history_language_filter: None,
+            history_period: AnalysisPeriod::All,
+            history_expanded: HashSet::new(),
+            history_origin: HistoryOrigin::Title,
             history_load_error: None,
+            history_detail: None,
+            history_replay: None,
+            history_replay_started: None,
+            history_export_dir: None,
+            history_return_state: None,
             should_quit: false,
             storage_notice: false,
             elapsed_total: Duration::ZERO,
@@ -308,6 +394,7 @@ impl App {
             active_bench_id: None,
             bench_comparison: None,
             bench_results: Vec::new(),
+            bench_resume: None,
             analysis_tab: 0,
             analysis_period: AnalysisPeriod::All,
             analysis_mode_filter: None,
@@ -338,6 +425,9 @@ impl App {
             recommend_rhythm: false,
             analysis_as_of: date,
             bench_run: None,
+            ui_now: now,
+            input_blocked_until: None,
+            abort_confirm_until: None,
             settings_original: None,
         }
     }
@@ -616,35 +706,48 @@ impl App {
     }
 
     pub fn handle_key_at(&mut self, key: KeyEvent, now: Instant) {
+        self.ui_now = now;
         if key.kind == KeyEventKind::Release {
             self.handle_release(key, now);
             return;
         }
+        if self.result_input_delay_remaining().is_some() {
+            return;
+        }
         if key.kind != KeyEventKind::Press {
+            if key.code != KeyCode::Esc {
+                self.abort_confirm_until = None;
+            }
             return;
         }
         if self.screen == Screen::Playing && key.code == KeyCode::F(2) {
+            self.abort_confirm_until = None;
             self.report_current_reading(now);
             return;
         }
         let action = classify(key);
+        if !matches!(action, InputAction::Abort) {
+            self.abort_confirm_until = None;
+        }
         match self.screen {
             Screen::Title => self.handle_title_key(key, action),
             Screen::ModeSelect => self.handle_mode_select_key(key, action),
             Screen::KeyPicker => self.handle_key_picker_key(key, action),
             Screen::Countdown { .. } => {
-                if matches!(key.code, KeyCode::Esc) {
+                if matches!(action, InputAction::Abort) && self.confirm_abort(now) {
                     if self.bench_run.is_some() {
                         self.abort_benchmark();
                     } else {
+                        self.game = None;
                         self.screen = Screen::Title;
                     }
                 }
             }
             Screen::Playing => self.handle_playing_key(action, now),
-            Screen::Result => self.handle_result_key(key, action),
+            Screen::Result => self.handle_result_key(key, action, now),
             Screen::History => self.handle_history_key(key, action),
-            Screen::HistoryDetail => self.handle_history_detail_key(key, action),
+            Screen::HistoryDetail => self.handle_history_detail_key(key, action, now),
+            Screen::Replay => self.handle_history_replay_key(key, action, now),
             Screen::Settings => self.handle_settings_key(key, action),
             Screen::BenchSelect => self.handle_bench_select_key(key, action),
             Screen::BenchSummary => self.handle_bench_summary_key(key, action),
@@ -681,6 +784,9 @@ impl App {
             KeyCode::Char('b') | KeyCode::Char('B') => {
                 self.bench_include_d = false;
                 self.bench_selected = 0;
+                self.bench_resume = db::incomplete_benchmark(&self.db_path(), crate::bench::BENCH_SERIES, self.analysis_as_of)
+                    .ok()
+                    .flatten();
                 self.screen = Screen::BenchSelect;
             }
             KeyCode::Char('a') | KeyCode::Char('A') => self.open_analysis(),
@@ -829,11 +935,15 @@ impl App {
     }
 
     fn handle_bench_select_key(&mut self, key: KeyEvent, action: InputAction) {
+        let has_resume = self.bench_resume.is_some();
+        let start_index = usize::from(has_resume);
+        let optional_index = start_index + 1;
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => self.bench_selected = self.bench_selected.saturating_sub(1),
-            KeyCode::Down | KeyCode::Char('j') => self.bench_selected = (self.bench_selected + 1).min(1),
+            KeyCode::Down | KeyCode::Char('j') => self.bench_selected = (self.bench_selected + 1).min(optional_index),
             KeyCode::Char('d') | KeyCode::Char('D') => self.bench_include_d = !self.bench_include_d,
-            KeyCode::Enter if self.bench_selected == 0 => self.start_benchmark(),
+            KeyCode::Enter if has_resume && self.bench_selected == 0 => self.resume_benchmark(),
+            KeyCode::Enter if self.bench_selected == start_index => self.start_benchmark(),
             KeyCode::Enter => self.bench_include_d = !self.bench_include_d,
             KeyCode::Char(' ') => self.start_benchmark(),
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => self.screen = Screen::Title,
@@ -1054,6 +1164,21 @@ impl App {
             original_mode: self.config.mode.clone(),
         };
         self.bench_results.clear();
+        self.bench_resume = None;
+        self.bench_run = Some(run);
+        self.configure_bench_part();
+    }
+
+    fn resume_benchmark(&mut self) {
+        let Some(resume) = self.bench_resume.take() else { return };
+        let run = BenchRun {
+            include_d: self.bench_include_d,
+            parallel_index: resume.parallel_index,
+            part: resume.part,
+            original_session: self.config.session.clone(),
+            original_mode: self.config.mode.clone(),
+        };
+        self.bench_results = resume.completed;
         self.bench_run = Some(run);
         self.configure_bench_part();
     }
@@ -1075,29 +1200,68 @@ impl App {
         self.start_countdown();
     }
 
-    fn continue_benchmark(&mut self) {
+    fn continue_benchmark(&mut self, now: Instant) {
         let next = self.bench_run.as_ref().and_then(|run| run.part.next(run.include_d));
         if let Some(next) = next {
             if let Some(run) = self.bench_run.as_mut() {
                 run.part = next;
             }
             self.configure_bench_part();
-        } else if let Some(run) = self.bench_run.take() {
-            self.config.session = run.original_session;
-            self.config.mode = run.original_mode;
-            self.active_bench_id = None;
-            self.screen = Screen::BenchSummary;
+        } else if let Some(parallel_index) = self.bench_run.as_ref().map(|run| run.parallel_index) {
+            if let Ok(results) = db::bench_results_for_day_form(&self.db_path(), crate::bench::BENCH_SERIES, self.analysis_as_of, parallel_index)
+                && !results.is_empty()
+            {
+                self.bench_results = results;
+            }
+            self.leave_benchmark(Screen::BenchSummary);
+            self.begin_result_input_delay(now);
         }
     }
 
     fn abort_benchmark(&mut self) {
+        self.leave_benchmark(Screen::Title);
+    }
+
+    fn leave_benchmark(&mut self, destination: Screen) {
         self.game = None;
         if let Some(run) = self.bench_run.take() {
             self.config.session = run.original_session;
             self.config.mode = run.original_mode;
         }
         self.active_bench_id = None;
-        self.screen = Screen::Title;
+        self.bench_resume = None;
+        self.abort_confirm_until = None;
+        self.input_blocked_until = None;
+        self.screen = destination;
+    }
+
+    fn begin_result_input_delay(&mut self, now: Instant) {
+        let delay = self.config.session.result_input_delay();
+        self.input_blocked_until = (!delay.is_zero()).then_some(now + delay);
+        self.ui_now = now;
+    }
+
+    fn confirm_abort(&mut self, now: Instant) -> bool {
+        if self.abort_confirm_until.is_some_and(|deadline| now <= deadline) {
+            self.abort_confirm_until = None;
+            true
+        } else {
+            self.abort_confirm_until = Some(now + ABORT_CONFIRMATION_DURATION);
+            false
+        }
+    }
+
+    pub fn abort_confirmation_active(&self) -> bool {
+        self.abort_confirm_until.is_some_and(|deadline| self.ui_now <= deadline)
+    }
+
+    pub fn result_input_delay_remaining(&self) -> Option<Duration> {
+        let applies =
+            matches!(self.screen, Screen::BenchSummary) || matches!(self.screen, Screen::Result) && self.result_origin == ResultOrigin::JustPlayed;
+        applies
+            .then_some(self.input_blocked_until?)
+            .filter(|deadline| self.ui_now < *deadline)
+            .map(|deadline| deadline.saturating_duration_since(self.ui_now))
     }
 
     fn handle_bench_summary_key(&mut self, key: KeyEvent, action: InputAction) {
@@ -1352,20 +1516,24 @@ impl App {
         options
     }
 
-    fn handle_result_key(&mut self, key: KeyEvent, action: InputAction) {
+    fn handle_result_key(&mut self, key: KeyEvent, action: InputAction, now: Instant) {
         match key.code {
             KeyCode::Char(' ') | KeyCode::Enter => match self.result_origin {
-                ResultOrigin::JustPlayed if self.bench_run.is_some() => self.continue_benchmark(),
+                ResultOrigin::JustPlayed if self.bench_run.is_some() => self.continue_benchmark(now),
                 ResultOrigin::JustPlayed if self.config.mode.kind == ModeKind::Burst && self.burst_series.complete() => {
                     self.screen = Screen::Title;
                 }
                 ResultOrigin::JustPlayed => self.start_countdown(),
                 ResultOrigin::History => self.open_history(),
             },
-            KeyCode::Char('h') | KeyCode::Char('H') => self.open_history(),
-            KeyCode::Char('q') | KeyCode::Char('Q') => self.should_quit = true,
+            KeyCode::Char('h') | KeyCode::Char('H') if self.bench_run.is_none() => self.open_history(),
+            KeyCode::Char('q') | KeyCode::Char('Q') if self.bench_run.is_none() => self.should_quit = true,
             KeyCode::Esc => match self.result_origin {
-                ResultOrigin::JustPlayed if self.bench_run.is_some() => self.abort_benchmark(),
+                ResultOrigin::JustPlayed if self.bench_run.is_some() => {
+                    if self.confirm_abort(now) {
+                        self.abort_benchmark();
+                    }
+                }
                 ResultOrigin::JustPlayed => self.should_quit = true,
                 ResultOrigin::History => self.open_history(),
             },
@@ -1373,7 +1541,11 @@ impl App {
         }
         if matches!(action, InputAction::Abort) && key.code != KeyCode::Esc {
             match self.result_origin {
-                ResultOrigin::JustPlayed if self.bench_run.is_some() => self.abort_benchmark(),
+                ResultOrigin::JustPlayed if self.bench_run.is_some() => {
+                    if self.confirm_abort(now) {
+                        self.abort_benchmark();
+                    }
+                }
                 ResultOrigin::JustPlayed => self.should_quit = true,
                 ResultOrigin::History => self.open_history(),
             }
@@ -1410,30 +1582,137 @@ impl App {
             KeyCode::Char('s') | KeyCode::Char('S') => {
                 self.history_sort = self.history_sort.next();
                 self.history_selected = 0;
-                self.open_history();
+                self.rebuild_history();
             }
-            KeyCode::Enter => self.open_history_detail(),
+            KeyCode::Tab => {
+                self.history_kind_filter = self.history_kind_filter.next();
+                self.history_selected = 0;
+                self.rebuild_history();
+            }
+            KeyCode::Char('m') | KeyCode::Char('M') => {
+                self.cycle_history_mode();
+                self.history_selected = 0;
+                self.rebuild_history();
+            }
+            KeyCode::Char('l') | KeyCode::Char('L') => {
+                self.history_language_filter = match self.history_language_filter.as_deref() {
+                    None => Some("en".to_owned()),
+                    Some("en") => Some("ja".to_owned()),
+                    _ => None,
+                };
+                self.history_selected = 0;
+                self.rebuild_history();
+            }
+            KeyCode::Char('p') | KeyCode::Char('P') => {
+                self.history_period = match self.history_period {
+                    AnalysisPeriod::All => AnalysisPeriod::Days30,
+                    AnalysisPeriod::Days30 => AnalysisPeriod::Days7,
+                    AnalysisPeriod::Days7 => AnalysisPeriod::All,
+                };
+                self.history_selected = 0;
+                self.rebuild_history();
+            }
+            KeyCode::Enter => self.activate_history_entry(),
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
-                self.screen = Screen::Title;
+                self.leave_history();
             }
             _ => {}
         }
-        if matches!(action, InputAction::Abort) {
-            self.screen = Screen::Title;
+        if matches!(action, InputAction::Abort) && !matches!(key.code, KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q')) {
+            self.leave_history();
         }
     }
 
-    fn handle_history_detail_key(&mut self, key: KeyEvent, action: InputAction) {
+    fn handle_history_detail_key(&mut self, key: KeyEvent, action: InputAction, now: Instant) {
         match key.code {
             KeyCode::Esc | KeyCode::Backspace | KeyCode::Char(' ') | KeyCode::Enter => {
-                self.open_history();
+                self.screen = Screen::History;
             }
+            KeyCode::Char('r') | KeyCode::Char('R') => self.start_history_replay(now),
+            KeyCode::Char('e') | KeyCode::Char('E') => self.export_history_detail(),
             KeyCode::Char('q') | KeyCode::Char('Q') => self.should_quit = true,
             _ => {}
         }
         if matches!(action, InputAction::Abort) {
-            self.open_history();
+            self.screen = Screen::History;
         }
+    }
+
+    fn start_history_replay(&mut self, now: Instant) {
+        let Some(record) = self
+            .history_detail
+            .as_ref()
+            .filter(|detail| detail.record.header.metrics_version != 0)
+            .map(|detail| detail.record.clone())
+        else {
+            return;
+        };
+        let mut replay = crate::replay::Replay::new_with_lang(
+            record,
+            crate::replay::PlaybackTiming::Recorded { speed: 1.0 },
+            false,
+            false,
+            self.config.general.lang,
+        );
+        replay.set_big_font(&self.config.display.big_font, &self.home_dir);
+        replay.set_graphics_detection(self.graphics.clone());
+        self.history_replay = Some(Box::new(replay));
+        self.history_replay_started = Some(now);
+        self.screen = Screen::Replay;
+    }
+
+    fn handle_history_replay_key(&mut self, key: KeyEvent, action: InputAction, now: Instant) {
+        let elapsed = self
+            .history_replay_started
+            .map_or(Duration::ZERO, |started| now.saturating_duration_since(started));
+        match key.code {
+            KeyCode::Char(' ') => {
+                if let Some(replay) = self.history_replay.as_mut() {
+                    replay.toggle_pause(elapsed);
+                }
+            }
+            KeyCode::Right => {
+                if let Some(replay) = self.history_replay.as_mut() {
+                    replay.step();
+                }
+            }
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => self.finish_history_replay(),
+            _ => {}
+        }
+        if matches!(action, InputAction::Abort) && !matches!(key.code, KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q')) {
+            self.finish_history_replay();
+        }
+    }
+
+    fn finish_history_replay(&mut self) {
+        self.history_replay = None;
+        self.history_replay_started = None;
+        self.screen = Screen::HistoryDetail;
+    }
+
+    fn export_history_detail(&mut self) {
+        let Some(detail) = self.history_detail.as_mut().filter(|detail| detail.record.header.metrics_version != 0) else {
+            return;
+        };
+        let id = detail.summary.id;
+        let directory = self
+            .history_export_dir
+            .clone()
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| PathBuf::from("."));
+        let path = directory.join(format!("session-{id}.ttrec"));
+        let result = std::fs::File::create(&path)
+            .and_then(|file| crate::record::ttrec::write(&detail.record, file).map_err(|error| std::io::Error::other(error.to_string())));
+        detail.export_notice = Some(match result {
+            Ok(()) => match self.config.general.lang {
+                Lang::En => format!("Exported: {}", path.display()),
+                Lang::Ja => format!("書き出しました: {}", path.display()),
+            },
+            Err(error) => match self.config.general.lang {
+                Lang::En => format!("Export failed: {error}"),
+                Lang::Ja => format!("書き出せませんでした: {error}"),
+            },
+        });
     }
 
     fn handle_playing_key(&mut self, action: InputAction, now: Instant) {
@@ -1445,15 +1724,16 @@ impl App {
         }
         match action {
             InputAction::Abort => {
-                // Esc during play: abort back to title.
-                if let Some(game) = self.game.as_mut() {
-                    game.session.abort(now.saturating_duration_since(game.started_at));
-                }
-                if self.bench_run.is_some() {
-                    self.abort_benchmark();
-                } else {
-                    self.game = None;
-                    self.screen = Screen::Title;
+                if self.confirm_abort(now) {
+                    if let Some(game) = self.game.as_mut() {
+                        game.session.abort(now.saturating_duration_since(game.started_at));
+                    }
+                    if self.bench_run.is_some() {
+                        self.abort_benchmark();
+                    } else {
+                        self.game = None;
+                        self.screen = Screen::Title;
+                    }
                 }
             }
             InputAction::Char(g) => {
@@ -1581,25 +1861,44 @@ impl App {
         self.screen = Screen::Countdown { remaining: 3.0 };
         self.last_save_id = None;
         self.last_save_error = None;
+        self.input_blocked_until = None;
+        self.abort_confirm_until = None;
     }
 
     fn open_history(&mut self) {
-        let loaded = if self.history_sort.is_ranking() {
-            db::ranked_sessions(&self.db_path())
-        } else {
-            db::list(&self.db_path())
-        };
-        match loaded {
-            Ok(mut items) => {
-                sort_history(&mut items, self.history_sort);
-                if self.history_selected >= items.len() {
-                    self.history_selected = items.len().saturating_sub(1);
-                }
-                self.history = items;
+        let entering = !matches!(self.screen, Screen::History | Screen::HistoryDetail);
+        if entering {
+            self.history_origin = if self.screen == Screen::Result && self.result_origin == ResultOrigin::JustPlayed {
+                self.history_return_state = Some(HistoryReturnState {
+                    result: self.last_result.clone(),
+                    legacy_wpm: self.legacy_wpm,
+                    last_save_id: self.last_save_id,
+                    last_save_error: self.last_save_error.clone(),
+                });
+                HistoryOrigin::Result
+            } else {
+                self.history_return_state = None;
+                HistoryOrigin::Title
+            };
+            self.history_selected = 0;
+            self.history_sort = HistorySort::DateDesc;
+            self.history_kind_filter = HistoryKindFilter::All;
+            self.history_mode_filter = None;
+            self.history_language_filter = None;
+            self.history_period = AnalysisPeriod::All;
+            self.history_expanded.clear();
+            self.history_detail = None;
+        }
+        match db::list(&self.db_path()) {
+            Ok(items) => {
+                self.history_sessions = items;
                 self.history_load_error = None;
+                self.rebuild_history();
             }
             Err(e) => {
+                self.history_sessions.clear();
                 self.history.clear();
+                self.history_ranks.clear();
                 self.history_selected = 0;
                 self.history_load_error = Some(e.to_string());
             }
@@ -1607,25 +1906,177 @@ impl App {
         self.screen = Screen::History;
     }
 
+    fn leave_history(&mut self) {
+        match self.history_origin {
+            HistoryOrigin::Title => self.screen = Screen::Title,
+            HistoryOrigin::Result => {
+                if let Some(state) = self.history_return_state.take() {
+                    self.last_result = state.result;
+                    self.legacy_wpm = state.legacy_wpm;
+                    self.last_save_id = state.last_save_id;
+                    self.last_save_error = state.last_save_error;
+                }
+                self.result_origin = ResultOrigin::JustPlayed;
+                self.screen = Screen::Result;
+            }
+        }
+    }
+
+    fn activate_history_entry(&mut self) {
+        let Some(entry) = self.history.get(self.history_selected) else {
+            return;
+        };
+        if let HistoryEntry::BenchRun { id, .. } = entry {
+            let id = *id;
+            if !self.history_expanded.remove(&id) {
+                self.history_expanded.insert(id);
+            }
+            self.rebuild_history();
+            return;
+        }
+        self.open_history_detail();
+    }
+
+    pub(crate) fn history_sessions_empty(&self) -> bool {
+        self.history_sessions.is_empty()
+    }
+
+    fn cycle_history_mode(&mut self) {
+        let filter = HistoryFilter {
+            mode: None,
+            language: self.history_language_filter.as_deref(),
+            period: self.history_period,
+            today: self.analysis_as_of,
+        };
+        let recorded = self
+            .history_sessions
+            .iter()
+            .filter(|summary| match self.history_kind_filter {
+                HistoryKindFilter::All => true,
+                HistoryKindFilter::Practice => summary.bench_id.is_none(),
+                HistoryKindFilter::Bench => summary.bench_id.is_some(),
+            })
+            .filter(|summary| summary_matches(summary, filter))
+            .map(history_effective_mode)
+            .collect::<BTreeSet<_>>();
+        const ORDER: [&str; 10] = [
+            "random",
+            "words",
+            "romaji",
+            "sentence",
+            "ngram",
+            "adaptive",
+            "unlock",
+            "rhythm",
+            "burst",
+            "endurance",
+        ];
+        let mut options = vec![None];
+        options.extend(
+            ORDER
+                .into_iter()
+                .filter(|mode| recorded.contains(*mode))
+                .map(|mode| Some(mode.to_owned())),
+        );
+        for mode in recorded {
+            if !options.iter().any(|candidate| candidate.as_deref() == Some(mode.as_str())) {
+                options.push(Some(mode));
+            }
+        }
+        let current = options.iter().position(|value| *value == self.history_mode_filter).unwrap_or(0);
+        self.history_mode_filter = options[(current + 1) % options.len()].clone();
+    }
+
+    fn rebuild_history(&mut self) {
+        let mut rows = build_history_rows(
+            &self.history_sessions,
+            self.history_kind_filter,
+            self.history_mode_filter.as_deref(),
+            self.history_language_filter.as_deref(),
+            self.history_period,
+            self.analysis_as_of,
+        );
+        sort_history_entries(&mut rows, self.history_sort);
+        let ranking =
+            self.history_sort == HistorySort::WpmDesc && self.history_mode_filter.is_some() && self.history_kind_filter != HistoryKindFilter::All;
+        let mut ranks = rank_history_entries(&rows, ranking, self.history_kind_filter);
+        let mut expanded_rows = Vec::new();
+        let mut expanded_ranks = Vec::new();
+        for (row, rank) in rows.into_iter().zip(ranks.drain(..)) {
+            let expanded = matches!(&row, HistoryEntry::BenchRun { id, .. } if self.history_expanded.contains(id));
+            let children = match &row {
+                HistoryEntry::BenchRun { id, series, form, parts } if expanded => parts
+                    .iter()
+                    .cloned()
+                    .map(|summary| HistoryEntry::BenchPart {
+                        run_id: *id,
+                        series: series.clone(),
+                        form: form.clone(),
+                        summary,
+                    })
+                    .collect::<Vec<_>>(),
+                _ => Vec::new(),
+            };
+            expanded_rows.push(row);
+            expanded_ranks.push(rank);
+            for child in children {
+                expanded_rows.push(child);
+                expanded_ranks.push(rank);
+            }
+        }
+        self.history = expanded_rows;
+        self.history_ranks = expanded_ranks;
+        self.history_selected = self.history_selected.min(self.history.len().saturating_sub(1));
+    }
+
     fn open_history_detail(&mut self) {
         let Some(entry) = self.history.get(self.history_selected) else {
             return;
         };
+        let entry = match entry {
+            HistoryEntry::Session(summary) | HistoryEntry::BenchPart { summary, .. } => summary.clone(),
+            HistoryEntry::BenchRun { .. } => return,
+        };
         let path = self.db_path();
-        match db::load_result(&path, entry.id, &self.config) {
-            Ok(Some(result)) => {
+        match (db::load_result(&path, entry.id, &self.config), db::load_record(&path, entry.id)) {
+            (Ok(Some(result)), Ok(Some(record))) => {
+                let matching = self
+                    .history_sessions
+                    .iter()
+                    .filter(|candidate| same_history_condition(candidate, &entry))
+                    .collect::<Vec<_>>();
+                let personal_best_wpm = matching
+                    .iter()
+                    .filter(|candidate| candidate.score_eligible)
+                    .map(|candidate| candidate.wpm)
+                    .max_by(f64::total_cmp);
+                let previous_wpm_delta = matching
+                    .iter()
+                    .copied()
+                    .filter(|candidate| {
+                        candidate.finished_at < entry.finished_at || candidate.finished_at == entry.finished_at && candidate.id < entry.id
+                    })
+                    .max_by(|left, right| left.finished_at.cmp(&right.finished_at).then(left.id.cmp(&right.id)))
+                    .map(|previous| entry.wpm - previous.wpm);
                 self.last_result = Some(result);
                 self.legacy_wpm = db::legacy_wpm(&path, entry.id).ok().flatten();
                 self.result_origin = ResultOrigin::History;
                 self.last_save_id = Some(entry.id);
                 self.last_save_error = None;
+                self.history_detail = Some(HistoryDetailData {
+                    summary: entry,
+                    record,
+                    personal_best_wpm,
+                    previous_wpm_delta,
+                    export_notice: None,
+                });
                 self.screen = Screen::HistoryDetail;
             }
-            Ok(None) => {
+            (Ok(None), _) | (_, Ok(None)) => {
                 self.legacy_wpm = None;
                 self.history_load_error = Some(format!("{}: #{}", Msg::SessionNotFound.text(self.config.general.lang), entry.id));
             }
-            Err(e) => {
+            (Err(e), _) | (_, Err(e)) => {
                 self.legacy_wpm = None;
                 self.history_load_error = Some(e.to_string());
             }
@@ -1931,6 +2382,8 @@ impl App {
     }
 
     pub fn on_tick_at_date(&mut self, dt: Duration, now: Instant, date: chrono::NaiveDate) -> AppResult<()> {
+        self.ui_now = now;
+        self.analysis_as_of = date;
         self.elapsed_total += dt;
         match self.screen {
             Screen::Countdown { remaining } => {
@@ -1942,6 +2395,17 @@ impl App {
                 }
             }
             Screen::Playing => self.tick_playing(dt, now)?,
+            Screen::Replay => {
+                let elapsed = self
+                    .history_replay_started
+                    .map_or(Duration::ZERO, |started| now.saturating_duration_since(started));
+                if let Some(replay) = self.history_replay.as_mut() {
+                    replay.advance_to(elapsed);
+                    if replay.is_finished() {
+                        self.finish_history_replay();
+                    }
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -2052,7 +2516,7 @@ impl App {
         }
     }
 
-    fn finish_game(&mut self, _now: Instant) {
+    fn finish_game(&mut self, now: Instant) {
         let Some(game) = self.game.take() else { return };
         let started_wall = game.started_wall;
         let ghost_opponent = game.ghost.as_ref().map(|ghost| ghost.opponent().to_owned());
@@ -2236,6 +2700,8 @@ impl App {
         self.legacy_wpm = None;
         self.result_origin = ResultOrigin::JustPlayed;
         self.screen = Screen::Result;
+        self.abort_confirm_until = None;
+        self.begin_result_input_delay(now);
     }
 
     fn refresh_result_coaching(&mut self, record: &SessionRecord) {
@@ -2558,6 +3024,246 @@ fn reset_item_display_state(game: &mut GameState) {
     game.ime_warning = false;
 }
 
+impl HistoryEntry {
+    pub fn primary_summary(&self) -> &SessionSummary {
+        match self {
+            Self::Session(summary) | Self::BenchPart { summary, .. } => summary,
+            Self::BenchRun { parts, .. } => parts.iter().find(|part| bench_part(part).as_deref() == Some("A")).unwrap_or(&parts[0]),
+        }
+    }
+
+    pub fn finished_at(&self) -> chrono::DateTime<chrono::Local> {
+        match self {
+            Self::BenchRun { parts, .. } => parts[0].finished_at,
+            _ => self.primary_summary().finished_at,
+        }
+    }
+
+    pub fn wpm(&self) -> f64 {
+        self.primary_summary().wpm
+    }
+
+    pub fn accuracy(&self) -> f64 {
+        match self {
+            Self::BenchRun { parts, .. } => parts.iter().map(|part| part.accuracy).sum::<f64>() / parts.len() as f64,
+            _ => self.primary_summary().accuracy,
+        }
+    }
+
+    pub fn duration(&self) -> Duration {
+        match self {
+            Self::BenchRun { parts, .. } => parts.iter().fold(Duration::ZERO, |total, part| total.saturating_add(part.duration)),
+            _ => self.primary_summary().duration,
+        }
+    }
+
+    pub fn score_eligible(&self) -> bool {
+        self.primary_summary().score_eligible
+    }
+}
+
+fn history_effective_mode(summary: &SessionSummary) -> String {
+    if let Some(part) = bench_part(summary) {
+        return match part.as_str() {
+            "A" => "words",
+            "B" => "ngram",
+            "C" => "romaji",
+            "D" => "random",
+            _ => summary.mode.as_str(),
+        }
+        .to_owned();
+    }
+    summary.mode.clone()
+}
+
+pub fn history_language(summary: &SessionSummary) -> Option<&'static str> {
+    if let Some(part) = bench_part(summary) {
+        return match part.as_str() {
+            "A" | "B" | "D" => Some("en"),
+            "C" => Some("ja"),
+            _ => None,
+        };
+    }
+    match summary.mode.as_str() {
+        "words" => Some("en"),
+        "romaji" => Some("ja"),
+        _ => serde_json::from_str::<serde_json::Value>(&summary.mode_params)
+            .ok()
+            .and_then(|value| value.get("lang").and_then(serde_json::Value::as_str).map(str::to_owned))
+            .and_then(|language| match language.as_str() {
+                "en" => Some("en"),
+                "ja" => Some("ja"),
+                _ => None,
+            }),
+    }
+}
+
+fn bench_identity(summary: &SessionSummary) -> Option<(String, String, String)> {
+    let mut fields = summary.bench_id.as_deref()?.split('/');
+    let series = fields.next()?;
+    let part = fields.next()?;
+    let form = fields.next()?;
+    if fields.next().is_some() || series.is_empty() || part.is_empty() || form.is_empty() {
+        return None;
+    }
+    Some((series.to_owned(), form.to_owned(), part.to_owned()))
+}
+
+fn same_history_condition(left: &SessionSummary, right: &SessionSummary) -> bool {
+    match (bench_identity(left), bench_identity(right)) {
+        (Some((left_series, _, left_part)), Some((right_series, _, right_part))) => left_series == right_series && left_part == right_part,
+        (None, None) => left.mode == right.mode,
+        _ => false,
+    }
+}
+
+pub fn bench_part(summary: &SessionSummary) -> Option<String> {
+    bench_identity(summary).map(|(_, _, part)| part)
+}
+
+#[derive(Clone, Copy)]
+struct HistoryFilter<'a> {
+    mode: Option<&'a str>,
+    language: Option<&'a str>,
+    period: AnalysisPeriod,
+    today: chrono::NaiveDate,
+}
+
+fn summary_matches(summary: &SessionSummary, filter: HistoryFilter<'_>) -> bool {
+    let mode_matches = filter.mode.is_none_or(|expected| history_effective_mode(summary) == expected);
+    let language_matches = filter.language.is_none_or(|expected| history_language(summary) == Some(expected));
+    let since = match filter.period {
+        AnalysisPeriod::All => None,
+        AnalysisPeriod::Days30 => Some(filter.today - chrono::Duration::days(29)),
+        AnalysisPeriod::Days7 => Some(filter.today - chrono::Duration::days(6)),
+    };
+    let period_matches = since.is_none_or(|minimum| summary.finished_at.date_naive() >= minimum);
+    mode_matches && language_matches && period_matches
+}
+
+fn build_history_rows(
+    sessions: &[SessionSummary],
+    kind: HistoryKindFilter,
+    mode: Option<&str>,
+    language: Option<&str>,
+    period: AnalysisPeriod,
+    today: chrono::NaiveDate,
+) -> Vec<HistoryEntry> {
+    let filter = HistoryFilter {
+        mode,
+        language,
+        period,
+        today,
+    };
+    let mut rows = Vec::new();
+    if kind != HistoryKindFilter::Bench {
+        rows.extend(
+            sessions
+                .iter()
+                .filter(|summary| summary.bench_id.is_none())
+                .filter(|summary| summary_matches(summary, filter))
+                .cloned()
+                .map(HistoryEntry::Session),
+        );
+    }
+    if kind == HistoryKindFilter::Practice {
+        return rows;
+    }
+
+    let mut by_form: BTreeMap<(String, String), Vec<SessionSummary>> = BTreeMap::new();
+    for summary in sessions.iter().filter(|summary| summary.bench_id.is_some()) {
+        if let Some((series, form, _)) = bench_identity(summary) {
+            by_form.entry((series, form)).or_default().push(summary.clone());
+        }
+    }
+    for ((series, form), mut candidates) in by_form {
+        candidates.sort_by(|left, right| left.started_at.cmp(&right.started_at).then(left.id.cmp(&right.id)));
+        let mut run = Vec::new();
+        for candidate in candidates {
+            let starts_new = run.last().is_some_and(|previous: &SessionSummary| {
+                candidate.started_at.signed_duration_since(previous.finished_at) > chrono::Duration::minutes(30)
+            });
+            if starts_new {
+                push_bench_run(&mut rows, &series, &form, std::mem::take(&mut run), filter);
+            }
+            run.push(candidate);
+        }
+        push_bench_run(&mut rows, &series, &form, run, filter);
+    }
+    rows
+}
+
+fn push_bench_run(rows: &mut Vec<HistoryEntry>, series: &str, form: &str, parts: Vec<SessionSummary>, filter: HistoryFilter<'_>) {
+    let id = parts.first().map(|part| part.id);
+    let mut parts = parts.into_iter().filter(|summary| summary_matches(summary, filter)).collect::<Vec<_>>();
+    parts.sort_by(|left, right| bench_part(left).cmp(&bench_part(right)).then(left.finished_at.cmp(&right.finished_at)));
+    if let (Some(id), false) = (id, parts.is_empty()) {
+        rows.push(HistoryEntry::BenchRun {
+            id,
+            series: series.to_owned(),
+            form: form.to_owned(),
+            parts,
+        });
+    }
+}
+
+fn sort_history_entries(items: &mut [HistoryEntry], sort: HistorySort) {
+    use std::cmp::Ordering;
+    match sort {
+        HistorySort::DateDesc => items.sort_by(|a, b| {
+            b.finished_at()
+                .cmp(&a.finished_at())
+                .then(b.primary_summary().id.cmp(&a.primary_summary().id))
+        }),
+        HistorySort::DateAsc => items.sort_by(|a, b| {
+            a.finished_at()
+                .cmp(&b.finished_at())
+                .then(a.primary_summary().id.cmp(&b.primary_summary().id))
+        }),
+        HistorySort::WpmDesc => items.sort_by(|a, b| {
+            b.wpm()
+                .partial_cmp(&a.wpm())
+                .unwrap_or(Ordering::Equal)
+                .then(b.finished_at().cmp(&a.finished_at()))
+        }),
+        HistorySort::AccuracyDesc => items.sort_by(|a, b| {
+            b.accuracy()
+                .partial_cmp(&a.accuracy())
+                .unwrap_or(Ordering::Equal)
+                .then(b.finished_at().cmp(&a.finished_at()))
+        }),
+    }
+}
+
+fn rank_history_entries(items: &[HistoryEntry], enabled: bool, kind: HistoryKindFilter) -> Vec<Option<usize>> {
+    if !enabled {
+        return vec![None; items.len()];
+    }
+    let mut practice_rank = 0;
+    let mut bench_ranks: HashMap<String, usize> = HashMap::new();
+    items
+        .iter()
+        .map(|entry| {
+            if !entry.score_eligible() {
+                return None;
+            }
+            match (kind, entry) {
+                (HistoryKindFilter::Practice, HistoryEntry::Session(_)) => {
+                    practice_rank += 1;
+                    Some(practice_rank)
+                }
+                (HistoryKindFilter::Bench, HistoryEntry::BenchRun { series, .. }) => {
+                    let rank = bench_ranks.entry(series.clone()).or_default();
+                    *rank += 1;
+                    Some(*rank)
+                }
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
 fn sort_history(items: &mut [SessionSummary], sort: HistorySort) {
     use std::cmp::Ordering;
     match sort {
@@ -2575,8 +3281,6 @@ fn sort_history(items: &mut [SessionSummary], sort: HistorySort) {
                 .unwrap_or(Ordering::Equal)
                 .then(b.finished_at.cmp(&a.finished_at))
         }),
-        HistorySort::MaxComboDesc => items.sort_by(|a, b| b.max_combo.cmp(&a.max_combo).then(b.finished_at.cmp(&a.finished_at))),
-        HistorySort::WordsDesc => items.sort_by(|a, b| b.completed_words.cmp(&a.completed_words).then(b.finished_at.cmp(&a.finished_at))),
     }
 }
 
@@ -2595,15 +3299,24 @@ mod tests {
     use chrono::{Duration as ChronoDuration, Local};
 
     fn summary(id: i64, secs_offset: i64, wpm: f64, acc: f64, combo: u32, words: u32) -> SessionSummary {
+        let finished_at = Local::now() + ChronoDuration::seconds(secs_offset);
         SessionSummary {
             id,
-            finished_at: Local::now() + ChronoDuration::seconds(secs_offset),
+            started_at: finished_at - ChronoDuration::seconds(60),
+            finished_at,
             duration: Duration::from_secs(60),
+            mode: "words".to_owned(),
+            mode_params: "{}".to_owned(),
+            bench_id: None,
+            layout: "qwerty".to_owned(),
+            input_layout: "same".to_owned(),
+            error_mode: "stop".to_owned(),
             wpm,
             accuracy: acc,
             max_combo: combo,
             completed_words: words,
             metrics_version: 1,
+            score_eligible: true,
         }
     }
 
@@ -2630,15 +3343,15 @@ mod tests {
     }
 
     #[test]
-    fn sort_cycle_visits_each_mode_once() {
+    fn sort_cycle_visits_four_modes_once() {
         let mut s = HistorySort::DateDesc;
         let mut seen = vec![s];
-        for _ in 0..5 {
+        for _ in 0..3 {
             s = s.next();
             seen.push(s);
         }
         let last = s.next();
         assert_eq!(last, HistorySort::DateDesc);
-        assert_eq!(seen.len(), 6);
+        assert_eq!(seen.len(), 4);
     }
 }

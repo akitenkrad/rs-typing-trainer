@@ -33,6 +33,22 @@ pub fn render(frame: &mut Frame, app: &App) {
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
 
+    let content = if app.result_origin == ResultOrigin::History {
+        let condition_height = if app.history_detail.as_ref().and_then(|detail| detail.export_notice.as_ref()).is_some() {
+            9
+        } else {
+            8
+        };
+        let areas = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(condition_height), Constraint::Min(0)])
+            .split(inner);
+        render_history_conditions(frame, app, &theme, areas[0], lang);
+        areas[1]
+    } else {
+        inner
+    };
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -45,7 +61,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             Constraint::Min(0),    // reaction histogram + save info
             Constraint::Length(2), // hint
         ])
-        .split(inner);
+        .split(content);
 
     let Some(result) = app.last_result.as_ref() else {
         let none = Paragraph::new(Msg::NoResultYet.text(lang));
@@ -64,9 +80,121 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
     render_reaction_and_save(frame, app, result, &theme, left_inset(chunks[6]));
     match app.result_origin {
-        ResultOrigin::JustPlayed => render_hint(frame, &theme, chunks[7], lang),
-        ResultOrigin::History => render_hint_history(frame, &theme, chunks[7], lang),
+        ResultOrigin::JustPlayed => render_hint(frame, app, &theme, chunks[7], lang),
+        ResultOrigin::History => render_hint_history(frame, app, &theme, chunks[7], lang),
     }
+}
+
+fn render_history_conditions(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, lang: Lang) {
+    let Some(detail) = app.history_detail.as_ref() else {
+        return;
+    };
+    let summary = &detail.summary;
+    let header = &detail.record.header;
+    let params = serde_json::from_str::<serde_json::Value>(&header.mode_params).unwrap_or_default();
+    let (mode, language, practice_layout, input_layout, error_mode, aids, key_filter, bench_id, words, combo, best, previous) = match lang {
+        Lang::En => (
+            "Mode",
+            "Language",
+            "Practice layout",
+            "Input layout",
+            "Error mode",
+            "Assists",
+            "Key filter",
+            "Bench ID",
+            "Words",
+            "Max combo",
+            "Personal best",
+            "Previous",
+        ),
+        Lang::Ja => (
+            "モード",
+            "言語",
+            "練習の配列",
+            "入力の配列",
+            "誤打の扱い",
+            "補助",
+            "キーの絞り込み",
+            "ベンチ ID",
+            "語数",
+            "最大コンボ",
+            "自己ベスト",
+            "前回差",
+        ),
+    };
+    let mut lines = vec![Line::from(format!(
+        "{mode}: {}    {language}: {}",
+        crate::ui::history::mode_label(&header.mode, lang),
+        crate::app::history_language(summary).unwrap_or("—")
+    ))];
+    let mut layout_line = format!("{practice_layout}: {}", header.layout);
+    if header.input_layout != "same" && header.input_layout != header.layout {
+        layout_line.push_str(&format!("    {input_layout}: {}", header.input_layout));
+    }
+    layout_line.push_str(&format!("    {error_mode}: {}", header.error_mode));
+    lines.push(Line::from(layout_line));
+
+    let mut assistance = Vec::new();
+    if let Some(enabled) = params.get("pacer_enabled").and_then(serde_json::Value::as_bool) {
+        assistance.push(format!("Pacer: {}", on_off(enabled)));
+    }
+    if let Some(ghost) = params.get("ghost") {
+        let enabled = ghost.get("enabled").and_then(serde_json::Value::as_bool).unwrap_or(false);
+        let opponent = ghost.get("opponent").and_then(serde_json::Value::as_str);
+        assistance.push(opponent.map_or_else(
+            || format!("Ghost: {}", on_off(enabled)),
+            |opponent| format!("Ghost: {} ({opponent})", on_off(enabled)),
+        ));
+    }
+    if let Some(enabled) = params.get("blind").and_then(serde_json::Value::as_bool) {
+        assistance.push(format!("Blind: {}", on_off(enabled)));
+    }
+    if let Some(show) = params.get("keyboard_show").and_then(serde_json::Value::as_str) {
+        assistance.push(format!("Keyboard: {show}"));
+    }
+    if !assistance.is_empty() {
+        lines.push(Line::from(format!("{aids}: {}", assistance.join("  "))));
+    }
+
+    let mut conditions = Vec::new();
+    if let Some(filter) = params.get("key_filter").and_then(serde_json::Value::as_str) {
+        conditions.push(format!("{key_filter}: {filter}"));
+    }
+    if let Some(keys) = params.get("keys").and_then(serde_json::Value::as_str).filter(|keys| !keys.is_empty()) {
+        conditions.push(format!("Keys: {keys}"));
+    }
+    if let Some(id) = header.bench_id.as_deref() {
+        conditions.push(format!("{bench_id}: {id}"));
+    }
+    if !conditions.is_empty() {
+        lines.push(Line::from(conditions.join("    ")));
+    }
+    lines.push(Line::from(format!(
+        "{words}: {}    {combo}: {}",
+        header.completed_words, header.max_combo
+    )));
+    let best_value = detail.personal_best_wpm.map_or_else(|| "—".to_owned(), |value| format!("{value:.1} WPM"));
+    let previous_value = detail
+        .previous_wpm_delta
+        .map_or_else(|| "—".to_owned(), |value| format!("{value:+.1} WPM"));
+    lines.push(Line::from(Span::styled(
+        format!("{best}: {best_value}    {previous}: {previous_value}"),
+        Style::default().fg(theme.warning).add_modifier(Modifier::BOLD),
+    )));
+    if let Some(notice) = detail.export_notice.as_ref() {
+        lines.push(Line::from(Span::styled(notice.clone(), Style::default().fg(theme.correct))));
+    }
+    let block = Block::default().borders(Borders::ALL).title(match lang {
+        Lang::En => " Conditions ",
+        Lang::Ja => " 条件 ",
+    });
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    frame.render_widget(Paragraph::new(lines), left_inset(inner));
+}
+
+fn on_off(enabled: bool) -> &'static str {
+    if enabled { "ON" } else { "OFF" }
 }
 
 fn render_benchmark_result(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, lang: Lang) {
@@ -91,10 +219,20 @@ fn render_benchmark_result(frame: &mut Frame, app: &App, theme: &Theme, area: Re
         .recent_three_wpm_delta
         .map_or_else(|| Msg::InitialResult.text(lang).to_owned(), |value| format!("{value:+.1} WPM"));
     let next = app.next_bench_part();
-    let next_line = next.map_or_else(
+    let mut next_line = next.map_or_else(
         || Msg::BenchViewSummary.text(lang).to_owned(),
         |part| format!("{} {}", Msg::BenchNext.text(lang), crate::ui::bench_summary::part_label(part, lang)),
     );
+    let remaining = app.result_input_delay_remaining();
+    if let Some(remaining) = remaining {
+        next_line.push_str(&format!("  … {:.1}s", remaining.as_secs_f32()));
+    }
+    let hint_color = if remaining.is_some() { theme.muted } else { theme.accent };
+    let abort_note = if app.abort_confirmation_active() {
+        Msg::AbortConfirmHint.text(lang)
+    } else {
+        Msg::BenchAbortNote.text(lang)
+    };
     let lines = vec![
         Line::from(""),
         Line::from(Span::styled(part_name, Style::default().fg(theme.accent).add_modifier(Modifier::BOLD))),
@@ -113,8 +251,11 @@ fn render_benchmark_result(frame: &mut Frame, app: &App, theme: &Theme, area: Re
             Style::default().fg(theme.warning).add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
-        Line::from(Span::styled(next_line, Style::default().fg(theme.accent).add_modifier(Modifier::BOLD))),
-        Line::from(Msg::BenchAbortNote.text(lang)),
+        Line::from(Span::styled(next_line, Style::default().fg(hint_color).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(
+            abort_note,
+            Style::default().fg(if app.abort_confirmation_active() { theme.warning } else { hint_color }),
+        )),
     ];
     frame.render_widget(Paragraph::new(lines), left_inset(inner));
 }
@@ -448,13 +589,31 @@ fn insight_lines(app: &App, theme: &Theme) -> Vec<Line<'static>> {
     lines
 }
 
-fn render_hint(frame: &mut Frame, theme: &Theme, area: Rect, lang: Lang) {
-    let p = Paragraph::new(Msg::ResultHint.text(lang)).style(Style::default().fg(theme.accent));
+fn render_hint(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, lang: Lang) {
+    let remaining = app.result_input_delay_remaining();
+    let hint = remaining.map_or_else(
+        || Msg::ResultHint.text(lang).to_owned(),
+        |remaining| format!("{}  … {:.1}s", Msg::ResultHint.text(lang), remaining.as_secs_f32()),
+    );
+    let color = if remaining.is_some() { theme.muted } else { theme.accent };
+    let p = Paragraph::new(hint).style(Style::default().fg(color));
     frame.render_widget(p, left_inset(area));
 }
 
-fn render_hint_history(frame: &mut Frame, theme: &Theme, area: Rect, lang: Lang) {
-    let p = Paragraph::new(Msg::HistoryDetailHint.text(lang)).style(Style::default().fg(theme.accent));
+fn render_hint_history(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, lang: Lang) {
+    let actions = if app
+        .history_detail
+        .as_ref()
+        .is_some_and(|detail| detail.record.header.metrics_version != 0)
+    {
+        match lang {
+            Lang::En => "[R] Replay    [E] Export    ",
+            Lang::Ja => "[R] 再生    [E] 書き出し    ",
+        }
+    } else {
+        ""
+    };
+    let p = Paragraph::new(format!("{actions}{}", Msg::HistoryDetailHint.text(lang))).style(Style::default().fg(theme.accent));
     frame.render_widget(p, left_inset(area));
 }
 

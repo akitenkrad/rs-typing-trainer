@@ -112,6 +112,13 @@ pub struct BenchResultSummary {
     pub comparison: BenchComparison,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct BenchResume {
+    pub part: BenchPart,
+    pub parallel_index: u8,
+    pub completed: Vec<BenchResultSummary>,
+}
+
 pub fn next_parallel_index(previous: Option<u8>) -> u8 {
     previous.map_or(1, |value| value % PARALLEL_VERSION_COUNT + 1)
 }

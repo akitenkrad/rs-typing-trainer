@@ -117,6 +117,18 @@ fn auto_difficulty_defaults_to_enabled() {
 }
 
 #[test]
+fn result_input_delay_defaults_to_1500_and_is_clamped_to_10000_ms() {
+    assert_eq!(Config::default().session.result_input_delay_ms, 1_500);
+    assert_eq!(
+        Config::from_toml("[session]\nresult_input_delay_ms = 20000\n")
+            .unwrap()
+            .session
+            .result_input_delay_ms,
+        10_000
+    );
+}
+
+#[test]
 fn graphics_defaults_to_auto_and_round_trips_all_values() {
     assert_eq!(Config::default().display.graphics, GraphicsPreference::Auto);
 

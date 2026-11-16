@@ -24,7 +24,15 @@ pub fn render(frame: &mut Frame, app: &App) {
         crate::i18n::Lang::En => "Start benchmark  [Enter]",
         crate::i18n::Lang::Ja => "ベンチマーク開始  [Enter]",
     };
-    let items = [start, optional];
+    let resume = app.bench_resume.as_ref().map(|resume| match lang {
+        crate::i18n::Lang::En => format!("Resume from part {} (form {:02})", resume.part.as_str(), resume.parallel_index),
+        crate::i18n::Lang::Ja => format!("パート {} から続ける（版 {:02}）", resume.part.as_str(), resume.parallel_index),
+    });
+    let mut items = Vec::new();
+    if let Some(resume) = resume.as_deref() {
+        items.push(resume);
+    }
+    items.extend([start, optional]);
     let mut lines = vec![Line::from(""), Line::from(Msg::BenchRequiredParts.text(lang)), Line::from("")];
     lines.extend(items.iter().enumerate().map(|(index, label)| {
         let selected = index == app.bench_selected;

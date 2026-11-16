@@ -168,6 +168,8 @@ pub struct SessionConfig {
     pub blind: bool,
     #[serde(default)]
     pub retry_on_error: bool,
+    #[serde(default = "default_result_input_delay_ms")]
+    pub result_input_delay_ms: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -498,6 +500,7 @@ impl Default for SessionConfig {
             preview_items: default_preview_items(),
             blind: false,
             retry_on_error: false,
+            result_input_delay_ms: default_result_input_delay_ms(),
         }
     }
 }
@@ -509,6 +512,10 @@ impl SessionConfig {
 
     pub fn item_timeout(&self) -> Duration {
         Duration::from_secs(self.item_timeout_seconds)
+    }
+
+    pub fn result_input_delay(&self) -> Duration {
+        Duration::from_millis(self.result_input_delay_ms.min(10_000))
     }
 }
 
@@ -616,6 +623,10 @@ fn default_item_timeout_seconds() -> u64 {
 
 fn default_preview_items() -> usize {
     1
+}
+
+fn default_result_input_delay_ms() -> u64 {
+    1_500
 }
 
 fn default_mode_keys() -> String {
@@ -816,6 +827,7 @@ impl Config {
 
     pub fn from_toml(raw: &str) -> AppResult<Self> {
         let mut cfg: Config = toml::from_str(raw).map_err(AppError::ConfigParse)?;
+        cfg.session.result_input_delay_ms = cfg.session.result_input_delay_ms.min(10_000);
         let root: toml::Value = toml::from_str(raw).map_err(AppError::ConfigParse)?;
         if root.get("session").is_none() {
             cfg.session.duration_seconds = cfg.game.duration_seconds;

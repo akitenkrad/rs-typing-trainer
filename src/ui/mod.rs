@@ -36,6 +36,11 @@ pub fn render(frame: &mut Frame, app: &App) {
         Screen::Countdown { remaining } => countdown::render(frame, app, remaining),
         Screen::Playing => playing::render(frame, app),
         Screen::Result | Screen::HistoryDetail => result::render(frame, app),
+        Screen::Replay => {
+            if let Some(replay) = app.history_replay.as_deref() {
+                replay::render(frame, replay, app.config.general.lang);
+            }
+        }
         Screen::History => history::render(frame, app),
         Screen::Settings => settings::render(frame, app),
         Screen::BenchSelect => bench_select::render(frame, app),

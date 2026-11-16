@@ -32,7 +32,7 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | Mode selection | `[` / `]` | Decrease/increase preview items |
 | Mode selection | `Z` | Switch the prompt text between large and normal (saved when the mode starts) |
 | Mode selection | `Enter` | Continue to key selection or the countdown |
-| Benchmark selection | `↑` / `↓` (`k` / `j`) | Select Start or optional Part D |
+| Benchmark selection | `↑` / `↓` (`k` / `j`) | Select Resume (when shown), Start, or optional Part D |
 | Benchmark selection | `Enter` | Run the selected action |
 | Benchmark selection | `Space` | Start the benchmark directly |
 | Benchmark selection | `D` | Toggle optional Part D directly |
@@ -41,12 +41,19 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | Key selection | `Space` | Toggle the current key |
 | Key selection | `Tab` | Switch `include` / `only` |
 | Key selection | `Enter` | Save the selection and start the countdown |
+| Countdown | `Esc` twice within 2 seconds | Abort to the title screen; another key or the timeout cancels the first press |
 | Play | Printable keys | Type the word |
 | Play | `Backspace` | Move back in `advance` error mode |
-| Play | `Esc` | Abort to the title screen |
+| Play | `Esc` twice within 2 seconds | Abort to the title screen; the timer continues after the first press, and another key or the timeout cancels it |
+| Just-played result | Any key during `session.result_input_delay_ms` | Ignore the input; the hint shows the approximate remaining delay |
 | Result | `Space` / `Enter` | Start another session |
 | Result | `H` | Open history |
 | Result | `Q` / `Esc` | Quit |
+| Benchmark part result | `Space` / `Enter` | Continue to the next part or summary after the input delay |
+| Benchmark part result | `Esc` twice within 2 seconds | End the benchmark after the input delay, retaining completed parts |
+| Benchmark part result | `H` / `Q` | No action |
+| Benchmark summary | Any key during `session.result_input_delay_ms` | Ignore the input; the hint shows the approximate remaining delay |
+| Benchmark summary | `Enter` / `Space` / `Esc` / `Q` | Return to the title screen after the input delay |
 | Coach | `↑` / `↓` (`k` / `j`) | Scroll the report |
 | Coach | `T` | Open or close goal candidates |
 | Goal candidates | `↑` / `↓`, `Enter` | Select and save a goal |
@@ -54,17 +61,25 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | Analysis confusion | `←` / `→` | Select the expected key |
 | History | `↑` / `↓` (`k` / `j`) | Move the selection |
 | History | `PgUp` / `PgDn` / `Home` / `End` | Jump through the list |
-| History | `S` | Cycle the sort order |
-| History | `Enter` | View a session in detail |
-| History | `Esc` / `Q` | Return to the title screen |
+| History | `Tab` | Cycle All / Practice / Bench |
+| History | `M` / `L` / `P` | Cycle recorded modes, language, or period |
+| History | `S` | Cycle newest, oldest, WPM and accuracy sort orders |
+| History | `Enter` | Expand/collapse a benchmark run, or open a session/part in detail |
+| History | `Esc` / `Q` | Return to the screen that opened history |
 | History detail | `Space` / `Enter` / `Esc` | Return to history |
+| History detail | `R` | Replay a v2 session inside the application; `Esc` returns to the detail |
+| History detail | `E` | Export a v2 session as `session-ID.ttrec` and show the path |
 | History detail | `Q` | Quit |
+| History replay | `Space` / `→` | Pause/resume, or advance one keystroke |
+| History replay | `Esc` / `Q` | Return to the history detail |
 | Settings | `↑` / `↓` (`k` / `j`) | Select a setting |
 | Settings | `←` / `→` (`h` / `l`) | Change the selected value |
 | Settings | `Enter` | Save and return to the title |
 | Settings | `Esc` / `Q` | Cancel and return to the title |
 
 While a word is sliding in or out, for about 200 ms on each side, keystrokes are dropped. This prevents the key that completed one word from being credited to the next word.
+
+If today’s latest saved benchmark form has a missing required part, the benchmark-selection screen offers to resume from the first missing part using the same form number. Parts A through C define completion; optional Part D does not keep a benchmark in the resumable state. Starting a new benchmark remains available and follows the normal form-rotation rule.
 
 ## Playing-screen layout
 
@@ -90,7 +105,11 @@ Every completed session is stored in a local SQLite database. By default the fil
 
 When the new default file does not exist but `~/.cache/rs-typing-trainer/sessions.db` does, the program copies the old database to the new location and leaves the old file untouched. The title screen reports that copy once. No automatic copy is attempted when a database path is configured or when both default files already exist.
 
-Press `H` on the title screen to open history. Press `S` to cycle through newest date, oldest date, WPM, accuracy, maximum combo and completed-word sort orders. Score-based orders show a rank. `Enter` opens the original result, including the mistype heatmap and reaction-time distribution.
+Press `H` on the title or result screen to open history. The list shows date, kind, content, language, layout, WPM, accuracy and duration; layout, language and duration are dropped in that order as the terminal narrows. Legacy v1 imports, practice and benchmark records have distinct kinds. Benchmark parts from the same series and form are one run when each next part starts within 30 minutes of the preceding part's finish. `Enter` expands that run into its saved parts, including incomplete runs.
+
+`Tab` filters All / Practice / Bench. `M` cycles only modes with records after the type, language and period filters are applied, `L` cycles all / `en` / `ja`, and `P` cycles all time / 30 days / 7 days. `S` cycles newest date, oldest date, WPM and accuracy. A WPM rank appears only after one practice mode or benchmark part is selected; only score-eligible sessions count, and benchmark ranks are separate for each benchmark series and part.
+
+The detail keeps the original result charts and adds the recorded mode, language, layouts, error mode, assists, key filter, benchmark ID, word count and maximum combo when available. It also shows the personal-best WPM and the change from the previous session under the same condition. `R` replays a v2 session in the application and `E` writes it as `.ttrec`; v1 imports have no keystroke log and offer neither action. Returning from a detail preserves the selection, expanded benchmark runs and filters. Leaving the list returns to the title or just-played result that opened it.
 
 ## Coaching and grades
 

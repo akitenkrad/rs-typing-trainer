@@ -27,6 +27,7 @@ Every supported key is listed here. “Unset” means that the application deriv
 | `session.preview_items` | integer | `1` | Look-ahead items, from 0 through 3. |
 | `session.blind` | boolean | `false` | Hide typed progress until an item ends. |
 | `session.retry_on_error` | boolean | `false` | Repeat a mistyped item once. |
+| `session.result_input_delay_ms` | integer | `1500` | Ignore all press and repeat events for this many milliseconds after entering a just-played result or benchmark-summary screen. Zero disables the delay; values above 10000 are clamped to 10000. |
 | `mode.kind` | mode name | `"random"` | Initial practice mode. |
 | `mode.keys` | string | `"bmwvz"` | Selected characters for filtering or generation. |
 | `mode.key_filter` | `include` / `only` | `"include"` | Prompt-filter interpretation. |
