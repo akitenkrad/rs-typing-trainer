@@ -6,7 +6,7 @@ dictionary_license = "NAIST and ICOT terms"
 [filters]
 en_words = "SCOWL levels 10,20,35,40,50,60; ASCII letters; no apostrophes; top 20000 by public-domain books and Tatoeba CC0 frequency; blocklist"
 ja_words = "selected IPADIC POS; base forms reanalyzed for readings; 2-8 mora; no old kana or old-style glyphs; top 12000 by corpus frequency"
-en_sentences = "CC0; 30-90 characters; printable ASCII; unique; blocklist; all matching rows"
+en_sentences = "CC0; surrounding dialogue quotes removed; 30-90 characters; printable ASCII; unique; blocklist; all matching rows"
 ja_sentences = "15-45 characters; allowed Japanese characters and punctuation; balanced quotes; no gaiji or unknown readings; at most 15 per work"
 
 [[inputs]]
@@ -2489,8 +2489,8 @@ sha256 = "82bb9ba580357ef769a09c54504a63671188f990fc29ec5a5c09f966481add32"
 
 [[outputs]]
 path = "en_sentences.tsv.gz"
-count = 19696
-sha256 = "5f899fe7b79c41906082f15c98aac340e213aeee9c6dc261595b56ad608fd234"
+count = 19705
+sha256 = "271402caad3e3edf023db6e8b77a87e520b77533ce8e0dac456bcc42e3bce130"
 
 [[outputs]]
 path = "ja_sentences.tsv.gz"

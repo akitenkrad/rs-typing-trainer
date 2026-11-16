@@ -2,8 +2,8 @@ use std::collections::BTreeSet;
 
 use gen_data::{
     BizUdGenerationReport, FontGenerationOptions, FontKind, OutlineCommand, OutlineFont, OutlineGlyph, decode_outline_font, encode_outline_font,
-    extract_aozora, extract_english_body, generate_fonts, gzip_deterministic, jis_x0208_to_char, load_scowl_words, parse_bdf, stable_sample,
-    update_bizud_manifest, update_bizud_notice, update_shinonome_manifest, update_shinonome_notice,
+    extract_aozora, extract_english_body, generate_fonts, gzip_deterministic, jis_x0208_to_char, load_scowl_words, parse_bdf,
+    prepare_english_sentence, stable_sample, update_bizud_manifest, update_bizud_notice, update_shinonome_manifest, update_shinonome_notice,
 };
 use tempfile::TempDir;
 
@@ -166,6 +166,46 @@ fn stable_sampling_is_repeatable_and_order_independent() {
 
     assert_eq!(stable_sample(&values_a, 3, 0x5eed), stable_sample(&values_a, 3, 0x5eed));
     assert_eq!(stable_sample(&values_a, 3, 0x5eed), stable_sample(&values_b, 3, 0x5eed));
+}
+
+#[test]
+fn complete_english_dialogue_quotes_are_removed() {
+    let text = r#""How's everything?" "Horrible, but I will manage.""#;
+
+    assert_eq!(
+        prepare_english_sentence(text).as_deref(),
+        Some("How's everything? Horrible, but I will manage.")
+    );
+}
+
+#[test]
+fn english_word_quotes_are_preserved() {
+    for text in [
+        r#""Medicine is a religion," said the faith healer."#,
+        r#"Paris is pronounced "Paree" in French."#,
+    ] {
+        assert_eq!(prepare_english_sentence(text).as_deref(), Some(text));
+    }
+}
+
+#[test]
+fn malformed_or_nested_english_dialogue_quotes_are_preserved() {
+    for text in [
+        r#""This sentence has a closing quote but also trailing text." extra"#,
+        r#""This "nested" quote is not a complete dialogue sequence.""#,
+        r#""Two quoted parts touch and therefore stay.""Without a space""#,
+    ] {
+        assert_eq!(prepare_english_sentence(text).as_deref(), Some(text));
+    }
+}
+
+#[test]
+fn english_sentence_length_is_checked_after_dialogue_quotes_are_removed() {
+    let too_short_after_removal = format!("\"{}\"", "a".repeat(28));
+    let maximum_after_removal = format!("\"{}\"", "a".repeat(90));
+
+    assert!(prepare_english_sentence(&too_short_after_removal).is_none());
+    assert_eq!(prepare_english_sentence(&maximum_after_removal).as_deref(), Some("a".repeat(90).as_str()));
 }
 
 #[test]

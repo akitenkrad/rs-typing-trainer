@@ -68,6 +68,53 @@ fn bundled_tsv_rows_have_the_documented_shapes_and_no_blocklisted_words() {
 }
 
 #[test]
+fn bundled_english_sentences_have_no_complete_dialogue_quote_sequences() {
+    fn is_complete_dialogue_quote_sequence(text: &str) -> bool {
+        let bytes = text.as_bytes();
+        let mut cursor = 0;
+        if bytes.first() != Some(&b'"') {
+            return false;
+        }
+        loop {
+            cursor += 1;
+            while cursor < bytes.len() && bytes[cursor] != b'"' {
+                cursor += 1;
+            }
+            if cursor == bytes.len() {
+                return false;
+            }
+            cursor += 1;
+            if cursor == bytes.len() {
+                return true;
+            }
+            if bytes[cursor] != b' ' {
+                return false;
+            }
+            while cursor < bytes.len() && bytes[cursor] == b' ' {
+                cursor += 1;
+            }
+            if cursor == bytes.len() || bytes[cursor] != b'"' {
+                return false;
+            }
+        }
+    }
+
+    let home = TempDir::new().unwrap();
+    let catalog = DataCatalog::load(&DataConfig::default(), home.path()).unwrap();
+
+    let quoted = catalog
+        .sentences_en()
+        .iter()
+        .filter(|text| is_complete_dialogue_quote_sequence(text))
+        .collect::<Vec<_>>();
+    assert!(
+        quoted.is_empty(),
+        "complete dialogue quote sequences remain: {:?}",
+        &quoted[..quoted.len().min(3)]
+    );
+}
+
+#[test]
 fn bundled_japanese_readings_only_keep_written_long_vowel_marks() {
     let home = TempDir::new().unwrap();
     let catalog = DataCatalog::load(&DataConfig::default(), home.path()).unwrap();

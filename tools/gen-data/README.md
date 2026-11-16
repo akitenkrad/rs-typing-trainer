@@ -50,6 +50,8 @@ The font files start with the 8-byte magic `SHNFONT\0`, a format version byte (1
 
 `--extra-aozora` is optional and points directly to a directory containing `selection.tsv` and `zips/`. Missing archives in that supplemental selection are reported and skipped. The generator writes gzip-compressed TSV files to the selected output directory and review candidates to `tools/gen-data/review/`. Repeated writes are content-aware and replace changed files atomically. Gzip timestamps are fixed at zero; sampling uses a fixed seed and an in-tree FNV-1a implementation; maps and tie-breaking use sorted order.
 
+For English sentences made entirely of one or more quoted dialogue parts, the generator removes the surrounding double quotes, trims each part, and joins the parts with one ASCII space before applying the sentence filters.
+
 ## Review and overrides
 
 - `review/ja_words_top600.tsv`: surface, reading, rank, and ruby comparison result.

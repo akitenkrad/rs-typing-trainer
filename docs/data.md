@@ -12,14 +12,14 @@ The application also bundles the public-domain Shinonome 0.9.11 font at 12 and 1
 |---|---:|---|
 | `data/en_words.tsv.gz` | 20,000 | `word`, `rank`, `tier` |
 | `data/ja_words.tsv.gz` | 12,000 | `surface`, `reading`, `rank`, `tier` |
-| `data/en_sentences.tsv.gz` | 19,696 | `text`, `tatoeba_id`, `tier` |
+| `data/en_sentences.tsv.gz` | 19,705 | `text`, `tatoeba_id`, `tier` |
 | `data/ja_sentences.tsv.gz` | 7,394 | `text`, `reading`, `source_id`, `author`, `tier` |
 | `data/font/shinonome12.bin.gz` | 7,037 glyphs | fixed binary records |
 | `data/font/shinonome16.bin.gz` | 7,037 glyphs | fixed binary records |
 
 Each uncompressed font starts with a 20-byte header: `SHNFONT\0`, format version, dot height, halfwidth pixel width, fullwidth pixel width, a little-endian glyph count, and four reserved bytes. Code-point-sorted fixed records then contain a little-endian `u32` Unicode value, one width byte, and `height` little-endian `u16` rows. Pixel x is bit `15-x`. Gzip timestamps are zero. The compressed 12-dot and 16-dot files are 113,046 and 150,545 bytes respectively.
 
-Readings are hiragana with the punctuation `、。「」`. A long-vowel mark appears only when it is also present in the written prompt. The source ID for a Japanese sentence is the six-digit work ID in `tools/gen-data/sources/aozora_selection.tsv`. `tier=core` contains 2,000 English words, 2,070 English sentences, 561 hand-reviewed Japanese words, and 537 hand-reviewed Japanese sentences; all other rows use `tier=ext`.
+Readings are hiragana with the punctuation `、。「」`. A long-vowel mark appears only when it is also present in the written prompt. The source ID for a Japanese sentence is the six-digit work ID in `tools/gen-data/sources/aozora_selection.tsv`. `tier=core` contains 2,000 English words, 2,068 English sentences, 561 hand-reviewed Japanese words, and 537 hand-reviewed Japanese sentences; all other rows use `tier=ext`.
 
 ## Sources and licenses
 
@@ -39,7 +39,7 @@ Japanese archives are decoded from Shift_JIS. The title, author, legend, annotat
 
 Sentence candidates have 15–45 characters, balanced Japanese quotation marks, and only the documented Japanese characters and punctuation. Their readings join IPADIC `reading` fields, not `pronunciation` fields. The written particles `は`, `へ`, and `を` are preserved, ruby readings take precedence at annotated positions, and candidates containing an unknown `*` reading are excluded. The review and override files record the manual correction stage.
 
-English CC0 sentences have 30–90 printable ASCII characters. Every matching unique, non-blocklisted sentence is included. Japanese works contribute at most 15 sentences each. Stable maps, tie-breakers, and FNV-1a ordering make regeneration deterministic.
+English CC0 sentences have 30–90 printable ASCII characters. For rows made entirely of quoted dialogue parts, the surrounding double quotes are removed and the trimmed parts are joined with one space before filtering. Every matching unique, non-blocklisted sentence is included. Japanese works contribute at most 15 sentences each. Stable maps, tie-breakers, and FNV-1a ordering make regeneration deterministic.
 
 ## Fixed data and daily practice decks
 

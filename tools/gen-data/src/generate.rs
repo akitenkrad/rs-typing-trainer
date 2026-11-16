@@ -675,23 +675,60 @@ fn generate_english_sentences(input: &Path, blocklist: &BTreeSet<String>) -> Res
         let line = line.with_context(|| format!("failed to decode {} line {}", path.display(), index + 1))?;
         let fields = line.splitn(4, '\t').collect::<Vec<_>>();
         ensure!(fields.len() == 4, "{} line {} must have four fields", path.display(), index + 1);
-        let text = fields[2];
-        let length = text.chars().count();
-        if fields[1] != "eng"
-            || !(30..=90).contains(&length)
-            || !text.bytes().all(|byte| (0x20..=0x7e).contains(&byte))
-            || contains_blocklisted_word(text, blocklist)
-        {
+        let Some(text) = prepare_english_sentence(fields[2]) else {
+            continue;
+        };
+        if fields[1] != "eng" || contains_blocklisted_word(&text, blocklist) {
             continue;
         }
-        unique.entry(text.to_owned()).or_insert_with(|| EnglishSentence {
-            text: text.to_owned(),
+        unique.entry(text.to_string()).or_insert_with(|| EnglishSentence {
+            text: text.into_owned(),
             id: fields[0].to_owned(),
         });
     }
     let selected = unique.into_values().collect::<Vec<_>>();
     ensure!(selected.len() >= 15_000, "only {} English sentence candidates survived", selected.len());
     Ok(selected)
+}
+
+pub fn prepare_english_sentence(text: &str) -> Option<Cow<'_, str>> {
+    let text = remove_surrounding_dialogue_quotes(text).map_or(Cow::Borrowed(text), Cow::Owned);
+    let length = text.chars().count();
+    ((30..=90).contains(&length) && text.bytes().all(|byte| (0x20..=0x7e).contains(&byte))).then_some(text)
+}
+
+fn remove_surrounding_dialogue_quotes(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    if bytes.first() != Some(&b'"') {
+        return None;
+    }
+
+    let mut cursor = 0;
+    let mut parts = Vec::new();
+    loop {
+        cursor += 1;
+        let content_start = cursor;
+        while cursor < bytes.len() && bytes[cursor] != b'"' {
+            cursor += 1;
+        }
+        if cursor == bytes.len() {
+            return None;
+        }
+        parts.push(text[content_start..cursor].trim());
+        cursor += 1;
+        if cursor == bytes.len() {
+            return Some(parts.join(" "));
+        }
+        if bytes[cursor] != b' ' {
+            return None;
+        }
+        while cursor < bytes.len() && bytes[cursor] == b' ' {
+            cursor += 1;
+        }
+        if cursor == bytes.len() || bytes[cursor] != b'"' {
+            return None;
+        }
+    }
 }
 
 fn contains_blocklisted_word(text: &str, blocklist: &BTreeSet<String>) -> bool {
@@ -885,7 +922,7 @@ fn render_manifest(
     outputs: &[(&str, Vec<u8>, usize)],
 ) -> Result<String> {
     let mut manifest = format!(
-        "generated_date = \"{generated_date}\"\nlindera_version = \"{LINDERA_VERSION}\"\ndictionary = \"{IPADIC_VERSION}\"\ndictionary_license = \"NAIST and ICOT terms\"\n\n[filters]\nen_words = \"SCOWL levels 10,20,35,40,50,60; ASCII letters; no apostrophes; top 20000 by public-domain books and Tatoeba CC0 frequency; blocklist\"\nja_words = \"selected IPADIC POS; base forms reanalyzed for readings; 2-8 mora; no old kana or old-style glyphs; top 12000 by corpus frequency\"\nen_sentences = \"CC0; 30-90 characters; printable ASCII; unique; blocklist; all matching rows\"\nja_sentences = \"15-45 characters; allowed Japanese characters and punctuation; balanced quotes; no gaiji or unknown readings; at most 15 per work\"\n"
+        "generated_date = \"{generated_date}\"\nlindera_version = \"{LINDERA_VERSION}\"\ndictionary = \"{IPADIC_VERSION}\"\ndictionary_license = \"NAIST and ICOT terms\"\n\n[filters]\nen_words = \"SCOWL levels 10,20,35,40,50,60; ASCII letters; no apostrophes; top 20000 by public-domain books and Tatoeba CC0 frequency; blocklist\"\nja_words = \"selected IPADIC POS; base forms reanalyzed for readings; 2-8 mora; no old kana or old-style glyphs; top 12000 by corpus frequency\"\nen_sentences = \"CC0; surrounding dialogue quotes removed; 30-90 characters; printable ASCII; unique; blocklist; all matching rows\"\nja_sentences = \"15-45 characters; allowed Japanese characters and punctuation; balanced quotes; no gaiji or unknown readings; at most 15 per work\"\n"
     );
     for path in input_files {
         let relative = if let Ok(relative) = path.strip_prefix(input) {
