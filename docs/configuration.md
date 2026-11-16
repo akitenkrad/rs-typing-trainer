@@ -85,4 +85,6 @@ Every supported key is listed here. “Unset” means that the application deriv
 | `characters.allow_consecutive_same_word` | boolean | `false` | v1 alias for the random-mode setting. |
 | `metrics.db_path` | path | `—` | v1 database-path alias; `storage.db_path` wins. |
 
+Legacy session timing aliases are resolved independently for each key. An explicit `session` value takes precedence; otherwise the corresponding `game` value is used, falling back to the default when neither key is present.
+
 The settings screen edits layout, input layout, geometry, keyboard visibility, keyboard appearance, prompt size, terminal graphics, language, error mode, and result feedback while preserving comments and unrelated TOML keys. See [Training modes](modes.md), [Training tools](training.md), and [Keyboard layouts](keyboard.md) for behavior behind these values.

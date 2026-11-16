@@ -209,6 +209,86 @@ fn v1_fixture_is_mapped_to_v2() {
 }
 
 #[test]
+fn legacy_session_values_fill_missing_keys_in_a_partial_session_section() {
+    let config = Config::from_toml(
+        r#"
+[game]
+duration_seconds = 6
+word_timeout_seconds = 3
+word_length = 3
+[session]
+preview_items = 1
+"#,
+    )
+    .unwrap();
+
+    assert_eq!(config.session.duration_seconds, 6);
+    assert_eq!(config.session.item_timeout_seconds, 3);
+    assert_eq!(config.game.duration_seconds, 6);
+    assert_eq!(config.game.word_timeout_seconds, 3);
+}
+
+#[test]
+fn explicit_session_values_win_per_key_over_legacy_game_values() {
+    let config = Config::from_toml(
+        r#"
+[game]
+duration_seconds = 6
+word_timeout_seconds = 3
+word_length = 3
+[session]
+duration_seconds = 30
+preview_items = 1
+"#,
+    )
+    .unwrap();
+
+    assert_eq!(config.session.duration_seconds, 30);
+    assert_eq!(config.session.item_timeout_seconds, 3);
+    assert_eq!(config.game.duration_seconds, 30);
+    assert_eq!(config.game.word_timeout_seconds, 3);
+}
+
+#[test]
+fn legacy_session_values_are_used_without_a_session_section() {
+    let config = Config::from_toml(
+        r#"
+[game]
+duration_seconds = 6
+word_timeout_seconds = 3
+word_length = 3
+"#,
+    )
+    .unwrap();
+
+    assert_eq!(config.session.duration_seconds, 6);
+    assert_eq!(config.session.item_timeout_seconds, 3);
+}
+
+#[test]
+fn session_timing_defaults_when_neither_new_nor_legacy_keys_are_present() {
+    let config = Config::from_toml("[session]\npreview_items = 1\n").unwrap();
+
+    assert_eq!(config.session.duration_seconds, 60);
+    assert_eq!(config.session.item_timeout_seconds, 5);
+}
+
+#[test]
+fn legacy_duration_survives_mode_controls_round_trip() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("config.toml");
+    fs::write(&path, "[game]\nduration_seconds = 6\n").unwrap();
+    let config = Config::from_path(&path).unwrap();
+
+    save_mode_controls(&path, &config).unwrap();
+
+    let saved = fs::read_to_string(&path).unwrap();
+    assert!(saved.contains("duration_seconds = 6"), "{saved}");
+    let reloaded = Config::from_path(&path).unwrap();
+    assert_eq!(reloaded.session.duration_seconds, 6);
+}
+
+#[test]
 fn analysis_half_life_must_be_positive() {
     assert!(Config::from_toml("[analysis]\nhalf_life_days = 0.0\n").is_err());
 }

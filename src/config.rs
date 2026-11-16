@@ -458,6 +458,7 @@ impl Default for PracticeConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct GameConfig {
     pub duration_seconds: u64,
     pub word_timeout_seconds: u64,
@@ -859,13 +860,15 @@ impl Config {
         let mut cfg: Config = toml::from_str(raw).map_err(AppError::ConfigParse)?;
         cfg.session.result_input_delay_ms = cfg.session.result_input_delay_ms.min(10_000);
         let root: toml::Value = toml::from_str(raw).map_err(AppError::ConfigParse)?;
-        if root.get("session").is_none() {
+        let session = root.get("session").and_then(toml::Value::as_table);
+        if session.and_then(|table| table.get("duration_seconds")).is_none() {
             cfg.session.duration_seconds = cfg.game.duration_seconds;
-            cfg.session.item_timeout_seconds = cfg.game.word_timeout_seconds;
-        } else {
-            cfg.game.duration_seconds = cfg.session.duration_seconds;
-            cfg.game.word_timeout_seconds = cfg.session.item_timeout_seconds;
         }
+        if session.and_then(|table| table.get("item_timeout_seconds")).is_none() {
+            cfg.session.item_timeout_seconds = cfg.game.word_timeout_seconds;
+        }
+        cfg.game.duration_seconds = cfg.session.duration_seconds;
+        cfg.game.word_timeout_seconds = cfg.session.item_timeout_seconds;
         if root.get("mode").is_none() {
             cfg.mode.kind = ModeKind::Random;
             cfg.mode.keys.clone_from(&cfg.characters.charset);
