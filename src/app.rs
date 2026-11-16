@@ -45,6 +45,7 @@ use crate::ui::analysis_image::AnalysisImageCache;
 use crate::ui::bigtext_image::BigTextImageState;
 use crate::ui::keyboard_image::KeyboardImageCache;
 use crate::ui::result_image::ResultImageCache;
+use crate::ui::title_image::TitleImageCache;
 use unicode_segmentation::UnicodeSegmentation;
 
 /// Slide-in / slide-out duration for word transitions. During these phases
@@ -206,6 +207,7 @@ pub struct App {
     pub(crate) bigtext_images: RefCell<BigTextImageState>,
     pub(crate) analysis_images: RefCell<AnalysisImageCache>,
     pub(crate) result_images: RefCell<ResultImageCache>,
+    pub(crate) title_images: RefCell<TitleImageCache>,
     pub game: Option<GameState>,
     pub last_result: Option<GameResult>,
     pub result_record: Option<SessionRecord>,
@@ -371,6 +373,7 @@ impl App {
             bigtext_images: RefCell::new(BigTextImageState::new()),
             analysis_images: RefCell::new(AnalysisImageCache::new()),
             result_images: RefCell::new(ResultImageCache::new()),
+            title_images: RefCell::new(TitleImageCache::new()),
             game: None,
             last_result: None,
             result_record: None,
@@ -657,6 +660,7 @@ impl App {
         self.keyboard_images.get_mut().clear();
         self.analysis_images.get_mut().clear();
         self.result_images.get_mut().clear();
+        self.title_images.get_mut().clear();
     }
 
     /// Refresh cell pixels from a resize ioctl without querying terminal capabilities again.
@@ -667,6 +671,7 @@ impl App {
             self.keyboard_images.get_mut().clear();
             self.analysis_images.get_mut().clear();
             self.result_images.get_mut().clear();
+            self.title_images.get_mut().clear();
         }
     }
 

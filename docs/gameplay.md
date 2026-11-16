@@ -6,6 +6,8 @@
 
 Run `rs-typing-trainer` or `cargo run --release` to open the title screen. The default interface language is English; use `--lang ja` for Japanese. An explicit `--config PATH` takes the place of the normal configuration search.
 
+When terminal images are available and the window has enough room, the title screen centres a two-row keycap logo drawn with the selected theme and large font. If images are disabled or unavailable, or the window is too narrow or short, it keeps the text logo so that every title action remains visible.
+
 Running the program without a subcommand is the same as `rs-typing-trainer play`. `replay FILE` plays a portable record, `stats` prints saved-session analysis, `graphics` reports terminal-image support, and `export SESSION_ID [-o FILE]` writes a v2 session as `.ttrec`, using standard output when `-o` is omitted. Replay reads only its record file; see [Replay](replay.md).
 
 ## Terminal graphics check

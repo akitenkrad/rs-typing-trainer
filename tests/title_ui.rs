@@ -3,6 +3,7 @@ use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use rs_typing_trainer::app::Screen;
 use rs_typing_trainer::config::Config;
+use rs_typing_trainer::graphics::{CellPixels, GraphicsDetection, GraphicsMode, GraphicsReason};
 use rs_typing_trainer::i18n::{Lang, Msg};
 use rs_typing_trainer::ui;
 
@@ -44,6 +45,19 @@ fn render_app(app: &rs_typing_trainer::app::App) -> Terminal<TestBackend> {
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
     terminal.draw(|frame| ui::title::render(frame, app)).unwrap();
     terminal
+}
+
+fn render_app_size(app: &rs_typing_trainer::app::App, width: u16, height: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    terminal.draw(|frame| ui::title::render(frame, app)).unwrap();
+    terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<Vec<_>>()
+        .join("")
 }
 
 fn symbol_column(terminal: &Terminal<TestBackend>, symbol: &str) -> u16 {
@@ -268,5 +282,45 @@ fn title_menu_is_left_aligned_and_only_the_selection_has_an_arrow_in_both_langua
         };
         assert!(columns.windows(2).all(|pair| pair[0] == pair[1]), "{lang:?}: {columns:?}");
         assert_eq!(columns[0], 6);
+    }
+}
+
+#[test]
+fn title_screen_keeps_all_actions_with_and_without_images_at_large_and_small_sizes() {
+    for lang in [Lang::En, Lang::Ja] {
+        let expected = match lang {
+            Lang::En => ["Start", "Benchmark", "Analysis", "History", "Settings", "Quit"],
+            Lang::Ja => ["開始", "ベンチマーク", "分析", "履歴", "設定", "終了"],
+        };
+        for images in [false, true] {
+            for (width, height) in [(150, 40), (80, 24)] {
+                let mut config = Config::default();
+                config.general.lang = lang;
+                let mut app = test_app(config);
+                if images {
+                    app.set_graphics_detection(GraphicsDetection {
+                        mode: GraphicsMode::Kitty,
+                        cell_pixels: Some(CellPixels::new(9, 20)),
+                        reason: GraphicsReason::Explicit(GraphicsMode::Kitty),
+                    });
+                }
+
+                let output = render_app_size(&app, width, height);
+                let compact = without_whitespace(&output);
+                for label in expected {
+                    assert!(
+                        compact.contains(label),
+                        "missing {label:?}: lang={lang:?} images={images} size={width}x{height}"
+                    );
+                }
+                assert!(compact.contains(&without_whitespace(Msg::TitleTagline.text(lang))));
+                let uses_image = images && (width, height) == (150, 40);
+                assert_eq!(
+                    compact.contains(&without_whitespace(Msg::TitleLogo.text(lang))),
+                    !uses_image,
+                    "unexpected logo mode: lang={lang:?} images={images} size={width}x{height}"
+                );
+            }
+        }
     }
 }

@@ -23,6 +23,7 @@ pub mod result_image;
 pub mod settings;
 pub mod theme;
 pub mod title;
+pub mod title_image;
 
 use ratatui::Frame;
 use ratatui::layout::Rect;

@@ -1,16 +1,23 @@
 //! Title screen.
 
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::layout::{Constraint, Direction, Layout, Rect, Size};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui_image::Image;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::App;
 use crate::i18n::Msg;
+use crate::ui::title_image::TitleLogoSpec;
 use crate::ui::{left_inset, theme::Theme};
+
+const IMAGE_LOGO_HEIGHT: u16 = 7;
+const IMAGE_LOGO_MAX_WIDTH: u16 = 80;
+const IMAGE_LAYOUT_MIN_HEIGHT: u16 = 25;
+const IMAGE_LAYOUT_MIN_WIDTH: u16 = 52;
 
 pub fn render(frame: &mut Frame, app: &App) {
     let theme = Theme::from_name(&app.config.ui.theme);
@@ -24,11 +31,14 @@ pub fn render(frame: &mut Frame, app: &App) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    let image_logo = prepare_image_logo(app, theme, inner);
+    let logo_height = if image_logo.is_some() { IMAGE_LOGO_HEIGHT } else { 1 };
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),
-            Constraint::Length(1),
+            Constraint::Length(logo_height),
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(6),
@@ -38,8 +48,16 @@ pub fn render(frame: &mut Frame, app: &App) {
         ])
         .split(inner);
 
-    let logo = Paragraph::new(Msg::TitleLogo.text(lang)).style(Style::default().fg(theme.accent).add_modifier(Modifier::BOLD));
-    frame.render_widget(logo, left_inset(chunks[1]));
+    if let Some((font, spec)) = image_logo {
+        let logo_area = centered(chunks[1], spec.cells.width);
+        let mut images = app.title_images.borrow_mut();
+        if let Some(protocol) = images.protocol(&app.graphics, &font, &spec) {
+            frame.render_widget(Image::new(protocol), logo_area);
+        }
+    } else {
+        let logo = Paragraph::new(Msg::TitleLogo.text(lang)).style(Style::default().fg(theme.accent).add_modifier(Modifier::BOLD));
+        frame.render_widget(logo, left_inset(chunks[1]));
+    }
 
     let tagline = Paragraph::new(Msg::TitleTagline.text(lang)).style(Style::default().fg(theme.fg));
     frame.render_widget(tagline, left_inset(chunks[2]));
@@ -160,6 +178,22 @@ pub fn render(frame: &mut Frame, app: &App) {
         .wrap(Wrap { trim: false })
         .style(Style::default().fg(theme.muted));
     frame.render_widget(info, left_inset(chunks[7]));
+}
+
+fn prepare_image_logo(app: &App, theme: Theme, inner: Rect) -> Option<(crate::ui::bigtext_image::ResolvedBigFont, TitleLogoSpec)> {
+    if inner.width < IMAGE_LAYOUT_MIN_WIDTH || inner.height < IMAGE_LAYOUT_MIN_HEIGHT {
+        return None;
+    }
+    let width = inner.width.saturating_sub(8).clamp(48, IMAGE_LOGO_MAX_WIDTH);
+    let spec = TitleLogoSpec::from_theme(Size::new(width, IMAGE_LOGO_HEIGHT), theme);
+    let font = app.bigtext_images.borrow_mut().resolved_font(&app.config.display.big_font, &app.home_dir);
+    app.title_images.borrow_mut().prepare(&app.graphics, &font, &spec).ok()?;
+    Some((font, spec))
+}
+
+fn centered(area: Rect, width: u16) -> Rect {
+    let width = width.min(area.width);
+    Rect::new(area.x + area.width.saturating_sub(width) / 2, area.y, width, area.height)
 }
 
 fn labeled_value(label: &str, value: &str, label_width: usize) -> String {
