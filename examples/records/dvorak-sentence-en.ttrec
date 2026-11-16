@@ -1,112 +1,110 @@
-{"type":"session","format_version":1,"duration_us":19516714,"id":null,"started_at":"2026-11-14T09:00:00+00:00","finished_at":"2026-11-14T09:00:19.516714+00:00","duration_ms":19516,"mode":"sentence","mode_params":"{\"generator\":\"examples/gen_sample_records.rs\",\"median_interval_ms\":175.0,\"seed\":1578626563,\"synthetic_notice_ja\":\"合成した記録であり実際のプレイではない\",\"transition_class_adjustment\":true}","bench_id":null,"layout":"dvorak","input_layout":"same","geometry":"ansi","error_mode":"stop","release_events":true,"app_version":"0.1.0","metrics_version":2,"net_wpm":63.94519077340581,"raw_wpm":65.17490598058669,"accuracy":0.9811320754716981,"iki_median_ms":163.5,"iki_cv":0.2581268748402326,"cps":5.328765897783818,"consistency":0.7418731251597674,"max_combo":2,"completed_words":3,"timeout_words":0,"mistypes_total":2,"legacy_payload":null}
-{"type":"item","idx":0,"text":"\"Are you ready?\" \"I was born ready.\"","reading":null,"shown_us":0,"done_us":6556692,"outcome":"completed"}
-{"type":"key","seq":0,"t_us":121863,"release_us":188228,"item_idx":0,"pos":0,"kind":"char","typed":"\"","expected":"\"","correct":true,"code":"KeyQ"}
-{"type":"key","seq":1,"t_us":407952,"release_us":495910,"item_idx":0,"pos":1,"kind":"char","typed":"A","expected":"A","correct":true,"code":"KeyA"}
-{"type":"key","seq":2,"t_us":616799,"release_us":690739,"item_idx":0,"pos":2,"kind":"char","typed":"r","expected":"r","correct":true,"code":"KeyO"}
-{"type":"key","seq":3,"t_us":753918,"release_us":848105,"item_idx":0,"pos":3,"kind":"char","typed":"e","expected":"e","correct":true,"code":"KeyD"}
-{"type":"key","seq":4,"t_us":959739,"release_us":1034835,"item_idx":0,"pos":4,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
-{"type":"key","seq":5,"t_us":1102370,"release_us":1158718,"item_idx":0,"pos":5,"kind":"char","typed":"y","expected":"y","correct":true,"code":"KeyT"}
-{"type":"key","seq":6,"t_us":1219046,"release_us":1302220,"item_idx":0,"pos":6,"kind":"char","typed":"o","expected":"o","correct":true,"code":"KeyS"}
-{"type":"key","seq":7,"t_us":1501340,"release_us":1578101,"item_idx":0,"pos":7,"kind":"char","typed":"u","expected":"u","correct":true,"code":"KeyF"}
-{"type":"key","seq":8,"t_us":1672175,"release_us":1754307,"item_idx":0,"pos":8,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
-{"type":"key","seq":9,"t_us":1857862,"release_us":1939480,"item_idx":0,"pos":9,"kind":"char","typed":"r","expected":"r","correct":true,"code":"KeyO"}
-{"type":"key","seq":10,"t_us":1980861,"release_us":2070256,"item_idx":0,"pos":10,"kind":"char","typed":"e","expected":"e","correct":true,"code":"KeyD"}
-{"type":"key","seq":11,"t_us":2225431,"release_us":2317597,"item_idx":0,"pos":11,"kind":"char","typed":"a","expected":"a","correct":true,"code":"KeyA"}
-{"type":"key","seq":12,"t_us":2349062,"release_us":2426612,"item_idx":0,"pos":12,"kind":"char","typed":"d","expected":"d","correct":true,"code":"KeyH"}
-{"type":"key","seq":13,"t_us":2473479,"release_us":2557678,"item_idx":0,"pos":13,"kind":"char","typed":"y","expected":"y","correct":true,"code":"KeyT"}
-{"type":"key","seq":14,"t_us":2649761,"release_us":2750246,"item_idx":0,"pos":14,"kind":"char","typed":"?","expected":"?","correct":true,"code":"BracketLeft"}
-{"type":"key","seq":15,"t_us":2855503,"release_us":2915360,"item_idx":0,"pos":15,"kind":"char","typed":"\"","expected":"\"","correct":true,"code":"KeyQ"}
-{"type":"key","seq":16,"t_us":3012636,"release_us":3110462,"item_idx":0,"pos":16,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
-{"type":"key","seq":17,"t_us":3162232,"release_us":3218082,"item_idx":0,"pos":17,"kind":"char","typed":"\"","expected":"\"","correct":true,"code":"KeyQ"}
-{"type":"key","seq":18,"t_us":3363056,"release_us":3437954,"item_idx":0,"pos":18,"kind":"char","typed":"I","expected":"I","correct":true,"code":"KeyG"}
-{"type":"key","seq":19,"t_us":3522950,"release_us":3586402,"item_idx":0,"pos":19,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
-{"type":"key","seq":20,"t_us":3663083,"release_us":3730916,"item_idx":0,"pos":20,"kind":"char","typed":"w","expected":"w","correct":true,"code":"Comma"}
-{"type":"key","seq":21,"t_us":3856599,"release_us":3956838,"item_idx":0,"pos":21,"kind":"char","typed":"a","expected":"a","correct":true,"code":"KeyA"}
-{"type":"key","seq":22,"t_us":3991044,"release_us":4060696,"item_idx":0,"pos":22,"kind":"char","typed":"s","expected":"s","correct":true,"code":"Semicolon"}
-{"type":"key","seq":23,"t_us":4175550,"release_us":4245241,"item_idx":0,"pos":23,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
-{"type":"key","seq":24,"t_us":4322740,"release_us":4384551,"item_idx":0,"pos":24,"kind":"char","typed":"b","expected":"b","correct":true,"code":"KeyN"}
-{"type":"key","seq":25,"t_us":4509797,"release_us":4599555,"item_idx":0,"pos":25,"kind":"char","typed":"o","expected":"o","correct":true,"code":"KeyS"}
-{"type":"key","seq":26,"t_us":4645622,"release_us":4735445,"item_idx":0,"pos":26,"kind":"char","typed":"r","expected":"r","correct":true,"code":"KeyO"}
-{"type":"key","seq":27,"t_us":5001243,"release_us":5105528,"item_idx":0,"pos":27,"kind":"char","typed":"n","expected":"n","correct":true,"code":"KeyL"}
-{"type":"key","seq":28,"t_us":5196734,"release_us":5300235,"item_idx":0,"pos":28,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
-{"type":"key","seq":29,"t_us":5362707,"release_us":5419850,"item_idx":0,"pos":29,"kind":"char","typed":"r","expected":"r","correct":true,"code":"KeyO"}
-{"type":"key","seq":30,"t_us":5573431,"release_us":5641404,"item_idx":0,"pos":30,"kind":"char","typed":"e","expected":"e","correct":true,"code":"KeyD"}
-{"type":"key","seq":31,"t_us":5739037,"release_us":5801037,"item_idx":0,"pos":31,"kind":"char","typed":"x","expected":"a","correct":false,"code":"KeyB"}
-{"type":"key","seq":32,"t_us":5821037,"release_us":null,"item_idx":0,"pos":31,"kind":"backspace","typed":null,"expected":"a","correct":false,"code":"Backspace"}
-{"type":"key","seq":33,"t_us":5926037,"release_us":6013338,"item_idx":0,"pos":31,"kind":"char","typed":"a","expected":"a","correct":true,"code":"KeyA"}
-{"type":"key","seq":34,"t_us":6058395,"release_us":6126741,"item_idx":0,"pos":32,"kind":"char","typed":"d","expected":"d","correct":true,"code":"KeyH"}
-{"type":"key","seq":35,"t_us":6205805,"release_us":6264685,"item_idx":0,"pos":33,"kind":"char","typed":"y","expected":"y","correct":true,"code":"KeyT"}
-{"type":"key","seq":36,"t_us":6356612,"release_us":6431606,"item_idx":0,"pos":34,"kind":"char","typed":".","expected":".","correct":true,"code":"KeyE"}
-{"type":"key","seq":37,"t_us":6556692,"release_us":6639814,"item_idx":0,"pos":35,"kind":"char","typed":"\"","expected":"\"","correct":true,"code":"KeyQ"}
-{"type":"item","idx":1,"text":"\"Can I ask you a question?\" \"No.\"","reading":null,"shown_us":6856692,"done_us":12513838,"outcome":"completed"}
-{"type":"key","seq":38,"t_us":7060203,"release_us":7130284,"item_idx":1,"pos":0,"kind":"char","typed":"\"","expected":"\"","correct":true,"code":"KeyQ"}
-{"type":"key","seq":39,"t_us":7207885,"release_us":7311213,"item_idx":1,"pos":1,"kind":"char","typed":"C","expected":"C","correct":true,"code":"KeyI"}
-{"type":"key","seq":40,"t_us":7336653,"release_us":7403958,"item_idx":1,"pos":2,"kind":"char","typed":"a","expected":"a","correct":true,"code":"KeyA"}
-{"type":"key","seq":41,"t_us":7512895,"release_us":7603790,"item_idx":1,"pos":3,"kind":"char","typed":"n","expected":"n","correct":true,"code":"KeyL"}
-{"type":"key","seq":42,"t_us":7720900,"release_us":7813631,"item_idx":1,"pos":4,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
-{"type":"key","seq":43,"t_us":7949220,"release_us":8044307,"item_idx":1,"pos":5,"kind":"char","typed":"I","expected":"I","correct":true,"code":"KeyG"}
-{"type":"key","seq":44,"t_us":8144886,"release_us":8205538,"item_idx":1,"pos":6,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
-{"type":"key","seq":45,"t_us":8397040,"release_us":8457562,"item_idx":1,"pos":7,"kind":"char","typed":"a","expected":"a","correct":true,"code":"KeyA"}
-{"type":"key","seq":46,"t_us":8549662,"release_us":8634592,"item_idx":1,"pos":8,"kind":"char","typed":"s","expected":"s","correct":true,"code":"Semicolon"}
-{"type":"key","seq":47,"t_us":8734201,"release_us":8795794,"item_idx":1,"pos":9,"kind":"char","typed":"k","expected":"k","correct":true,"code":"KeyV"}
-{"type":"key","seq":48,"t_us":8885978,"release_us":8960968,"item_idx":1,"pos":10,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
-{"type":"key","seq":49,"t_us":9046911,"release_us":9117758,"item_idx":1,"pos":11,"kind":"char","typed":"y","expected":"y","correct":true,"code":"KeyT"}
-{"type":"key","seq":50,"t_us":9230344,"release_us":9308820,"item_idx":1,"pos":12,"kind":"char","typed":"o","expected":"o","correct":true,"code":"KeyS"}
-{"type":"key","seq":51,"t_us":9426732,"release_us":9530501,"item_idx":1,"pos":13,"kind":"char","typed":"u","expected":"u","correct":true,"code":"KeyF"}
-{"type":"key","seq":52,"t_us":9626567,"release_us":9714719,"item_idx":1,"pos":14,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
-{"type":"key","seq":53,"t_us":9814669,"release_us":9901677,"item_idx":1,"pos":15,"kind":"char","typed":"a","expected":"a","correct":true,"code":"KeyA"}
-{"type":"key","seq":54,"t_us":10013617,"release_us":10110953,"item_idx":1,"pos":16,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
-{"type":"key","seq":55,"t_us":10177442,"release_us":10267898,"item_idx":1,"pos":17,"kind":"char","typed":"q","expected":"q","correct":true,"code":"KeyX"}
-{"type":"key","seq":56,"t_us":10419782,"release_us":10486321,"item_idx":1,"pos":18,"kind":"char","typed":"u","expected":"u","correct":true,"code":"KeyF"}
-{"type":"key","seq":57,"t_us":10549959,"release_us":10608121,"item_idx":1,"pos":19,"kind":"char","typed":"e","expected":"e","correct":true,"code":"KeyD"}
-{"type":"key","seq":58,"t_us":10666459,"release_us":10736144,"item_idx":1,"pos":20,"kind":"char","typed":"s","expected":"s","correct":true,"code":"Semicolon"}
-{"type":"key","seq":59,"t_us":10810538,"release_us":10882086,"item_idx":1,"pos":21,"kind":"char","typed":"t","expected":"t","correct":true,"code":"KeyK"}
-{"type":"key","seq":60,"t_us":10960123,"release_us":11038238,"item_idx":1,"pos":22,"kind":"char","typed":"i","expected":"i","correct":true,"code":"KeyG"}
-{"type":"key","seq":61,"t_us":11137717,"release_us":11204389,"item_idx":1,"pos":23,"kind":"char","typed":"o","expected":"o","correct":true,"code":"KeyS"}
-{"type":"key","seq":62,"t_us":11281525,"release_us":11351070,"item_idx":1,"pos":24,"kind":"char","typed":"n","expected":"n","correct":true,"code":"KeyL"}
-{"type":"key","seq":63,"t_us":11479845,"release_us":11549990,"item_idx":1,"pos":25,"kind":"char","typed":"?","expected":"?","correct":true,"code":"BracketLeft"}
-{"type":"key","seq":64,"t_us":11643345,"release_us":11747420,"item_idx":1,"pos":26,"kind":"char","typed":"\"","expected":"\"","correct":true,"code":"KeyQ"}
-{"type":"key","seq":65,"t_us":11801452,"release_us":11878727,"item_idx":1,"pos":27,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
-{"type":"key","seq":66,"t_us":11986906,"release_us":12050191,"item_idx":1,"pos":28,"kind":"char","typed":"\"","expected":"\"","correct":true,"code":"KeyQ"}
-{"type":"key","seq":67,"t_us":12185181,"release_us":12242986,"item_idx":1,"pos":29,"kind":"char","typed":"N","expected":"N","correct":true,"code":"KeyL"}
-{"type":"key","seq":68,"t_us":12283382,"release_us":12350555,"item_idx":1,"pos":30,"kind":"char","typed":"o","expected":"o","correct":true,"code":"KeyS"}
-{"type":"key","seq":69,"t_us":12420364,"release_us":12514661,"item_idx":1,"pos":31,"kind":"char","typed":".","expected":".","correct":true,"code":"KeyE"}
-{"type":"key","seq":70,"t_us":12513838,"release_us":12606761,"item_idx":1,"pos":32,"kind":"char","typed":"\"","expected":"\"","correct":true,"code":"KeyQ"}
-{"type":"item","idx":2,"text":"\"Do you believe him?\" \"Not really!\"","reading":null,"shown_us":12813838,"done_us":19066714,"outcome":"completed"}
-{"type":"key","seq":71,"t_us":12980021,"release_us":13059816,"item_idx":2,"pos":0,"kind":"char","typed":"\"","expected":"\"","correct":true,"code":"KeyQ"}
-{"type":"key","seq":72,"t_us":13178124,"release_us":13249437,"item_idx":2,"pos":1,"kind":"char","typed":"D","expected":"D","correct":true,"code":"KeyH"}
-{"type":"key","seq":73,"t_us":13326485,"release_us":13402640,"item_idx":2,"pos":2,"kind":"char","typed":"o","expected":"o","correct":true,"code":"KeyS"}
-{"type":"key","seq":74,"t_us":13480277,"release_us":13581665,"item_idx":2,"pos":3,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
-{"type":"key","seq":75,"t_us":13609017,"release_us":13697417,"item_idx":2,"pos":4,"kind":"char","typed":"y","expected":"y","correct":true,"code":"KeyT"}
-{"type":"key","seq":76,"t_us":13758925,"release_us":13830554,"item_idx":2,"pos":5,"kind":"char","typed":"o","expected":"o","correct":true,"code":"KeyS"}
-{"type":"key","seq":77,"t_us":13932927,"release_us":14008089,"item_idx":2,"pos":6,"kind":"char","typed":"u","expected":"u","correct":true,"code":"KeyF"}
-{"type":"key","seq":78,"t_us":14102729,"release_us":14164729,"item_idx":2,"pos":7,"kind":"char","typed":"x","expected":" ","correct":false,"code":"KeyB"}
-{"type":"key","seq":79,"t_us":14184729,"release_us":null,"item_idx":2,"pos":7,"kind":"backspace","typed":null,"expected":" ","correct":false,"code":"Backspace"}
-{"type":"key","seq":80,"t_us":14289729,"release_us":14350503,"item_idx":2,"pos":7,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
-{"type":"key","seq":81,"t_us":14442718,"release_us":14509448,"item_idx":2,"pos":8,"kind":"char","typed":"b","expected":"b","correct":true,"code":"KeyN"}
-{"type":"key","seq":82,"t_us":14684555,"release_us":14752480,"item_idx":2,"pos":9,"kind":"char","typed":"e","expected":"e","correct":true,"code":"KeyD"}
-{"type":"key","seq":83,"t_us":14827727,"release_us":14923914,"item_idx":2,"pos":10,"kind":"char","typed":"l","expected":"l","correct":true,"code":"KeyP"}
-{"type":"key","seq":84,"t_us":14983520,"release_us":15065157,"item_idx":2,"pos":11,"kind":"char","typed":"i","expected":"i","correct":true,"code":"KeyG"}
-{"type":"key","seq":85,"t_us":15119845,"release_us":15197031,"item_idx":2,"pos":12,"kind":"char","typed":"e","expected":"e","correct":true,"code":"KeyD"}
-{"type":"key","seq":86,"t_us":15258288,"release_us":15319279,"item_idx":2,"pos":13,"kind":"char","typed":"v","expected":"v","correct":true,"code":"Period"}
-{"type":"key","seq":87,"t_us":15399832,"release_us":15504194,"item_idx":2,"pos":14,"kind":"char","typed":"e","expected":"e","correct":true,"code":"KeyD"}
-{"type":"key","seq":88,"t_us":15607607,"release_us":15712211,"item_idx":2,"pos":15,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
-{"type":"key","seq":89,"t_us":15865277,"release_us":15939208,"item_idx":2,"pos":16,"kind":"char","typed":"h","expected":"h","correct":true,"code":"KeyJ"}
-{"type":"key","seq":90,"t_us":16031460,"release_us":16090377,"item_idx":2,"pos":17,"kind":"char","typed":"i","expected":"i","correct":true,"code":"KeyG"}
-{"type":"key","seq":91,"t_us":16253965,"release_us":16333474,"item_idx":2,"pos":18,"kind":"char","typed":"m","expected":"m","correct":true,"code":"KeyM"}
-{"type":"key","seq":92,"t_us":16424390,"release_us":16521381,"item_idx":2,"pos":19,"kind":"char","typed":"?","expected":"?","correct":true,"code":"BracketLeft"}
-{"type":"key","seq":93,"t_us":16646958,"release_us":16740181,"item_idx":2,"pos":20,"kind":"char","typed":"\"","expected":"\"","correct":true,"code":"KeyQ"}
-{"type":"key","seq":94,"t_us":16808052,"release_us":16885009,"item_idx":2,"pos":21,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
-{"type":"key","seq":95,"t_us":16947256,"release_us":17006430,"item_idx":2,"pos":22,"kind":"char","typed":"\"","expected":"\"","correct":true,"code":"KeyQ"}
-{"type":"key","seq":96,"t_us":17164812,"release_us":17242969,"item_idx":2,"pos":23,"kind":"char","typed":"N","expected":"N","correct":true,"code":"KeyL"}
-{"type":"key","seq":97,"t_us":17413339,"release_us":17508683,"item_idx":2,"pos":24,"kind":"char","typed":"o","expected":"o","correct":true,"code":"KeyS"}
-{"type":"key","seq":98,"t_us":17564118,"release_us":17640349,"item_idx":2,"pos":25,"kind":"char","typed":"t","expected":"t","correct":true,"code":"KeyK"}
-{"type":"key","seq":99,"t_us":17702510,"release_us":17759511,"item_idx":2,"pos":26,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
-{"type":"key","seq":100,"t_us":17857703,"release_us":17918162,"item_idx":2,"pos":27,"kind":"char","typed":"r","expected":"r","correct":true,"code":"KeyO"}
-{"type":"key","seq":101,"t_us":17988022,"release_us":18081761,"item_idx":2,"pos":28,"kind":"char","typed":"e","expected":"e","correct":true,"code":"KeyD"}
-{"type":"key","seq":102,"t_us":18154067,"release_us":18247564,"item_idx":2,"pos":29,"kind":"char","typed":"a","expected":"a","correct":true,"code":"KeyA"}
-{"type":"key","seq":103,"t_us":18359097,"release_us":18428165,"item_idx":2,"pos":30,"kind":"char","typed":"l","expected":"l","correct":true,"code":"KeyP"}
-{"type":"key","seq":104,"t_us":18569424,"release_us":18673002,"item_idx":2,"pos":31,"kind":"char","typed":"l","expected":"l","correct":true,"code":"KeyP"}
-{"type":"key","seq":105,"t_us":18726268,"release_us":18782531,"item_idx":2,"pos":32,"kind":"char","typed":"y","expected":"y","correct":true,"code":"KeyT"}
-{"type":"key","seq":106,"t_us":18884100,"release_us":18958283,"item_idx":2,"pos":33,"kind":"char","typed":"!","expected":"!","correct":true,"code":"Digit1"}
-{"type":"key","seq":107,"t_us":19066714,"release_us":19151284,"item_idx":2,"pos":34,"kind":"char","typed":"\"","expected":"\"","correct":true,"code":"KeyQ"}
+{"type":"session","format_version":1,"duration_us":19138182,"id":null,"started_at":"2026-11-14T09:00:00+00:00","finished_at":"2026-11-14T09:00:19.138182+00:00","duration_ms":19138,"mode":"sentence","mode_params":"{\"generator\":\"examples/gen_sample_records.rs\",\"median_interval_ms\":175.0,\"seed\":1578626563,\"synthetic_notice_ja\":\"合成した記録であり実際のプレイではない\",\"transition_class_adjustment\":true}","bench_id":null,"layout":"dvorak","input_layout":"same","geometry":"ansi","error_mode":"stop","release_events":true,"app_version":"0.1.0","metrics_version":2,"net_wpm":63.955918069960866,"raw_wpm":65.20995567917579,"accuracy":0.9807692307692307,"iki_median_ms":163.405,"iki_cv":0.2615851234053274,"cps":5.329659839163407,"consistency":0.7384148765946725,"max_combo":2,"completed_words":3,"timeout_words":0,"mistypes_total":2,"legacy_payload":null}
+{"type":"item","idx":0,"text":"Are you ready? I was born ready.","reading":null,"kind":"word","shown_us":0,"done_us":5783406,"outcome":"completed"}
+{"type":"key","seq":0,"t_us":121863,"release_us":188228,"item_idx":0,"pos":0,"kind":"char","typed":"A","expected":"A","correct":true,"code":"KeyA"}
+{"type":"key","seq":1,"t_us":324894,"release_us":412852,"item_idx":0,"pos":1,"kind":"char","typed":"r","expected":"r","correct":true,"code":"KeyO"}
+{"type":"key","seq":2,"t_us":533741,"release_us":607681,"item_idx":0,"pos":2,"kind":"char","typed":"e","expected":"e","correct":true,"code":"KeyD"}
+{"type":"key","seq":3,"t_us":689558,"release_us":783745,"item_idx":0,"pos":3,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
+{"type":"key","seq":4,"t_us":895379,"release_us":970475,"item_idx":0,"pos":4,"kind":"char","typed":"y","expected":"y","correct":true,"code":"KeyT"}
+{"type":"key","seq":5,"t_us":1050846,"release_us":1107194,"item_idx":0,"pos":5,"kind":"char","typed":"o","expected":"o","correct":true,"code":"KeyS"}
+{"type":"key","seq":6,"t_us":1167522,"release_us":1250696,"item_idx":0,"pos":6,"kind":"char","typed":"u","expected":"u","correct":true,"code":"KeyF"}
+{"type":"key","seq":7,"t_us":1426507,"release_us":1503268,"item_idx":0,"pos":7,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
+{"type":"key","seq":8,"t_us":1597342,"release_us":1679474,"item_idx":0,"pos":8,"kind":"char","typed":"r","expected":"r","correct":true,"code":"KeyO"}
+{"type":"key","seq":9,"t_us":1760747,"release_us":1842365,"item_idx":0,"pos":9,"kind":"char","typed":"e","expected":"e","correct":true,"code":"KeyD"}
+{"type":"key","seq":10,"t_us":1913097,"release_us":2002492,"item_idx":0,"pos":10,"kind":"char","typed":"a","expected":"a","correct":true,"code":"KeyA"}
+{"type":"key","seq":11,"t_us":2110548,"release_us":2202714,"item_idx":0,"pos":11,"kind":"char","typed":"d","expected":"d","correct":true,"code":"KeyH"}
+{"type":"key","seq":12,"t_us":2234179,"release_us":2311729,"item_idx":0,"pos":12,"kind":"char","typed":"y","expected":"y","correct":true,"code":"KeyT"}
+{"type":"key","seq":13,"t_us":2358596,"release_us":2442795,"item_idx":0,"pos":13,"kind":"char","typed":"?","expected":"?","correct":true,"code":"BracketLeft"}
+{"type":"key","seq":14,"t_us":2558917,"release_us":2659402,"item_idx":0,"pos":14,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
+{"type":"key","seq":15,"t_us":2792715,"release_us":2852572,"item_idx":0,"pos":15,"kind":"char","typed":"I","expected":"I","correct":true,"code":"KeyG"}
+{"type":"key","seq":16,"t_us":2949848,"release_us":3047674,"item_idx":0,"pos":16,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
+{"type":"key","seq":17,"t_us":3099444,"release_us":3155294,"item_idx":0,"pos":17,"kind":"char","typed":"w","expected":"w","correct":true,"code":"Comma"}
+{"type":"key","seq":18,"t_us":3261577,"release_us":3336475,"item_idx":0,"pos":18,"kind":"char","typed":"a","expected":"a","correct":true,"code":"KeyA"}
+{"type":"key","seq":19,"t_us":3402284,"release_us":3465736,"item_idx":0,"pos":19,"kind":"char","typed":"s","expected":"s","correct":true,"code":"Semicolon"}
+{"type":"key","seq":20,"t_us":3542417,"release_us":3610250,"item_idx":0,"pos":20,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
+{"type":"key","seq":21,"t_us":3762322,"release_us":3862561,"item_idx":0,"pos":21,"kind":"char","typed":"b","expected":"b","correct":true,"code":"KeyN"}
+{"type":"key","seq":22,"t_us":3896767,"release_us":3966419,"item_idx":0,"pos":22,"kind":"char","typed":"o","expected":"o","correct":true,"code":"KeyS"}
+{"type":"key","seq":23,"t_us":4059132,"release_us":4128823,"item_idx":0,"pos":23,"kind":"char","typed":"r","expected":"r","correct":true,"code":"KeyO"}
+{"type":"key","seq":24,"t_us":4241648,"release_us":4303459,"item_idx":0,"pos":24,"kind":"char","typed":"n","expected":"n","correct":true,"code":"KeyL"}
+{"type":"key","seq":25,"t_us":4454212,"release_us":4543970,"item_idx":0,"pos":25,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
+{"type":"key","seq":26,"t_us":4608559,"release_us":4698382,"item_idx":0,"pos":26,"kind":"char","typed":"r","expected":"r","correct":true,"code":"KeyO"}
+{"type":"key","seq":27,"t_us":4860935,"release_us":4965220,"item_idx":0,"pos":27,"kind":"char","typed":"e","expected":"e","correct":true,"code":"KeyD"}
+{"type":"key","seq":28,"t_us":5074020,"release_us":5177521,"item_idx":0,"pos":28,"kind":"char","typed":"a","expected":"a","correct":true,"code":"KeyA"}
+{"type":"key","seq":29,"t_us":5220076,"release_us":5277219,"item_idx":0,"pos":29,"kind":"char","typed":"d","expected":"d","correct":true,"code":"KeyH"}
+{"type":"key","seq":30,"t_us":5430800,"release_us":5498773,"item_idx":0,"pos":30,"kind":"char","typed":"y","expected":"y","correct":true,"code":"KeyT"}
+{"type":"key","seq":31,"t_us":5596406,"release_us":5658406,"item_idx":0,"pos":31,"kind":"char","typed":"x","expected":".","correct":false,"code":"KeyB"}
+{"type":"key","seq":32,"t_us":5678406,"release_us":null,"item_idx":0,"pos":31,"kind":"backspace","typed":null,"expected":".","correct":false,"code":"Backspace"}
+{"type":"key","seq":33,"t_us":5783406,"release_us":5870707,"item_idx":0,"pos":31,"kind":"char","typed":".","expected":".","correct":true,"code":"KeyE"}
+{"type":"item","idx":1,"text":"Can I ask you a few personal questions?","reading":null,"kind":"word","shown_us":6083406,"done_us":12701140,"outcome":"completed"}
+{"type":"key","seq":34,"t_us":6215764,"release_us":6284110,"item_idx":1,"pos":0,"kind":"char","typed":"C","expected":"C","correct":true,"code":"KeyI"}
+{"type":"key","seq":35,"t_us":6363174,"release_us":6422054,"item_idx":1,"pos":1,"kind":"char","typed":"a","expected":"a","correct":true,"code":"KeyA"}
+{"type":"key","seq":36,"t_us":6484927,"release_us":6559921,"item_idx":1,"pos":2,"kind":"char","typed":"n","expected":"n","correct":true,"code":"KeyL"}
+{"type":"key","seq":37,"t_us":6668487,"release_us":6751609,"item_idx":1,"pos":3,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
+{"type":"key","seq":38,"t_us":6832609,"release_us":6902690,"item_idx":1,"pos":4,"kind":"char","typed":"I","expected":"I","correct":true,"code":"KeyG"}
+{"type":"key","seq":39,"t_us":7000429,"release_us":7103757,"item_idx":1,"pos":5,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
+{"type":"key","seq":40,"t_us":7146756,"release_us":7214061,"item_idx":1,"pos":6,"kind":"char","typed":"a","expected":"a","correct":true,"code":"KeyA"}
+{"type":"key","seq":41,"t_us":7322998,"release_us":7413893,"item_idx":1,"pos":7,"kind":"char","typed":"s","expected":"s","correct":true,"code":"Semicolon"}
+{"type":"key","seq":42,"t_us":7506043,"release_us":7598774,"item_idx":1,"pos":8,"kind":"char","typed":"k","expected":"k","correct":true,"code":"KeyV"}
+{"type":"key","seq":43,"t_us":7734363,"release_us":7829450,"item_idx":1,"pos":9,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
+{"type":"key","seq":44,"t_us":7930029,"release_us":7990681,"item_idx":1,"pos":10,"kind":"char","typed":"y","expected":"y","correct":true,"code":"KeyT"}
+{"type":"key","seq":45,"t_us":8204877,"release_us":8265399,"item_idx":1,"pos":11,"kind":"char","typed":"o","expected":"o","correct":true,"code":"KeyS"}
+{"type":"key","seq":46,"t_us":8393920,"release_us":8478850,"item_idx":1,"pos":12,"kind":"char","typed":"u","expected":"u","correct":true,"code":"KeyF"}
+{"type":"key","seq":47,"t_us":8603624,"release_us":8665217,"item_idx":1,"pos":13,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
+{"type":"key","seq":48,"t_us":8755401,"release_us":8830391,"item_idx":1,"pos":14,"kind":"char","typed":"a","expected":"a","correct":true,"code":"KeyA"}
+{"type":"key","seq":49,"t_us":8916334,"release_us":8987181,"item_idx":1,"pos":15,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
+{"type":"key","seq":50,"t_us":9084621,"release_us":9163097,"item_idx":1,"pos":16,"kind":"char","typed":"f","expected":"f","correct":true,"code":"KeyY"}
+{"type":"key","seq":51,"t_us":9243173,"release_us":9346942,"item_idx":1,"pos":17,"kind":"char","typed":"e","expected":"e","correct":true,"code":"KeyD"}
+{"type":"key","seq":52,"t_us":9419028,"release_us":9507180,"item_idx":1,"pos":18,"kind":"char","typed":"w","expected":"w","correct":true,"code":"Comma"}
+{"type":"key","seq":53,"t_us":9607130,"release_us":9694138,"item_idx":1,"pos":19,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
+{"type":"key","seq":54,"t_us":9806078,"release_us":9903414,"item_idx":1,"pos":20,"kind":"char","typed":"p","expected":"p","correct":true,"code":"KeyR"}
+{"type":"key","seq":55,"t_us":9984647,"release_us":10075103,"item_idx":1,"pos":21,"kind":"char","typed":"e","expected":"e","correct":true,"code":"KeyD"}
+{"type":"key","seq":56,"t_us":10180298,"release_us":10246837,"item_idx":1,"pos":22,"kind":"char","typed":"r","expected":"r","correct":true,"code":"KeyO"}
+{"type":"key","seq":57,"t_us":10310475,"release_us":10368637,"item_idx":1,"pos":23,"kind":"char","typed":"s","expected":"s","correct":true,"code":"Semicolon"}
+{"type":"key","seq":58,"t_us":10426975,"release_us":10496660,"item_idx":1,"pos":24,"kind":"char","typed":"o","expected":"o","correct":true,"code":"KeyS"}
+{"type":"key","seq":59,"t_us":10543296,"release_us":10614844,"item_idx":1,"pos":25,"kind":"char","typed":"n","expected":"n","correct":true,"code":"KeyL"}
+{"type":"key","seq":60,"t_us":10692881,"release_us":10770996,"item_idx":1,"pos":26,"kind":"char","typed":"a","expected":"a","correct":true,"code":"KeyA"}
+{"type":"key","seq":61,"t_us":10836259,"release_us":10902931,"item_idx":1,"pos":27,"kind":"char","typed":"l","expected":"l","correct":true,"code":"KeyP"}
+{"type":"key","seq":62,"t_us":10999677,"release_us":11069222,"item_idx":1,"pos":28,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
+{"type":"key","seq":63,"t_us":11181622,"release_us":11251767,"item_idx":1,"pos":29,"kind":"char","typed":"q","expected":"q","correct":true,"code":"KeyX"}
+{"type":"key","seq":64,"t_us":11384139,"release_us":11488214,"item_idx":1,"pos":30,"kind":"char","typed":"u","expected":"u","correct":true,"code":"KeyF"}
+{"type":"key","seq":65,"t_us":11556476,"release_us":11633751,"item_idx":1,"pos":31,"kind":"char","typed":"e","expected":"e","correct":true,"code":"KeyD"}
+{"type":"key","seq":66,"t_us":11719676,"release_us":11782961,"item_idx":1,"pos":32,"kind":"char","typed":"s","expected":"s","correct":true,"code":"Semicolon"}
+{"type":"key","seq":67,"t_us":11965267,"release_us":12023072,"item_idx":1,"pos":33,"kind":"char","typed":"t","expected":"t","correct":true,"code":"KeyK"}
+{"type":"key","seq":68,"t_us":12063468,"release_us":12130641,"item_idx":1,"pos":34,"kind":"char","typed":"i","expected":"i","correct":true,"code":"KeyG"}
+{"type":"key","seq":69,"t_us":12200450,"release_us":12294747,"item_idx":1,"pos":35,"kind":"char","typed":"o","expected":"o","correct":true,"code":"KeyS"}
+{"type":"key","seq":70,"t_us":12275915,"release_us":12368838,"item_idx":1,"pos":36,"kind":"char","typed":"n","expected":"n","correct":true,"code":"KeyL"}
+{"type":"key","seq":71,"t_us":12421995,"release_us":12501790,"item_idx":1,"pos":37,"kind":"char","typed":"s","expected":"s","correct":true,"code":"Semicolon"}
+{"type":"key","seq":72,"t_us":12701140,"release_us":12772453,"item_idx":1,"pos":38,"kind":"char","typed":"?","expected":"?","correct":true,"code":"BracketLeft"}
+{"type":"item","idx":2,"text":"Do you believe him? Not really!","reading":null,"kind":"word","shown_us":13001140,"done_us":18688182,"outcome":"completed"}
+{"type":"key","seq":73,"t_us":13184905,"release_us":13261060,"item_idx":2,"pos":0,"kind":"char","typed":"D","expected":"D","correct":true,"code":"KeyH"}
+{"type":"key","seq":74,"t_us":13320242,"release_us":13421630,"item_idx":2,"pos":1,"kind":"char","typed":"o","expected":"o","correct":true,"code":"KeyS"}
+{"type":"key","seq":75,"t_us":13448982,"release_us":13537382,"item_idx":2,"pos":2,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
+{"type":"key","seq":76,"t_us":13586512,"release_us":13658141,"item_idx":2,"pos":3,"kind":"char","typed":"y","expected":"y","correct":true,"code":"KeyT"}
+{"type":"key","seq":77,"t_us":13760514,"release_us":13835676,"item_idx":2,"pos":4,"kind":"char","typed":"o","expected":"o","correct":true,"code":"KeyS"}
+{"type":"key","seq":78,"t_us":13945598,"release_us":14007598,"item_idx":2,"pos":5,"kind":"char","typed":"x","expected":"u","correct":false,"code":"KeyB"}
+{"type":"key","seq":79,"t_us":14027598,"release_us":null,"item_idx":2,"pos":5,"kind":"backspace","typed":null,"expected":"u","correct":false,"code":"Backspace"}
+{"type":"key","seq":80,"t_us":14132598,"release_us":14193372,"item_idx":2,"pos":5,"kind":"char","typed":"u","expected":"u","correct":true,"code":"KeyF"}
+{"type":"key","seq":81,"t_us":14285587,"release_us":14352317,"item_idx":2,"pos":6,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
+{"type":"key","seq":82,"t_us":14560402,"release_us":14628327,"item_idx":2,"pos":7,"kind":"char","typed":"b","expected":"b","correct":true,"code":"KeyN"}
+{"type":"key","seq":83,"t_us":14703574,"release_us":14799761,"item_idx":2,"pos":8,"kind":"char","typed":"e","expected":"e","correct":true,"code":"KeyD"}
+{"type":"key","seq":84,"t_us":14859367,"release_us":14941004,"item_idx":2,"pos":9,"kind":"char","typed":"l","expected":"l","correct":true,"code":"KeyP"}
+{"type":"key","seq":85,"t_us":14969428,"release_us":15046614,"item_idx":2,"pos":10,"kind":"char","typed":"i","expected":"i","correct":true,"code":"KeyG"}
+{"type":"key","seq":86,"t_us":15140909,"release_us":15201900,"item_idx":2,"pos":11,"kind":"char","typed":"e","expected":"e","correct":true,"code":"KeyD"}
+{"type":"key","seq":87,"t_us":15282453,"release_us":15386815,"item_idx":2,"pos":12,"kind":"char","typed":"v","expected":"v","correct":true,"code":"Period"}
+{"type":"key","seq":88,"t_us":15465295,"release_us":15569899,"item_idx":2,"pos":13,"kind":"char","typed":"e","expected":"e","correct":true,"code":"KeyD"}
+{"type":"key","seq":89,"t_us":15722965,"release_us":15796896,"item_idx":2,"pos":14,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
+{"type":"key","seq":90,"t_us":15911809,"release_us":15970726,"item_idx":2,"pos":15,"kind":"char","typed":"h","expected":"h","correct":true,"code":"KeyJ"}
+{"type":"key","seq":91,"t_us":16134314,"release_us":16213823,"item_idx":2,"pos":16,"kind":"char","typed":"i","expected":"i","correct":true,"code":"KeyG"}
+{"type":"key","seq":92,"t_us":16271905,"release_us":16368896,"item_idx":2,"pos":17,"kind":"char","typed":"m","expected":"m","correct":true,"code":"KeyM"}
+{"type":"key","seq":93,"t_us":16547585,"release_us":16640808,"item_idx":2,"pos":18,"kind":"char","typed":"?","expected":"?","correct":true,"code":"BracketLeft"}
+{"type":"key","seq":94,"t_us":16708679,"release_us":16785636,"item_idx":2,"pos":19,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
+{"type":"key","seq":95,"t_us":16847883,"release_us":16907057,"item_idx":2,"pos":20,"kind":"char","typed":"N","expected":"N","correct":true,"code":"KeyL"}
+{"type":"key","seq":96,"t_us":17065439,"release_us":17143596,"item_idx":2,"pos":21,"kind":"char","typed":"o","expected":"o","correct":true,"code":"KeyS"}
+{"type":"key","seq":97,"t_us":17313966,"release_us":17409310,"item_idx":2,"pos":22,"kind":"char","typed":"t","expected":"t","correct":true,"code":"KeyK"}
+{"type":"key","seq":98,"t_us":17485305,"release_us":17561536,"item_idx":2,"pos":23,"kind":"char","typed":" ","expected":" ","correct":true,"code":null}
+{"type":"key","seq":99,"t_us":17623697,"release_us":17680698,"item_idx":2,"pos":24,"kind":"char","typed":"r","expected":"r","correct":true,"code":"KeyO"}
+{"type":"key","seq":100,"t_us":17760267,"release_us":17820726,"item_idx":2,"pos":25,"kind":"char","typed":"e","expected":"e","correct":true,"code":"KeyD"}
+{"type":"key","seq":101,"t_us":17921685,"release_us":18015424,"item_idx":2,"pos":26,"kind":"char","typed":"a","expected":"a","correct":true,"code":"KeyA"}
+{"type":"key","seq":102,"t_us":18055740,"release_us":18149237,"item_idx":2,"pos":27,"kind":"char","typed":"l","expected":"l","correct":true,"code":"KeyP"}
+{"type":"key","seq":103,"t_us":18344645,"release_us":18413713,"item_idx":2,"pos":28,"kind":"char","typed":"l","expected":"l","correct":true,"code":"KeyP"}
+{"type":"key","seq":104,"t_us":18493909,"release_us":18597487,"item_idx":2,"pos":29,"kind":"char","typed":"y","expected":"y","correct":true,"code":"KeyT"}
+{"type":"key","seq":105,"t_us":18688182,"release_us":18744445,"item_idx":2,"pos":30,"kind":"char","typed":"!","expected":"!","correct":true,"code":"Digit1"}

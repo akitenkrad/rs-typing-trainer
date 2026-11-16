@@ -62,9 +62,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &catalog,
         DataKind::EnglishSentence,
         &[
-            "\"Are you ready?\" \"I was born ready.\"",
-            "\"Can I ask you a question?\" \"No.\"",
-            "\"Do you believe him?\" \"Not really!\"",
+            "Are you ready? I was born ready.",
+            "Can I ask you a few personal questions?",
+            "Do you believe him? Not really!",
         ],
     );
     write_sample(
