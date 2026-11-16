@@ -58,7 +58,7 @@ impl ResolvedBigFont {
         self.fallback_reason.as_deref()
     }
 
-    fn identity(&self) -> FontIdentity {
+    pub(crate) fn identity(&self) -> FontIdentity {
         match &self.source {
             FontSource::BizUdGothic => FontIdentity::BizUdGothic,
             FontSource::Shinonome => FontIdentity::Shinonome,
@@ -117,7 +117,7 @@ pub struct BigTileSpec {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-enum FontIdentity {
+pub(crate) enum FontIdentity {
     BizUdGothic,
     Shinonome,
     User(PathBuf, u128),
@@ -189,6 +189,11 @@ impl BigTextImageState {
     pub(crate) fn fallback_reason<'a>(&'a mut self, configured: &str, home: &Path) -> Option<&'a str> {
         self.synchronize_font(configured, home);
         self.font.fallback_reason().or(self.glyph_fallback_reason.as_deref())
+    }
+
+    pub(crate) fn resolved_font(&mut self, configured: &str, home: &Path) -> ResolvedBigFont {
+        self.synchronize_font(configured, home);
+        self.font.clone()
     }
 
     fn synchronize_font(&mut self, configured: &str, home: &Path) {
@@ -347,19 +352,32 @@ pub fn render_big_tile(font: &ResolvedBigFont, cell_pixels: CellPixels, spec: &B
         return rgba_image(pixmap);
     }
     let (foreground, bold) = effective_appearance(&spec.character);
-    match &font.source {
-        FontSource::Shinonome => {
-            draw_shinonome(&mut pixmap, spec.size, spec.character.character, foreground, bold);
-        }
+    draw_big_character(&mut pixmap, font, spec.size, spec.character.character, foreground, bold)?;
+    rgba_image(pixmap)
+}
+
+pub(crate) fn draw_big_character(
+    pixmap: &mut Pixmap,
+    font: &ResolvedBigFont,
+    size: BigTextSize,
+    character: char,
+    color: [u8; 3],
+    bold: bool,
+) -> Result<bool, String> {
+    let rendered = match &font.source {
+        FontSource::Shinonome => draw_shinonome(pixmap, size, character, color, bold),
         source => {
-            if let Some(outline) = outline_for(source, spec.character.character)? {
-                draw_outline(&mut pixmap, &outline, foreground, bold);
-            } else if !draw_bundled_outline(&mut pixmap, spec.character.character, foreground, bold)? {
-                draw_shinonome(&mut pixmap, spec.size, spec.character.character, foreground, bold);
+            if let Some(outline) = outline_for(source, character)? {
+                draw_outline(pixmap, &outline, color, bold);
+                true
+            } else if draw_bundled_outline(pixmap, character, color, bold)? {
+                true
+            } else {
+                draw_shinonome(pixmap, size, character, color, bold)
             }
         }
-    }
-    rgba_image(pixmap)
+    };
+    Ok(rendered)
 }
 
 fn rgba_image(pixmap: Pixmap) -> Result<RgbaImage, String> {

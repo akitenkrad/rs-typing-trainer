@@ -2,6 +2,7 @@
 //! renderers based on the current `Screen` value.
 
 pub mod analysis;
+pub mod analysis_image;
 pub mod animation;
 pub mod bench_select;
 pub mod bench_summary;

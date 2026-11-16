@@ -1,17 +1,23 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use chrono::DateTime;
+use chrono::Duration as ChronoDuration;
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect, Size};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Axis, Block, Borders, Chart, Dataset, GraphType, Paragraph};
+use ratatui_image::Image;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::{AnalysisPeriod, App};
+use crate::graphics::GraphicsMode;
 use crate::i18n::{Lang, Msg};
 use crate::layout::geometry::geometry;
+use crate::ui::analysis_image::{
+    FORECAST_EN_COLOR, FORECAST_JA_COLOR, GradeBadgeSpec, MetricKind, TrendChartSpec, TrendDateRange, TrendForecast, TrendPoint,
+    build_text_trend_data, build_trend_data, metric_value, mode_label, shared_trend_date_range,
+};
 use crate::ui::keyboard::{KeyboardState, KeyboardView};
 use crate::ui::theme::Theme;
 
@@ -195,6 +201,9 @@ fn render_grade_badges(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) 
         .direction(Direction::Horizontal)
         .constraints((0..grades.len()).map(|_| Constraint::Ratio(1, grades.len() as u32)).collect::<Vec<_>>())
         .split(chunks[0]);
+    if render_grade_badge_images(frame, app, theme, &grades, &columns) {
+        return Some(chunks[1]);
+    }
     for ((grade, overall), column) in grades.into_iter().zip(columns.iter().copied()) {
         let color = grade_color(overall.grade, theme);
         let label = match (grade.language.as_str(), app.config.general.lang) {
@@ -226,6 +235,76 @@ fn render_grade_badges(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) 
     Some(chunks[1])
 }
 
+fn render_grade_badge_images(
+    frame: &mut Frame,
+    app: &App,
+    theme: &Theme,
+    grades: &[(&crate::analysis::grades::LanguageGrade, &crate::analysis::grades::OverallGrade)],
+    columns: &[Rect],
+) -> bool {
+    let Some(cell_pixels) = app.graphics.cell_pixels else {
+        return false;
+    };
+    if app.graphics.mode == GraphicsMode::Off {
+        return false;
+    }
+    if columns.iter().any(|column| column.width == 0 || column.height <= 1) {
+        return false;
+    }
+    let font = app.bigtext_images.borrow_mut().resolved_font(&app.config.display.big_font, &app.home_dir);
+    let placements = grades
+        .iter()
+        .zip(columns.iter().copied())
+        .map(|((_, overall), column)| {
+            let rows = column.height.saturating_sub(1);
+            let square_width = (u32::from(rows) * u32::from(cell_pixels.height))
+                .div_ceil(u32::from(cell_pixels.width))
+                .min(u32::from(column.width)) as u16;
+            let spec = GradeBadgeSpec {
+                level: overall.grade,
+                color: grade_color(overall.grade, theme),
+                cells: Size::new(square_width.max(1), rows.max(1)),
+            };
+            let area = Rect::new(
+                column.x + column.width.saturating_sub(spec.cells.width) / 2,
+                column.y.saturating_add(1),
+                spec.cells.width,
+                spec.cells.height,
+            );
+            (spec, area)
+        })
+        .collect::<Vec<_>>();
+    let mut images = app.analysis_images.borrow_mut();
+    if placements
+        .iter()
+        .any(|(spec, _)| images.prepare_badge(&app.graphics, &font, spec).is_err())
+    {
+        return false;
+    }
+    for (((grade, overall), column), (spec, image_area)) in grades.iter().zip(columns.iter().copied()).zip(&placements) {
+        let color = grade_color(overall.grade, theme);
+        let label = match (grade.language.as_str(), app.config.general.lang) {
+            ("ja", Lang::En) => "Japanese",
+            ("ja", Lang::Ja) => "日本語",
+            (_, Lang::En) => "English",
+            (_, Lang::Ja) => "英語",
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                format!("{label}  {:.2}", overall.score),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            )))
+            .alignment(Alignment::Center),
+            Rect::new(column.x, column.y, column.width, 1),
+        );
+        let Some(protocol) = images.badge_protocol(&app.graphics, &font, spec) else {
+            return false;
+        };
+        frame.render_widget(Image::new(protocol), *image_area);
+    }
+    true
+}
+
 fn grade_color(level: crate::analysis::grades::Level, theme: &Theme) -> Color {
     match level {
         crate::analysis::grades::Level::S => theme.warning,
@@ -245,60 +324,52 @@ fn render_trend(frame: &mut Frame, app: &App, area: Rect) {
         .constraints([Constraint::Ratio(1, 3), Constraint::Ratio(1, 3), Constraint::Ratio(1, 3)])
         .split(area);
     let lang = app.config.general.lang;
-    render_metric_chart(frame, &app.analysis_records, chunks[0], MetricKind::NetWpm, lang);
-    render_metric_chart(frame, &app.analysis_records, chunks[1], MetricKind::Accuracy, lang);
-    render_metric_chart(frame, &app.analysis_records, chunks[2], MetricKind::Iki, lang);
+    let kinds = [MetricKind::NetWpm, MetricKind::Accuracy, MetricKind::Iki];
+    let image_enabled = app.graphics.mode != GraphicsMode::Off && app.graphics.cell_pixels.is_some();
+    let mut image_specs = kinds.map(|kind| {
+        if image_enabled {
+            build_trend_data(&app.analysis_records, kind, lang)
+        } else {
+            None
+        }
+    });
+    if let Some(spec) = &mut image_specs[0] {
+        spec.forecasts = trend_forecasts(app);
+    }
+    let x_range = shared_trend_date_range(image_specs.iter().flatten());
+    for ((area, kind), spec) in chunks.iter().copied().zip(kinds).zip(image_specs) {
+        render_metric_chart(frame, app, area, kind, lang, spec, x_range);
+    }
 }
 
-#[derive(Clone, Copy)]
-enum MetricKind {
-    NetWpm,
-    Accuracy,
-    Iki,
+fn render_metric_chart(
+    frame: &mut Frame,
+    app: &App,
+    area: Rect,
+    kind: MetricKind,
+    lang: Lang,
+    spec: Option<TrendChartSpec>,
+    x_range: Option<TrendDateRange>,
+) {
+    if let (Some(mut spec), Some(x_range)) = (spec, x_range)
+        && render_metric_chart_image(frame, app, area, lang, &mut spec, x_range)
+    {
+        return;
+    }
+    render_metric_chart_text(frame, &app.analysis_records, area, kind, lang);
 }
 
-fn render_metric_chart(frame: &mut Frame, records: &[crate::record::SessionRecord], area: Rect, kind: MetricKind, lang: Lang) {
+fn render_metric_chart_text(frame: &mut Frame, records: &[crate::record::SessionRecord], area: Rect, kind: MetricKind, lang: Lang) {
     let title = match kind {
         MetricKind::NetWpm => Msg::TrendNetWpm.text(lang),
         MetricKind::Accuracy => Msg::TrendAccuracy.text(lang),
         MetricKind::Iki => Msg::TrendIki.text(lang),
     };
-    let mut groups = BTreeMap::<String, BTreeMap<String, Vec<f64>>>::new();
-    for record in records
-        .iter()
-        .filter(|record| !matches!(kind, MetricKind::Iki) || record.header.metrics_version != 0)
-    {
-        let date = DateTime::parse_from_rfc3339(&record.header.finished_at)
-            .map(|value| value.date_naive().to_string())
-            .unwrap_or_else(|_| "unknown".to_owned());
-        let series = record
-            .header
-            .bench_id
-            .as_deref()
-            .and_then(|id| id.split('/').nth(1))
-            .map(|part| match lang {
-                Lang::En => format!("bench-{part}"),
-                Lang::Ja => format!("ベンチ-{part}"),
-            })
-            .unwrap_or_else(|| mode_label(&record.header.mode, lang));
-        groups
-            .entry(series)
-            .or_default()
-            .entry(date)
-            .or_default()
-            .push(metric_value(kind, record));
-    }
-    let dates = groups
-        .values()
-        .flat_map(|days| days.keys().cloned())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    if dates.len() < 2 {
+    let Some(spec) = build_text_trend_data(records, kind, lang) else {
         let current = records
             .iter()
             .rev()
-            .find(|record| !matches!(kind, MetricKind::Iki) || record.header.metrics_version != 0)
+            .find(|record| kind != MetricKind::Iki || record.header.metrics_version != 0)
             .map(|record| format!("{}: {:.1}", Msg::CurrentValue.text(lang), metric_value(kind, record)))
             .unwrap_or_else(|| Msg::NoData.text(lang).to_owned());
         let text = format!("{}    {current}", Msg::TrendNeedsTwoDays.text(lang));
@@ -309,31 +380,39 @@ fn render_metric_chart(frame: &mut Frame, records: &[crate::record::SessionRecor
             area,
         );
         return;
-    }
+    };
+    let dates = spec
+        .series
+        .iter()
+        .flat_map(|series| series.points.iter().map(|(date, _)| date.clone()))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
     let date_indices = dates
         .iter()
         .enumerate()
         .map(|(index, date)| (date, index as f64))
         .collect::<BTreeMap<_, _>>();
-    let names = groups.keys().cloned().collect::<Vec<_>>();
-    let points = groups
-        .values()
-        .map(|days| {
-            days.iter()
-                .map(|(date, values)| (*date_indices.get(date).expect("date index"), median(values)))
+    let points = spec
+        .series
+        .iter()
+        .map(|series| {
+            series
+                .points
+                .iter()
+                .map(|(date, value)| (*date_indices.get(date).expect("date index"), *value))
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
-    let colors = [Color::Cyan, Color::Green, Color::Yellow, Color::Magenta, Color::Blue, Color::Red];
     let datasets = points
         .iter()
         .enumerate()
         .map(|(index, values)| {
             Dataset::default()
-                .name(names[index].clone())
+                .name(spec.series[index].name.clone())
                 .marker(symbols::Marker::Braille)
                 .graph_type(GraphType::Line)
-                .style(Style::default().fg(colors[index % colors.len()]))
+                .style(Style::default().fg(spec.series[index].color))
                 .data(values)
         })
         .collect::<Vec<_>>();
@@ -363,33 +442,111 @@ fn render_metric_chart(frame: &mut Frame, records: &[crate::record::SessionRecor
     frame.render_widget(chart, area);
 }
 
-fn metric_value(kind: MetricKind, record: &crate::record::SessionRecord) -> f64 {
-    match kind {
-        MetricKind::NetWpm => record.header.net_wpm,
-        MetricKind::Accuracy => record.header.accuracy * 100.0,
-        MetricKind::Iki => record.header.iki_median_ms,
-    }
+fn trend_forecasts(app: &App) -> Vec<TrendForecast> {
+    let Some(report) = &app.analysis_coach else {
+        return Vec::new();
+    };
+    report
+        .progress
+        .curves
+        .iter()
+        .filter(|curve| matches!(curve.target.as_str(), "en" | "ja"))
+        .filter_map(|curve| {
+            let trend = report.progress.trends.iter().find(|trend| trend.target == curve.target)?;
+            let last = trend.speed.last()?;
+            Some(TrendForecast {
+                target: curve.target.clone(),
+                start: TrendPoint {
+                    date: last.date,
+                    value: last.value,
+                },
+                end_date: last.date.checked_add_signed(ChronoDuration::days(i64::from(curve.forecast_days)))?,
+                forecast: curve.forecast,
+                band_lo: curve.band_lo,
+                band_hi: curve.band_hi,
+                forecast_days: curve.forecast_days,
+                color: if curve.target == "ja" { FORECAST_JA_COLOR } else { FORECAST_EN_COLOR },
+            })
+        })
+        .collect()
 }
 
-fn mode_label(mode: &str, lang: Lang) -> String {
-    if lang == Lang::En {
-        return mode.to_owned();
+fn render_metric_chart_image(frame: &mut Frame, app: &App, area: Rect, lang: Lang, spec: &mut TrendChartSpec, x_range: TrendDateRange) -> bool {
+    if area.width <= 8 || area.height <= 3 {
+        return false;
     }
-    match mode {
-        "random" => "ランダム",
-        "words" => "単語",
-        "romaji" => "ローマ字",
-        "sentence" => "短文",
-        "ngram" => "n-gram",
-        "bench" => "ベンチ",
-        "adaptive" => "適応",
-        "unlock" => "解放",
-        "rhythm" => "リズム",
-        "burst" => "バースト",
-        "endurance" => "持久",
-        other => other,
+    let title = match spec.kind {
+        MetricKind::NetWpm => Msg::TrendNetWpm.text(lang),
+        MetricKind::Accuracy => Msg::TrendAccuracy.text(lang),
+        MetricKind::Iki => Msg::TrendIki.text(lang),
+    };
+    let y_label_width = 8_u16.min(area.width.saturating_sub(1));
+    let plot_area = Rect::new(
+        area.x + y_label_width,
+        area.y + 2,
+        area.width - y_label_width,
+        area.height.saturating_sub(3),
+    );
+    if plot_area.width == 0 || plot_area.height == 0 {
+        return false;
     }
-    .to_owned()
+    spec.cells = plot_area.as_size();
+    let Some((min_y, max_y)) = spec.y_bounds() else {
+        return false;
+    };
+    let mut images = app.analysis_images.borrow_mut();
+    if images.prepare_chart_with_range(&app.graphics, spec, x_range).is_err() {
+        return false;
+    }
+    frame.render_widget(
+        Paragraph::new(title).style(Style::default().add_modifier(Modifier::BOLD)),
+        Rect::new(area.x, area.y, area.width, 1),
+    );
+    let mut legend = Vec::new();
+    for series in &spec.series {
+        legend.push(Span::styled("■ ", Style::default().fg(series.color)));
+        legend.push(Span::raw(format!("{}  ", series.name)));
+    }
+    for forecast in &spec.forecasts {
+        legend.push(Span::styled("■ ", Style::default().fg(forecast.color)));
+        legend.push(Span::raw(format!("{}  ", forecast_label(forecast, lang))));
+    }
+    frame.render_widget(Paragraph::new(Line::from(legend)), Rect::new(area.x, area.y + 1, area.width, 1));
+    frame.render_widget(
+        Paragraph::new(format!("{max_y:.1}")).alignment(Alignment::Right),
+        Rect::new(area.x, plot_area.y, y_label_width.saturating_sub(1), 1),
+    );
+    frame.render_widget(
+        Paragraph::new(format!("{min_y:.1}")).alignment(Alignment::Right),
+        Rect::new(
+            area.x,
+            plot_area.y + plot_area.height.saturating_sub(1),
+            y_label_width.saturating_sub(1),
+            1,
+        ),
+    );
+    let label_area = Rect::new(plot_area.x, area.y + area.height.saturating_sub(1), plot_area.width, 1);
+    frame.render_widget(Paragraph::new(x_range.start.to_string()), label_area);
+    frame.render_widget(Paragraph::new(Msg::TrendDay.text(lang)).alignment(Alignment::Center), label_area);
+    frame.render_widget(Paragraph::new(x_range.end.to_string()).alignment(Alignment::Right), label_area);
+    let Some(protocol) = images.chart_protocol_with_range(&app.graphics, spec, x_range) else {
+        return false;
+    };
+    frame.render_widget(Image::new(protocol), plot_area);
+    true
+}
+
+fn forecast_label(forecast: &TrendForecast, lang: Lang) -> String {
+    let language = match (forecast.target.as_str(), lang) {
+        ("ja", Lang::En) => "Japanese",
+        ("ja", Lang::Ja) => "日本語",
+        (_, Lang::En) => "English",
+        (_, Lang::Ja) => "英語",
+    };
+    match lang {
+        Lang::En => format!("Forecast ({language}, {} d)", forecast.forecast_days),
+        Lang::Ja => format!("予測（{language}・{} 日後）", forecast.forecast_days),
+    }
 }
 
 fn render_keyboard(frame: &mut Frame, app: &App, area: Rect) {

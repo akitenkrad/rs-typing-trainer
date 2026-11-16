@@ -44,3 +44,9 @@ Tiles are cached by their complete appearance and terminal geometry. Kitty trans
 With `display.prompt_style = "large"`, an available image protocol also draws each large prompt character as one transparent tile. `display.big_font` selects the bundled BIZ UD Gothic outlines, an integer-scaled Shinonome bitmap, or face 0 of a user TTF/OTF/TTC file. The tile keeps the existing character columns, styles, visibility, cursor, and marker rows; only the glyph block becomes an image. Its height is the number of terminal rows needed for a square fullwidth box, so a Dot16 glyph at 9×20 pixels per cell uses four rows instead of the text renderer's eight.
 
 Missing user-font glyphs fall back character by character to BIZ UD Gothic, then Shinonome, then the existing text fallback. Tiles share the keycap protocol cache policy: a protocol or cell-pixel change clears all entries, and reaching the fixed limit clears the cache. The visible window is prepared before placement, so an ordinary keystroke creates only tiles whose colour changed. Without an image protocol, large prompts retain the previous Shinonome block rendering exactly.
+
+## Analysis badges and charts
+
+When an image protocol is available, the Coach tab draws each S-to-G grade as a rounded, dark-faced badge whose frame and large glyph use the grade colour and `display.big_font`. The Trend tab draws the net-WPM, accuracy and IKI plot areas as antialiased pixel images with calendar-proportional spacing, while titles, legends and axis labels remain terminal text. The net-WPM plot also shows a language-coloured 28-day forecast as a dashed line and a translucent fan from the latest daily speed to the predicted interval.
+
+Badge and chart images are cached by their complete visible input, terminal-cell geometry and protocol. Without an image protocol, the previous block-letter badges and braille `Chart` widgets remain unchanged; the forecast fan is available only in the image chart.

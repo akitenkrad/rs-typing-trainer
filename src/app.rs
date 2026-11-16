@@ -38,6 +38,7 @@ use crate::practice::session_variants::{BurstSeries, EnduranceComparison};
 use crate::practice::unlock::{UnlockState, apply_result, initial_keys, mode_config, unlock_sequence};
 use crate::record::SessionRecord;
 use crate::record::db::{self, SessionSummary};
+use crate::ui::analysis_image::AnalysisImageCache;
 use crate::ui::bigtext_image::BigTextImageState;
 use crate::ui::keyboard_image::KeyboardImageCache;
 use unicode_segmentation::UnicodeSegmentation;
@@ -128,6 +129,7 @@ pub struct App {
     pub graphics: GraphicsDetection,
     pub(crate) keyboard_images: RefCell<KeyboardImageCache>,
     pub(crate) bigtext_images: RefCell<BigTextImageState>,
+    pub(crate) analysis_images: RefCell<AnalysisImageCache>,
     pub game: Option<GameState>,
     pub last_result: Option<GameResult>,
     pub legacy_wpm: Option<f64>,
@@ -271,6 +273,7 @@ impl App {
             graphics: GraphicsDetection::default(),
             keyboard_images: RefCell::new(KeyboardImageCache::new()),
             bigtext_images: RefCell::new(BigTextImageState::new()),
+            analysis_images: RefCell::new(AnalysisImageCache::new()),
             game: None,
             last_result: None,
             legacy_wpm: None,
@@ -532,6 +535,7 @@ impl App {
     pub fn set_graphics_detection(&mut self, graphics: GraphicsDetection) {
         self.graphics = graphics;
         self.keyboard_images.get_mut().clear();
+        self.analysis_images.get_mut().clear();
     }
 
     /// Refresh cell pixels from a resize ioctl without querying terminal capabilities again.
@@ -540,6 +544,7 @@ impl App {
         if self.graphics.cell_pixels != next {
             self.graphics.cell_pixels = next;
             self.keyboard_images.get_mut().clear();
+            self.analysis_images.get_mut().clear();
         }
     }
 
