@@ -19,6 +19,7 @@ pub mod playing;
 pub mod prompt;
 pub mod replay;
 pub mod result;
+pub mod result_image;
 pub mod settings;
 pub mod theme;
 pub mod title;

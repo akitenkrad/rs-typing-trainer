@@ -44,6 +44,7 @@ use crate::record::db::{self, SessionSummary};
 use crate::ui::analysis_image::AnalysisImageCache;
 use crate::ui::bigtext_image::BigTextImageState;
 use crate::ui::keyboard_image::KeyboardImageCache;
+use crate::ui::result_image::ResultImageCache;
 use unicode_segmentation::UnicodeSegmentation;
 
 /// Slide-in / slide-out duration for word transitions. During these phases
@@ -77,6 +78,20 @@ pub enum ResultOrigin {
     JustPlayed,
     /// Loaded from history — `[SPACE/ENTER]` returns to the history list.
     History,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ResultComparison {
+    pub previous_wpm_delta: Option<f64>,
+    pub previous_cps_delta: Option<f64>,
+    pub previous_accuracy_delta: Option<f64>,
+    pub best_wpm: Option<f64>,
+    pub best_cps: Option<f64>,
+    pub best_accuracy: Option<f64>,
+    pub best_wpm_delta: Option<f64>,
+    pub best_cps_delta: Option<f64>,
+    pub best_accuracy_delta: Option<f64>,
+    pub recent_wpm: Vec<f64>,
 }
 
 /// Sort order for the history screen.
@@ -175,6 +190,8 @@ impl HistorySort {
 #[derive(Clone)]
 struct HistoryReturnState {
     result: Option<GameResult>,
+    result_record: Option<SessionRecord>,
+    result_comparison: ResultComparison,
     legacy_wpm: Option<f64>,
     last_save_id: Option<i64>,
     last_save_error: Option<String>,
@@ -188,8 +205,11 @@ pub struct App {
     pub(crate) keyboard_images: RefCell<KeyboardImageCache>,
     pub(crate) bigtext_images: RefCell<BigTextImageState>,
     pub(crate) analysis_images: RefCell<AnalysisImageCache>,
+    pub(crate) result_images: RefCell<ResultImageCache>,
     pub game: Option<GameState>,
     pub last_result: Option<GameResult>,
+    pub result_record: Option<SessionRecord>,
+    pub result_comparison: ResultComparison,
     pub legacy_wpm: Option<f64>,
     pub result_origin: ResultOrigin,
     pub last_save_id: Option<i64>,
@@ -350,8 +370,11 @@ impl App {
             keyboard_images: RefCell::new(KeyboardImageCache::new()),
             bigtext_images: RefCell::new(BigTextImageState::new()),
             analysis_images: RefCell::new(AnalysisImageCache::new()),
+            result_images: RefCell::new(ResultImageCache::new()),
             game: None,
             last_result: None,
+            result_record: None,
+            result_comparison: ResultComparison::default(),
             legacy_wpm: None,
             result_origin: ResultOrigin::JustPlayed,
             last_save_id: None,
@@ -633,6 +656,7 @@ impl App {
         self.graphics = graphics;
         self.keyboard_images.get_mut().clear();
         self.analysis_images.get_mut().clear();
+        self.result_images.get_mut().clear();
     }
 
     /// Refresh cell pixels from a resize ioctl without querying terminal capabilities again.
@@ -642,6 +666,7 @@ impl App {
             self.graphics.cell_pixels = next;
             self.keyboard_images.get_mut().clear();
             self.analysis_images.get_mut().clear();
+            self.result_images.get_mut().clear();
         }
     }
 
@@ -1900,6 +1925,8 @@ impl App {
             self.history_origin = if self.screen == Screen::Result && self.result_origin == ResultOrigin::JustPlayed {
                 self.history_return_state = Some(HistoryReturnState {
                     result: self.last_result.clone(),
+                    result_record: self.result_record.clone(),
+                    result_comparison: self.result_comparison.clone(),
                     legacy_wpm: self.legacy_wpm,
                     last_save_id: self.last_save_id,
                     last_save_error: self.last_save_error.clone(),
@@ -1941,6 +1968,8 @@ impl App {
             HistoryOrigin::Result => {
                 if let Some(state) = self.history_return_state.take() {
                     self.last_result = state.result;
+                    self.result_record = state.result_record;
+                    self.result_comparison = state.result_comparison;
                     self.legacy_wpm = state.legacy_wpm;
                     self.last_save_id = state.last_save_id;
                     self.last_save_error = state.last_save_error;
@@ -2070,25 +2099,13 @@ impl App {
         let path = self.db_path();
         match (db::load_result(&path, entry.id, &self.config), db::load_record(&path, entry.id)) {
             (Ok(Some(result)), Ok(Some(record))) => {
-                let matching = self
-                    .history_sessions
-                    .iter()
-                    .filter(|candidate| same_history_condition(candidate, &entry))
-                    .collect::<Vec<_>>();
-                let personal_best_wpm = matching
-                    .iter()
-                    .filter(|candidate| candidate.score_eligible)
-                    .map(|candidate| candidate.wpm)
-                    .max_by(f64::total_cmp);
-                let previous_wpm_delta = matching
-                    .iter()
-                    .copied()
-                    .filter(|candidate| {
-                        candidate.finished_at < entry.finished_at || candidate.finished_at == entry.finished_at && candidate.id < entry.id
-                    })
-                    .max_by(|left, right| left.finished_at.cmp(&right.finished_at).then(left.id.cmp(&right.id)))
-                    .map(|previous| entry.wpm - previous.wpm);
+                let records = db::load_records_filtered(&path, None, None).unwrap_or_else(|_| vec![record.clone()]);
+                let result_comparison = build_result_comparison(&records, &record);
+                let personal_best_wpm = result_comparison.best_wpm;
+                let previous_wpm_delta = result_comparison.previous_wpm_delta;
                 self.last_result = Some(result);
+                self.result_record = Some(record.clone());
+                self.result_comparison = result_comparison;
                 self.legacy_wpm = db::legacy_wpm(&path, entry.id).ok().flatten();
                 self.result_origin = ResultOrigin::History;
                 self.last_save_id = Some(entry.id);
@@ -2734,6 +2751,9 @@ impl App {
         }
         self.refresh_result_coaching(&record);
         self.refresh_recommendations();
+        let result_records = db::load_records_filtered(&db_path, None, None).unwrap_or_else(|_| vec![record.clone()]);
+        self.result_comparison = build_result_comparison(&result_records, &record);
+        self.result_record = Some(record);
         self.last_result = Some(result);
         self.legacy_wpm = None;
         self.result_origin = ResultOrigin::JustPlayed;
@@ -3155,12 +3175,86 @@ fn bench_identity(summary: &SessionSummary) -> Option<(String, String, String)> 
     Some((series.to_owned(), form.to_owned(), part.to_owned()))
 }
 
-fn same_history_condition(left: &SessionSummary, right: &SessionSummary) -> bool {
-    match (bench_identity(left), bench_identity(right)) {
-        (Some((left_series, _, left_part)), Some((right_series, _, right_part))) => left_series == right_series && left_part == right_part,
-        (None, None) => left.mode == right.mode,
+pub fn build_result_comparison(records: &[SessionRecord], current: &SessionRecord) -> ResultComparison {
+    let mut matching = records
+        .iter()
+        .filter(|candidate| same_record_condition(candidate, current))
+        .filter(|candidate| record_order(candidate) <= record_order(current))
+        .collect::<Vec<_>>();
+    if !matching.iter().any(|candidate| same_record_identity(candidate, current)) {
+        matching.push(current);
+    }
+    matching.sort_by_key(|record| record_order(record));
+
+    let previous = matching
+        .iter()
+        .copied()
+        .rev()
+        .find(|candidate| record_order(candidate) < record_order(current));
+    let eligible = matching
+        .iter()
+        .copied()
+        .filter(|record| record_score_eligible(record))
+        .collect::<Vec<_>>();
+    let prior_eligible = eligible
+        .iter()
+        .copied()
+        .filter(|record| record_order(record) < record_order(current))
+        .collect::<Vec<_>>();
+    let best_wpm = eligible.iter().map(|record| record.header.net_wpm).max_by(f64::total_cmp);
+    let best_cps = eligible.iter().map(|record| record.header.cps).max_by(f64::total_cmp);
+    let best_accuracy = eligible.iter().map(|record| record.header.accuracy).max_by(f64::total_cmp);
+    let prior_best_wpm = prior_eligible.iter().map(|record| record.header.net_wpm).max_by(f64::total_cmp);
+    let prior_best_cps = prior_eligible.iter().map(|record| record.header.cps).max_by(f64::total_cmp);
+    let prior_best_accuracy = prior_eligible.iter().map(|record| record.header.accuracy).max_by(f64::total_cmp);
+    let recent_start = matching.len().saturating_sub(10);
+    ResultComparison {
+        previous_wpm_delta: previous.map(|record| current.header.net_wpm - record.header.net_wpm),
+        previous_cps_delta: previous.map(|record| current.header.cps - record.header.cps),
+        previous_accuracy_delta: previous.map(|record| current.header.accuracy - record.header.accuracy),
+        best_wpm,
+        best_cps,
+        best_accuracy,
+        best_wpm_delta: prior_best_wpm.map(|best| current.header.net_wpm - best),
+        best_cps_delta: prior_best_cps.map(|best| current.header.cps - best),
+        best_accuracy_delta: prior_best_accuracy.map(|best| current.header.accuracy - best),
+        recent_wpm: matching[recent_start..].iter().map(|record| record.header.net_wpm).collect(),
+    }
+}
+
+fn same_record_condition(left: &SessionRecord, right: &SessionRecord) -> bool {
+    match (bench_record_identity(left), bench_record_identity(right)) {
+        (Some((left_series, left_part)), Some((right_series, right_part))) => left_series == right_series && left_part == right_part,
+        (None, None) => left.header.mode == right.header.mode,
         _ => false,
     }
+}
+
+fn bench_record_identity(record: &SessionRecord) -> Option<(&str, &str)> {
+    let mut fields = record.header.bench_id.as_deref()?.split('/');
+    let series = fields.next()?;
+    let part = fields.next()?;
+    let _form = fields.next()?;
+    (fields.next().is_none() && !series.is_empty() && !part.is_empty()).then_some((series, part))
+}
+
+fn same_record_identity(left: &SessionRecord, right: &SessionRecord) -> bool {
+    match (left.header.id, right.header.id) {
+        (Some(left), Some(right)) => left == right,
+        _ => left.header.finished_at == right.header.finished_at && left.header.mode == right.header.mode,
+    }
+}
+
+fn record_order(record: &SessionRecord) -> (chrono::DateTime<chrono::FixedOffset>, i64) {
+    let timestamp = chrono::DateTime::parse_from_rfc3339(&record.header.finished_at).unwrap_or_else(|_| chrono::DateTime::UNIX_EPOCH.fixed_offset());
+    (timestamp, record.header.id.unwrap_or(i64::MAX))
+}
+
+fn record_score_eligible(record: &SessionRecord) -> bool {
+    serde_json::from_str::<serde_json::Value>(&record.header.mode_params)
+        .ok()
+        .and_then(|value| value.get("score_eligible").and_then(serde_json::Value::as_bool))
+        .unwrap_or(true)
 }
 
 pub fn bench_part(summary: &SessionSummary) -> Option<String> {

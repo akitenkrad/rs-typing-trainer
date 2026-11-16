@@ -1,16 +1,59 @@
 //! Result screen — big WPM/CPS/Accuracy summary, mistype heatmap, reaction histogram.
 
+use std::collections::HashMap;
+
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect, Size};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui_image::Image;
 
 use crate::app::{App, ResultOrigin};
 use crate::bench::BenchPart;
 use crate::i18n::{Lang, Msg};
 use crate::metrics::stats::GameResult;
+use crate::record::SessionRecord;
+use crate::ui::keyboard::{KeyboardState, KeyboardStyle, KeyboardView, keycap_tile_placements};
+use crate::ui::result_image::{ItemSpeedPoint, MetricCardSpec, MistypeKeyboardSpec, ReactionHistogramSpec, ResultImageColors, SpeedChartSpec};
 use crate::ui::{left_inset, theme::Theme};
+
+pub fn item_speed_points(record: &SessionRecord) -> Vec<ItemSpeedPoint> {
+    if record.header.metrics_version == 0 {
+        return Vec::new();
+    }
+    record
+        .log
+        .items
+        .iter()
+        .filter(|item| item.outcome == crate::engine::session::ItemOutcome::Completed)
+        .filter_map(|item| {
+            let duration_us = item.done_us?.saturating_sub(item.shown_us);
+            if duration_us == 0 {
+                return None;
+            }
+            let keys = record
+                .log
+                .keystrokes
+                .iter()
+                .filter(|key| key.item_idx == item.idx && key.kind == crate::engine::session::KeystrokeKind::Char);
+            let mut correct = 0_u32;
+            let mut mistypes = 0_u32;
+            for key in keys {
+                if key.correct {
+                    correct += 1;
+                } else {
+                    mistypes += 1;
+                }
+            }
+            let minutes = duration_us as f64 / 60_000_000.0;
+            Some(ItemSpeedPoint {
+                wpm: f64::from(correct) / 5.0 / minutes,
+                mistypes: Some(mistypes),
+            })
+        })
+        .collect()
+}
 
 pub fn render(frame: &mut Frame, app: &App) {
     let theme = Theme::from_name(&app.config.ui.theme);
@@ -49,39 +92,653 @@ pub fn render(frame: &mut Frame, app: &App) {
         inner
     };
 
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(9), // big WPM / CPS / Accuracy summary
-            Constraint::Length(1),
-            Constraint::Length(6), // detailed secondary stats
-            Constraint::Length(1),
-            Constraint::Length(11), // heatmap
-            Constraint::Length(1),
-            Constraint::Min(0),    // reaction histogram + save info
-            Constraint::Length(2), // hint
-        ])
-        .split(content);
-
     let Some(result) = app.last_result.as_ref() else {
         let none = Paragraph::new(Msg::NoResultYet.text(lang));
-        frame.render_widget(none, left_inset(chunks[0]));
+        frame.render_widget(none, left_inset(content));
         return;
     };
 
-    render_big_summary(frame, result, app.legacy_wpm, &theme, chunks[0], lang);
-    render_secondary_box(frame, app, result, &theme, chunks[2], lang);
-    if app.result_origin == ResultOrigin::JustPlayed && !app.result_insights.is_empty() && area.height < 34 {
-        render_result_insights(frame, app, &theme, left_inset(chunks[4]));
-    } else if app.config.mode.kind == crate::config::ModeKind::Adaptive && app.result_origin == ResultOrigin::JustPlayed {
-        render_adaptive_result(frame, app, &theme, left_inset(chunks[4]), lang);
-    } else {
-        render_mistype_heatmap(frame, result, &theme, left_inset(chunks[4]), lang);
+    if content.width >= 120 {
+        if content.height >= 37 && render_image_result(frame, app, result, &theme, content, lang) {
+            return;
+        }
+        if content.height >= 29 && render_compact_image_result(frame, app, result, &theme, content, lang) {
+            return;
+        }
     }
-    render_reaction_and_save(frame, app, result, &theme, left_inset(chunks[6]));
+    render_text_result(frame, app, result, &theme, content, lang);
+}
+
+fn render_compact_image_result(frame: &mut Frame, app: &App, result: &GameResult, theme: &Theme, area: Rect, lang: Lang) -> bool {
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(8),
+            Constraint::Length(4),
+            Constraint::Length(2),
+            Constraint::Min(12),
+            Constraint::Length(1),
+            Constraint::Length(2),
+        ])
+        .split(area);
+    let card_areas = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Ratio(1, 3), Constraint::Ratio(1, 3), Constraint::Ratio(1, 3)])
+        .split(rows[0]);
+    let bottom = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Ratio(3, 5), Constraint::Ratio(2, 5)])
+        .split(rows[3]);
+    let colors = result_image_colors(theme);
+    let comparison = &app.result_comparison;
+    let cards = [
+        MetricCardSpec {
+            label: Msg::Wpm.text(lang).into(),
+            value: format!("{:.1}", result.wpm),
+            previous_delta: comparison.previous_wpm_delta,
+            best_delta: comparison.best_wpm_delta,
+            recent: comparison.recent_wpm.clone(),
+            lang,
+            delta_suffix: String::new(),
+            cells: card_areas[0].as_size(),
+            colors,
+        },
+        MetricCardSpec {
+            label: Msg::Cps.text(lang).into(),
+            value: format!("{:.2}", result.cps),
+            previous_delta: comparison.previous_cps_delta,
+            best_delta: comparison.best_cps_delta,
+            recent: Vec::new(),
+            lang,
+            delta_suffix: String::new(),
+            cells: card_areas[1].as_size(),
+            colors,
+        },
+        MetricCardSpec {
+            label: Msg::Accuracy.text(lang).into(),
+            value: format!("{:.1}%", result.accuracy * 100.0),
+            previous_delta: comparison.previous_accuracy_delta.map(|value| value * 100.0),
+            best_delta: comparison.best_accuracy_delta.map(|value| value * 100.0),
+            recent: Vec::new(),
+            lang,
+            delta_suffix: "pt".to_owned(),
+            cells: card_areas[2].as_size(),
+            colors,
+        },
+    ];
+    let keyboard_inner = Block::default().borders(Borders::ALL).inner(bottom[0]);
+    let keyboard = mistype_keyboard_spec(app, result, theme, keyboard_inner.as_size());
+    let font = app.bigtext_images.borrow_mut().resolved_font(&app.config.display.big_font, &app.home_dir);
+    {
+        let mut images = app.result_images.borrow_mut();
+        if cards.iter().any(|spec| images.prepare_metric_card(&app.graphics, &font, spec).is_err())
+            || keyboard
+                .as_ref()
+                .is_some_and(|(spec, _, _)| images.prepare_mistype_keyboard(&app.graphics, spec).is_err())
+        {
+            return false;
+        }
+    }
+    for (spec, card_area) in cards.iter().zip(card_areas.iter().copied()) {
+        let mut images = app.result_images.borrow_mut();
+        let Some(protocol) = images.metric_card_protocol(&app.graphics, &font, spec) else {
+            return false;
+        };
+        frame.render_widget(Image::new(protocol), card_area);
+    }
+    render_secondary_box(frame, app, result, theme, rows[1], lang);
+    let points = app.result_record.as_ref().map_or_else(Vec::new, item_speed_points);
+    let speed = if points.len() < 2 {
+        match lang {
+            Lang::En => "Item speed: not enough data".to_owned(),
+            Lang::Ja => "打鍵速度: データが足りません".to_owned(),
+        }
+    } else {
+        let values = points.iter().map(|point| format!("{:.0}", point.wpm)).collect::<Vec<_>>().join(" · ");
+        match lang {
+            Lang::En => format!("Item WPM: {values}"),
+            Lang::Ja => format!("項目 WPM: {values}"),
+        }
+    };
+    let reaction = format!(
+        "{} p50 {:.2}s  p90 {:.2}s",
+        Msg::ReactionTimeDistribution.text(lang).trim_end_matches(':'),
+        result.p50_reaction.as_secs_f64(),
+        result.p90_reaction.as_secs_f64()
+    );
+    frame.render_widget(Paragraph::new(vec![Line::from(speed), Line::from(reaction)]), left_inset(rows[2]));
+    render_image_keyboard(frame, app, result, theme, bottom[0], keyboard, lang);
+    render_observations(frame, app, theme, bottom[1], lang);
+    frame.render_widget(Paragraph::new(save_line(app, result, theme)), left_inset(rows[4]));
+    render_result_hint(frame, app, theme, rows[5], lang);
+    true
+}
+
+fn render_image_result(frame: &mut Frame, app: &App, result: &GameResult, theme: &Theme, area: Rect, lang: Lang) -> bool {
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(8),
+            Constraint::Length(4),
+            Constraint::Ratio(5, 9),
+            Constraint::Ratio(4, 9),
+            Constraint::Length(1),
+            Constraint::Length(2),
+        ])
+        .split(area);
+    let card_areas = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Ratio(1, 3), Constraint::Ratio(1, 3), Constraint::Ratio(1, 3)])
+        .split(rows[0]);
+    let middle = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Ratio(3, 5), Constraint::Ratio(2, 5)])
+        .split(rows[2]);
+    let bottom = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Ratio(3, 5), Constraint::Ratio(2, 5)])
+        .split(rows[3]);
+    let colors = result_image_colors(theme);
+    let comparison = &app.result_comparison;
+    let cards = [
+        MetricCardSpec {
+            label: Msg::Wpm.text(lang).into(),
+            value: format!("{:.1}", result.wpm),
+            previous_delta: comparison.previous_wpm_delta,
+            best_delta: comparison.best_wpm_delta,
+            recent: comparison.recent_wpm.clone(),
+            lang,
+            delta_suffix: String::new(),
+            cells: card_areas[0].as_size(),
+            colors,
+        },
+        MetricCardSpec {
+            label: Msg::Cps.text(lang).into(),
+            value: format!("{:.2}", result.cps),
+            previous_delta: comparison.previous_cps_delta,
+            best_delta: comparison.best_cps_delta,
+            recent: Vec::new(),
+            lang,
+            delta_suffix: String::new(),
+            cells: card_areas[1].as_size(),
+            colors,
+        },
+        MetricCardSpec {
+            label: Msg::Accuracy.text(lang).into(),
+            value: format!("{:.1}%", result.accuracy * 100.0),
+            previous_delta: comparison.previous_accuracy_delta.map(|value| value * 100.0),
+            best_delta: comparison.best_accuracy_delta.map(|value| value * 100.0),
+            recent: Vec::new(),
+            lang,
+            delta_suffix: "pt".to_owned(),
+            cells: card_areas[2].as_size(),
+            colors,
+        },
+    ];
+    let speed_inner = Block::default().borders(Borders::ALL).inner(middle[0]);
+    let points = app.result_record.as_ref().map_or_else(Vec::new, item_speed_points);
+    let speed = SpeedChartSpec {
+        points,
+        lang,
+        cells: speed_inner.as_size(),
+        colors,
+    };
+    let reaction_inner = Block::default().borders(Borders::ALL).inner(middle[1]);
+    let reaction = ReactionHistogramSpec {
+        reaction_seconds: result.metrics.reaction_times.iter().map(|duration| duration.as_secs_f64()).collect(),
+        p50_seconds: result.p50_reaction.as_secs_f64(),
+        p90_seconds: result.p90_reaction.as_secs_f64(),
+        cells: reaction_inner.as_size(),
+        colors,
+    };
+    let keyboard_inner = Block::default().borders(Borders::ALL).inner(bottom[0]);
+    let keyboard = mistype_keyboard_spec(app, result, theme, keyboard_inner.as_size());
+    let font = app.bigtext_images.borrow_mut().resolved_font(&app.config.display.big_font, &app.home_dir);
+    {
+        let mut images = app.result_images.borrow_mut();
+        if cards.iter().any(|spec| images.prepare_metric_card(&app.graphics, &font, spec).is_err())
+            || speed.points.len() >= 2 && images.prepare_speed_chart(&app.graphics, &font, &speed).is_err()
+            || images.prepare_reaction_histogram(&app.graphics, &font, &reaction).is_err()
+            || keyboard
+                .as_ref()
+                .is_some_and(|(spec, _, _)| images.prepare_mistype_keyboard(&app.graphics, spec).is_err())
+        {
+            return false;
+        }
+    }
+
+    for (spec, card_area) in cards.iter().zip(card_areas.iter().copied()) {
+        let mut images = app.result_images.borrow_mut();
+        let Some(protocol) = images.metric_card_protocol(&app.graphics, &font, spec) else {
+            return false;
+        };
+        frame.render_widget(Image::new(protocol), card_area);
+    }
+    render_secondary_box(frame, app, result, theme, rows[1], lang);
+
+    let speed_block = Block::default()
+        .borders(Borders::ALL)
+        .title(match lang {
+            Lang::En => " Keystroke speed by item ",
+            Lang::Ja => " 打鍵速度の推移 ",
+        })
+        .style(Style::default().fg(theme.muted));
+    frame.render_widget(speed_block, middle[0]);
+    if speed.points.len() < 2 {
+        frame.render_widget(
+            Paragraph::new(match lang {
+                Lang::En => "Not enough data",
+                Lang::Ja => "データが足りません",
+            })
+            .alignment(Alignment::Center),
+            speed_inner,
+        );
+    } else {
+        let mut images = app.result_images.borrow_mut();
+        let Some(protocol) = images.speed_chart_protocol(&app.graphics, &font, &speed) else {
+            return false;
+        };
+        frame.render_widget(Image::new(protocol), speed_inner);
+    }
+
+    let reaction_block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" {} ", Msg::ReactionTimeDistribution.text(lang).trim_end_matches(':')))
+        .style(Style::default().fg(theme.muted));
+    frame.render_widget(reaction_block, middle[1]);
+    {
+        let mut images = app.result_images.borrow_mut();
+        let Some(protocol) = images.reaction_histogram_protocol(&app.graphics, &font, &reaction) else {
+            return false;
+        };
+        frame.render_widget(Image::new(protocol), reaction_inner);
+    }
+
+    render_image_keyboard(frame, app, result, theme, bottom[0], keyboard, lang);
+    render_observations(frame, app, theme, bottom[1], lang);
+    frame.render_widget(Paragraph::new(save_line(app, result, theme)), left_inset(rows[4]));
+    render_result_hint(frame, app, theme, rows[5], lang);
+    true
+}
+
+fn result_image_colors(theme: &Theme) -> ResultImageColors {
+    ResultImageColors {
+        foreground: theme.fg,
+        muted: theme.muted,
+        correct: theme.correct,
+        mistype: theme.mistype,
+        accent: theme.accent,
+        warning: theme.warning,
+        panel: theme.bg_panel,
+    }
+}
+
+fn mistype_keyboard_spec(app: &App, result: &GameResult, theme: &Theme, cells: Size) -> Option<(MistypeKeyboardSpec, u32, u32)> {
+    if result.metrics.mistypes_total == 0 {
+        return None;
+    }
+    let mut counts = HashMap::<String, u32>::new();
+    let mut other = 0_u32;
+    let layout = app.practice_layout();
+    for (expected, count) in &result.metrics.mistypes_by_char {
+        let mut characters = expected.chars();
+        let Some(character) = characters.next().filter(|_| characters.next().is_none()) else {
+            other = other.saturating_add(*count);
+            continue;
+        };
+        if let Some(stroke) = layout.stroke_for(character) {
+            *counts.entry(stroke.code).or_default() += *count;
+        } else {
+            other = other.saturating_add(*count);
+        }
+    }
+    let maximum = counts.values().copied().max().unwrap_or(0);
+    let geometry = crate::layout::geometry::geometry(&app.config.keyboard.geometry).or_else(|| crate::layout::geometry::geometry("ansi"))?;
+    let state = KeyboardState {
+        heatmap: counts
+            .iter()
+            .map(|(code, count)| (code.clone(), f64::from(*count) / f64::from(maximum.max(1))))
+            .collect(),
+        ..KeyboardState::default()
+    };
+    let mut placements = keycap_tile_placements(
+        &geometry,
+        layout,
+        &state,
+        KeyboardView {
+            show: "full",
+            style: "keycap",
+            finger_guide: false,
+        },
+        true,
+    );
+    let board_width = KeyboardStyle::Keycap.width();
+    let board_height = 10_u16;
+    let offset_x = cells.width.saturating_sub(board_width) / 2;
+    let offset_y = cells.height.saturating_sub(board_height) / 2;
+    let mut ranked = counts.iter().collect::<Vec<_>>();
+    ranked.sort_by(|(left_code, left), (right_code, right)| right.cmp(left).then(left_code.cmp(right_code)));
+    let top = ranked
+        .into_iter()
+        .take(3)
+        .map(|(code, count)| (code.as_str(), *count))
+        .collect::<HashMap<_, _>>();
+    let mistype = crate::ui::image_cache::color_rgb(theme.mistype, [241, 76, 76]);
+    for (placement, key) in placements.iter_mut().zip(geometry.rows.iter().flatten()) {
+        placement.x = placement.x.saturating_add(offset_x);
+        placement.y = placement.y.saturating_add(offset_y);
+        if let Some(count) = counts.get(key.code) {
+            let ratio = f64::from(*count) / f64::from(maximum.max(1));
+            placement.spec.face_color = Color::Rgb(
+                (30.0 + f64::from(mistype[0]) * ratio * 0.8) as u8,
+                (12.0 + f64::from(mistype[1]) * ratio * 0.35) as u8,
+                (12.0 + f64::from(mistype[2]) * ratio * 0.35) as u8,
+            );
+            if let Some(count) = top.get(key.code) {
+                placement.spec.label = format!("{} {count}", placement.spec.label);
+            }
+        }
+    }
+    Some((MistypeKeyboardSpec { placements, cells }, other, maximum))
+}
+
+fn render_image_keyboard(
+    frame: &mut Frame,
+    app: &App,
+    result: &GameResult,
+    theme: &Theme,
+    area: Rect,
+    keyboard: Option<(MistypeKeyboardSpec, u32, u32)>,
+    lang: Lang,
+) {
+    let (other, maximum) = keyboard.as_ref().map_or((0, 0), |(_, other, maximum)| (*other, *maximum));
+    let other_label = if other > 0 {
+        match lang {
+            Lang::En => format!("  other {other}"),
+            Lang::Ja => format!("  ほか {other} 件"),
+        }
+    } else {
+        String::new()
+    };
+    let title = match lang {
+        Lang::En => format!(" Missed keys (expected)  0 ░▒▓ {maximum}{other_label} "),
+        Lang::Ja => format!(" 誤打したキー（打つべきキー）  0 ░▒▓ {maximum}{other_label} "),
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .style(Style::default().fg(theme.muted));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let Some((spec, _, _)) = keyboard else {
+        frame.render_widget(
+            Paragraph::new(Msg::NoMistypes.text(lang))
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(theme.correct)),
+            inner,
+        );
+        return;
+    };
+    let mut images = app.result_images.borrow_mut();
+    if let Some(protocol) = images.mistype_keyboard_protocol(&app.graphics, &spec) {
+        frame.render_widget(Image::new(protocol), inner);
+    } else {
+        render_mistype_heatmap(frame, result, theme, left_inset(inner), lang);
+    }
+}
+
+fn render_observations(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, lang: Lang) {
+    let title = match lang {
+        Lang::En => " This session's observation ",
+        Lang::Ja => " 今回の気づき ",
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .style(Style::default().fg(theme.warning));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if let Some(comparison) = app.bench_comparison {
+        let previous = comparison
+            .previous_wpm_delta
+            .map_or_else(|| Msg::InitialResult.text(lang).to_owned(), |value| format!("{value:+.1} WPM"));
+        let recent = comparison
+            .recent_three_wpm_delta
+            .map_or_else(|| Msg::InitialResult.text(lang).to_owned(), |value| format!("{value:+.1} WPM"));
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::from(format!("{}: {previous}", Msg::PreviousDelta.text(lang))),
+                Line::from(format!("{}: {recent}", Msg::RecentThreeDelta.text(lang))),
+            ]),
+            left_inset(inner),
+        );
+        return;
+    }
+    let notices = result_notice_lines(app, theme, lang);
+    if !notices.is_empty() {
+        let mut lines = notices;
+        let limit = if app.config.display.feedback == "detailed" { 3 } else { 1 };
+        lines.extend(app.result_insights.iter().take(limit).cloned().map(Line::from));
+        frame.render_widget(Paragraph::new(lines), left_inset(inner));
+        return;
+    }
+    if app.config.mode.kind == crate::config::ModeKind::Adaptive && app.result_origin == ResultOrigin::JustPlayed {
+        render_adaptive_result(frame, app, theme, left_inset(inner), lang);
+    } else if app.result_insights.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Msg::NoData.text(lang)).style(Style::default().fg(theme.muted)),
+            left_inset(inner),
+        );
+    } else {
+        let limit = if app.config.display.feedback == "detailed" { 3 } else { 1 };
+        frame.render_widget(
+            Paragraph::new(app.result_insights.iter().take(limit).cloned().map(Line::from).collect::<Vec<_>>()),
+            left_inset(inner),
+        );
+    }
+}
+
+fn result_notice_lines(app: &App, theme: &Theme, lang: Lang) -> Vec<Line<'static>> {
+    if app.result_origin != ResultOrigin::JustPlayed {
+        return Vec::new();
+    }
+    let mut lines = Vec::new();
+    if app.gate_failed {
+        lines.push(Line::from(Span::styled(
+            match lang {
+                Lang::En => "Gate not met: this session does not count toward personal bests",
+                Lang::Ja => "関門未達: 自己ベストに数えません",
+            },
+            Style::default().fg(theme.warning).add_modifier(Modifier::BOLD),
+        )));
+    }
+    if let Some(target) = app.next_pacer_target_wpm {
+        lines.push(Line::from(match lang {
+            Lang::En => format!("Next target: {target:.0} WPM"),
+            Lang::Ja => format!("次回の目標: {target:.0} WPM"),
+        }));
+    }
+    if let Some(key) = app.new_unlocked_key {
+        lines.push(Line::from(Span::styled(
+            match lang {
+                Lang::En => format!("New key: {key}"),
+                Lang::Ja => format!("新しいキー: {key}"),
+            },
+            Style::default().fg(theme.correct).add_modifier(Modifier::BOLD),
+        )));
+    }
+    if app.config.mode.kind == crate::config::ModeKind::Rhythm
+        && let Some(deviation) = app.rhythm_deviation_ms
+    {
+        lines.push(Line::from(match lang {
+            Lang::En => format!("Median beat deviation: {deviation:.1} ms"),
+            Lang::Ja => format!("拍からのずれの中央値: {deviation:.1} ms"),
+        }));
+    }
+    if app.config.mode.kind == crate::config::ModeKind::Burst {
+        lines.push(Line::from(match lang {
+            Lang::En => format!("Burst: {} / 3    best: {:.1} WPM", app.burst_series.run_count(), app.burst_series.best()),
+            Lang::Ja => format!(
+                "バースト: {} / 3 本    最高: {:.1} WPM",
+                app.burst_series.run_count(),
+                app.burst_series.best()
+            ),
+        }));
+    }
+    if app.config.mode.kind == crate::config::ModeKind::Endurance
+        && let Some(comparison) = app.endurance_comparison
+    {
+        lines.push(Line::from(match lang {
+            Lang::En => format!(
+                "First/second half IKI: {:.0}/{:.0} ms    errors: {:.1}/{:.1}%",
+                comparison.first_iki_ms,
+                comparison.second_iki_ms,
+                comparison.first_error_rate * 100.0,
+                comparison.second_error_rate * 100.0
+            ),
+            Lang::Ja => format!(
+                "前半/後半 IKI: {:.0}/{:.0} ms    誤打率: {:.1}/{:.1}%",
+                comparison.first_iki_ms,
+                comparison.second_iki_ms,
+                comparison.first_error_rate * 100.0,
+                comparison.second_error_rate * 100.0
+            ),
+        }));
+        if comparison.warn {
+            lines.push(Line::from(Span::styled(
+                match lang {
+                    Lang::En => "Performance drops in the second half. Take a break.",
+                    Lang::Ja => "後半に崩れています．休憩をはさみましょう",
+                },
+                Style::default().fg(theme.warning).add_modifier(Modifier::BOLD),
+            )));
+        }
+    }
+    lines
+}
+
+fn render_text_result(frame: &mut Frame, app: &App, result: &GameResult, theme: &Theme, area: Rect, lang: Lang) {
+    let compact = area.width < 100 || area.height < 30;
+    let constraints = if compact {
+        vec![
+            Constraint::Length(3),
+            Constraint::Length(4),
+            Constraint::Length(5),
+            Constraint::Min(4),
+            Constraint::Length(1),
+            Constraint::Length(2),
+        ]
+    } else {
+        vec![
+            Constraint::Length(9),
+            Constraint::Length(4),
+            Constraint::Length(10),
+            Constraint::Min(6),
+            Constraint::Length(1),
+            Constraint::Length(2),
+        ]
+    };
+    let rows = Layout::default().direction(Direction::Vertical).constraints(constraints).split(area);
+    if compact {
+        let lines = vec![
+            Line::from(format!("{}: {:.1}", Msg::Wpm.text(lang), result.wpm)),
+            Line::from(format!("{}: {:.2}", Msg::Cps.text(lang), result.cps)),
+            Line::from(format!("{}: {:.1}%", Msg::Accuracy.text(lang), result.accuracy * 100.0)),
+        ];
+        frame.render_widget(Paragraph::new(lines), left_inset(rows[0]));
+    } else {
+        render_big_summary(frame, result, app.legacy_wpm, theme, rows[0], lang);
+    }
+    render_secondary_box(frame, app, result, theme, rows[1], lang);
+    render_mistype_heatmap(frame, result, theme, left_inset(rows[2]), lang);
+    render_reaction_and_insights(frame, app, result, theme, rows[3], lang);
+    frame.render_widget(Paragraph::new(save_line(app, result, theme)), left_inset(rows[4]));
+    render_result_hint(frame, app, theme, rows[5], lang);
+}
+
+fn render_reaction_and_insights(frame: &mut Frame, app: &App, result: &GameResult, theme: &Theme, area: Rect, lang: Lang) {
+    let mut buckets = [0_u32; 4];
+    for duration in &result.metrics.reaction_times {
+        match duration.as_secs_f64() {
+            value if value < 0.3 => buckets[0] += 1,
+            value if value < 0.5 => buckets[1] += 1,
+            value if value < 0.8 => buckets[2] += 1,
+            _ => buckets[3] += 1,
+        }
+    }
+    let maximum = buckets.iter().copied().max().unwrap_or(1).max(1);
+    let labels = ["<0.3s", "0.3-0.5s", "0.5-0.8s", ">0.8s"];
+    let mut lines = vec![Line::from(Span::styled(
+        Msg::ReactionTimeDistribution.text(lang),
+        Style::default().fg(theme.muted),
+    ))];
+    for (label, count) in labels.into_iter().zip(buckets) {
+        let width = (8 * count / maximum).max(u32::from(count > 0));
+        lines.push(Line::from(vec![
+            Span::styled(format!("{label:<9} "), Style::default().fg(theme.fg)),
+            Span::styled("▆".repeat(width as usize), Style::default().fg(theme.accent)),
+            Span::styled(format!(" {count}"), Style::default().fg(theme.muted)),
+        ]));
+    }
+    if app.config.mode.kind == crate::config::ModeKind::Adaptive && app.result_origin == ResultOrigin::JustPlayed && area.width < 140 {
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(5), Constraint::Min(0)])
+            .split(area);
+        lines.truncate(usize::from(rows[0].height));
+        frame.render_widget(Paragraph::new(lines), left_inset(rows[0]));
+        render_adaptive_result(frame, app, theme, left_inset(rows[1]), lang);
+        return;
+    }
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Ratio(3, 5), Constraint::Ratio(2, 5)])
+        .split(area);
+    lines.truncate(usize::from(columns[0].height));
+    frame.render_widget(Paragraph::new(lines), left_inset(columns[0]));
+    render_observations(frame, app, theme, columns[1], lang);
+}
+
+fn save_line(app: &App, result: &GameResult, theme: &Theme) -> Line<'static> {
     match app.result_origin {
-        ResultOrigin::JustPlayed => render_hint(frame, app, &theme, chunks[7], lang),
-        ResultOrigin::History => render_hint_history(frame, app, &theme, chunks[7], lang),
+        ResultOrigin::JustPlayed => {
+            if let Some(id) = app.last_save_id {
+                Line::from(vec![
+                    Span::styled(
+                        format!("💾 {}", Msg::SavedToDatabase.text(app.config.general.lang)),
+                        Style::default().fg(theme.correct),
+                    ),
+                    Span::styled(id.to_string(), Style::default().fg(theme.fg)),
+                ])
+            } else if let Some(error) = &app.last_save_error {
+                Line::from(vec![
+                    Span::styled(
+                        format!("💾 {} ", Msg::SaveFailed.text(app.config.general.lang)),
+                        Style::default().fg(theme.mistype),
+                    ),
+                    Span::styled(error.clone(), Style::default().fg(theme.fg)),
+                ])
+            } else {
+                Line::from(Span::styled(
+                    Msg::NotSaved.text(app.config.general.lang),
+                    Style::default().fg(theme.muted),
+                ))
+            }
+        }
+        ResultOrigin::History => Line::from(vec![
+            Span::styled(
+                format!("📜 {} ", Msg::HistoryEntry.text(app.config.general.lang)),
+                Style::default().fg(theme.muted),
+            ),
+            Span::styled(result.finished_at.format("%Y-%m-%d %H:%M:%S").to_string(), Style::default().fg(theme.fg)),
+        ]),
+    }
+}
+
+fn render_result_hint(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, lang: Lang) {
+    match app.result_origin {
+        ResultOrigin::JustPlayed => render_hint(frame, app, theme, area, lang),
+        ResultOrigin::History => render_hint_history(frame, app, theme, area, lang),
     }
 }
 
@@ -470,7 +1127,8 @@ fn render_adaptive_result(frame: &mut Frame, app: &App, theme: &Theme, area: Rec
 fn render_mistype_heatmap(frame: &mut Frame, r: &GameResult, theme: &Theme, area: Rect, lang: Lang) {
     let mut entries: Vec<(&String, &u32)> = r.metrics.mistypes_by_char.iter().collect();
     entries.sort_by(|a, b| b.1.cmp(a.1));
-    let top = entries.into_iter().take(8);
+    let limit = usize::from(area.height.saturating_sub(1).div_ceil(2)).min(8);
+    let top = entries.into_iter().take(limit);
     let max_count = r.metrics.mistypes_by_char.values().copied().max().unwrap_or(1).max(1);
 
     let mut lines = vec![Line::from(Span::styled(Msg::MistypeHeatmap.text(lang), Style::default().fg(theme.muted)))];
@@ -478,12 +1136,15 @@ fn render_mistype_heatmap(frame: &mut Frame, r: &GameResult, theme: &Theme, area
     let mut rendered = 0;
     for (g, count) in top {
         let bar_len = (12 * (*count) / max_count).max(1);
-        let bar: String = "█".repeat(bar_len as usize);
+        let bar: String = "▆".repeat(bar_len as usize);
         lines.push(Line::from(vec![
             Span::styled(format!("  {g:>3}  "), Style::default().fg(theme.fg).add_modifier(Modifier::BOLD)),
             Span::styled(bar, Style::default().fg(theme.mistype)),
             Span::styled(format!("  {count}"), Style::default().fg(theme.muted)),
         ]));
+        if lines.len() < usize::from(area.height) {
+            lines.push(Line::from(""));
+        }
         rendered += 1;
     }
     if rendered == 0 {
@@ -492,101 +1153,9 @@ fn render_mistype_heatmap(frame: &mut Frame, r: &GameResult, theme: &Theme, area
             Style::default().fg(theme.correct),
         )));
     }
+    lines.truncate(usize::from(area.height));
     let p = Paragraph::new(lines);
     frame.render_widget(p, area);
-}
-
-fn render_reaction_and_save(frame: &mut Frame, app: &App, r: &GameResult, theme: &Theme, area: Rect) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(1)])
-        .split(area);
-
-    let mut lines = if app.result_origin == ResultOrigin::JustPlayed && !app.result_insights.is_empty() {
-        insight_lines(app, theme)
-    } else {
-        let mut buckets = [0u32; 4];
-        for duration in &r.metrics.reaction_times {
-            match duration.as_secs_f64() {
-                value if value < 0.3 => buckets[0] += 1,
-                value if value < 0.5 => buckets[1] += 1,
-                value if value < 0.8 => buckets[2] += 1,
-                _ => buckets[3] += 1,
-            }
-        }
-        let maximum = buckets.iter().copied().max().unwrap_or(1).max(1);
-        let labels = ["<0.3s    ", "0.3-0.5s ", "0.5-0.8s ", ">0.8s    "];
-        let mut lines = vec![Line::from(Span::styled(
-            Msg::ReactionTimeDistribution.text(app.config.general.lang),
-            Style::default().fg(theme.muted),
-        ))];
-        for (index, count) in buckets.iter().enumerate() {
-            let bar_len = (12 * (*count) / maximum).max(u32::from(*count > 0));
-            lines.push(Line::from(vec![
-                Span::styled(format!("  {} ", labels[index]), Style::default().fg(theme.fg)),
-                Span::styled("█".repeat(bar_len as usize), Style::default().fg(theme.accent)),
-                Span::styled(format!("  {count}"), Style::default().fg(theme.muted)),
-            ]));
-        }
-        lines
-    };
-    lines.truncate(usize::from(chunks[0].height));
-    frame.render_widget(Paragraph::new(lines), chunks[0]);
-
-    let save_line = match app.result_origin {
-        ResultOrigin::JustPlayed => {
-            if let Some(id) = app.last_save_id {
-                Line::from(vec![
-                    Span::styled(
-                        format!("💾 {}", Msg::SavedToDatabase.text(app.config.general.lang)),
-                        Style::default().fg(theme.correct),
-                    ),
-                    Span::styled(id.to_string(), Style::default().fg(theme.fg)),
-                ])
-            } else if let Some(e) = &app.last_save_error {
-                Line::from(vec![
-                    Span::styled(
-                        format!("💾 {} ", Msg::SaveFailed.text(app.config.general.lang)),
-                        Style::default().fg(theme.mistype),
-                    ),
-                    Span::styled(e.clone(), Style::default().fg(theme.fg)),
-                ])
-            } else {
-                Line::from(Span::styled(
-                    Msg::NotSaved.text(app.config.general.lang),
-                    Style::default().fg(theme.muted),
-                ))
-            }
-        }
-        ResultOrigin::History => {
-            let stamp = r.finished_at.format("%Y-%m-%d %H:%M:%S").to_string();
-            Line::from(vec![
-                Span::styled(
-                    format!("📜 {} ", Msg::HistoryEntry.text(app.config.general.lang)),
-                    Style::default().fg(theme.muted),
-                ),
-                Span::styled(stamp, Style::default().fg(theme.fg)),
-            ])
-        }
-    };
-    frame.render_widget(Paragraph::new(save_line), left_inset(chunks[1]));
-}
-
-fn render_result_insights(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
-    frame.render_widget(Paragraph::new(insight_lines(app, theme)), area);
-}
-
-fn insight_lines(app: &App, theme: &Theme) -> Vec<Line<'static>> {
-    let limit = if app.config.display.feedback == "detailed" { 3 } else { 1 };
-    let mut lines = vec![Line::from(Span::styled(
-        match app.config.general.lang {
-            Lang::En => "This session's observation",
-            Lang::Ja => "今回の気づき",
-        },
-        Style::default().fg(theme.warning).add_modifier(Modifier::BOLD),
-    ))];
-    lines.extend(app.result_insights.iter().take(limit).cloned().map(Line::from));
-    lines
 }
 
 fn render_hint(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, lang: Lang) {
