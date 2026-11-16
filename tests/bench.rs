@@ -7,7 +7,10 @@ use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use rs_typing_trainer::analysis::metrics::TransitionClass;
 use rs_typing_trainer::app::Screen;
-use rs_typing_trainer::bench::{BenchPart, BenchSettings, generate_parallel_versions, next_parallel_index};
+use rs_typing_trainer::bench::{
+    BENCH_SERIES_V2, BenchPart, BenchSettings, V2_SELECTION_RULE, generate_parallel_versions, generate_parallel_versions_for_series,
+    next_parallel_index,
+};
 use rs_typing_trainer::config::{Config, DataConfig, ErrorMode, ModeKind};
 use rs_typing_trainer::data::DataCatalog;
 use rs_typing_trainer::engine::item::Item;
@@ -120,6 +123,234 @@ fn save_bench_record(path: &std::path::Path, bench_id: &str, wpm: f64, accuracy:
 
 fn compact_render(app: &rs_typing_trainer::app::App) -> String {
     render(app).chars().filter(|character| !character.is_whitespace()).collect()
+}
+
+fn bench_prompt_fingerprint(versions: &[rs_typing_trainer::bench::BenchVersion]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for version in versions {
+        for value in std::iter::once(version.id.as_str()).chain(
+            version
+                .prompts
+                .iter()
+                .flat_map(|prompt| [prompt.text.as_str(), prompt.reading.as_deref().unwrap_or(""), prompt.target.as_str()]),
+        ) {
+            for byte in value.bytes().chain(std::iter::once(0xff)) {
+                hash ^= u64::from(byte);
+                hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        }
+    }
+    hash
+}
+
+#[test]
+fn every_bench_v1_prompt_stays_unchanged() {
+    let (_home, data) = catalog();
+    let layout = builtin_layout("qwerty").unwrap();
+    let geometry = geometry("ansi").unwrap();
+    let actual = [BenchPart::A, BenchPart::B, BenchPart::C, BenchPart::D]
+        .map(|part| bench_prompt_fingerprint(&generate_parallel_versions(part, &data, &layout, &geometry)));
+
+    assert_eq!(
+        actual,
+        [0x97eb_602d_8eb3_5b39, 0x4995_ff3b_e248_0943, 0x45ae_2abf_9076_c73f, 0xccb5_5a6d_9abc_e4b5,],
+        "bench-v1 fingerprints: {actual:#018x?}"
+    );
+}
+
+fn prompt_length(part: BenchPart, prompt: &rs_typing_trainer::bench::BenchPrompt) -> usize {
+    match part {
+        BenchPart::C => prompt.reading.as_deref().unwrap().chars().count(),
+        _ => prompt.text.chars().count(),
+    }
+}
+
+#[test]
+fn bench_v2_a_and_c_are_staged_and_keep_each_stage_multiset_across_forms() {
+    let (_home, data) = catalog();
+    let layout = builtin_layout("qwerty").unwrap();
+    let keyboard = geometry("ansi").unwrap();
+    for (part, ranges, counts) in [
+        (BenchPart::A, [(3, 5), (6, 8), (10, 15), (16, 22), (23, 29)], [15, 15, 12, 12, 12]),
+        (BenchPart::C, [(2, 4), (5, 8), (6, 10), (11, 15), (16, 20)], [15, 15, 12, 12, 12]),
+    ] {
+        let versions = generate_parallel_versions_for_series(BENCH_SERIES_V2, part, &data, &layout, &keyboard);
+        assert_eq!(versions.len(), 8);
+        let mut offset = 0;
+        for ((minimum, maximum), count) in ranges.into_iter().zip(counts) {
+            let expected = versions[0].prompts[offset..offset + count]
+                .iter()
+                .map(|prompt| (prompt.text.clone(), prompt.reading.clone()))
+                .collect::<BTreeSet<_>>();
+            for version in &versions {
+                let stage = &version.prompts[offset..offset + count];
+                assert!(stage.iter().all(|prompt| (minimum..=maximum).contains(&prompt_length(part, prompt))));
+                assert_eq!(
+                    stage
+                        .iter()
+                        .map(|prompt| (prompt.text.clone(), prompt.reading.clone()))
+                        .collect::<BTreeSet<_>>(),
+                    expected,
+                    "{part:?} stage {minimum}-{maximum} changed in {}",
+                    version.id
+                );
+            }
+            assert!(
+                versions[1..]
+                    .iter()
+                    .any(|version| version.prompts[offset..offset + count] != versions[0].prompts[offset..offset + count]),
+                "{part:?} stage {minimum}-{maximum} never changes order"
+            );
+            offset += count;
+        }
+        assert_eq!(offset, versions[0].prompts.len());
+    }
+}
+
+#[test]
+fn bench_v2_phrase_selection_rule_and_first_rows_are_fixed() {
+    let (_home, data) = catalog();
+    let versions = [BenchPart::A, BenchPart::C].map(|part| {
+        generate_parallel_versions_for_series(
+            BENCH_SERIES_V2,
+            part,
+            &data,
+            &builtin_layout("qwerty").unwrap(),
+            &geometry("ansi").unwrap(),
+        )
+    });
+    assert_eq!(V2_SELECTION_RULE, "sha256-v1");
+    let english = &versions[0][0].prompts;
+    let japanese = &versions[1][0].prompts;
+    for (stage_start, expected_rows) in [
+        (30, ["Change my mind.", "Cool story.", "Oh, perfect!"]),
+        (42, ["Tom is a wanted man.", "Give me my book back.", "What time did you say?"]),
+        (
+            54,
+            ["A lot of people do do that.", "Just take a seat right here.", "Why had it taken so long?"],
+        ),
+    ] {
+        for expected in expected_rows {
+            assert!(
+                english[stage_start..stage_start + 12].iter().any(|prompt| prompt.text == expected),
+                "missing {expected:?}"
+            );
+        }
+    }
+    for (stage_start, expected_rows) in [
+        (
+            30,
+            [
+                ("深夜の空港", "しんやのくうこう"),
+                ("なんだか眠い", "なんだかねむい"),
+                ("真っ白な手帳", "まっしろなてちょう"),
+            ],
+        ),
+        (
+            42,
+            [
+                ("ボウリングでストライク", "ぼうりんぐですとらいく"),
+                ("香ばしい焼きおにぎり", "こうばしいやきおにぎり"),
+                ("満員電車に揺られる", "まんいんでんしゃにゆられる"),
+            ],
+        ),
+        (
+            54,
+            [
+                ("ロープウェイで山頂へ向かう", "ろーぷうぇいでさんちょうへむかう"),
+                ("一緒に買い物に行ってくれる？", "いっしょにかいものにいってくれる？"),
+                ("秋のキャンパスの並木道を歩く", "あきのきゃんぱすのなみきみちをあるく"),
+            ],
+        ),
+    ] {
+        for (text, reading) in expected_rows {
+            assert!(
+                japanese[stage_start..stage_start + 12]
+                    .iter()
+                    .any(|prompt| prompt.text == text && prompt.reading.as_deref() == Some(reading)),
+                "missing {text:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn bench_v2_phrase_stages_have_varied_openings() {
+    let (_home, data) = catalog();
+    let layout = builtin_layout("qwerty").unwrap();
+    let keyboard = geometry("ansi").unwrap();
+    for (part, stage_starts) in [(BenchPart::A, [30, 42, 54]), (BenchPart::C, [30, 42, 54])] {
+        let version = &generate_parallel_versions_for_series(BENCH_SERIES_V2, part, &data, &layout, &keyboard)[0];
+        for stage_start in stage_starts {
+            let stage = &version.prompts[stage_start..stage_start + 12];
+            let opening_counts = stage.iter().fold(BTreeMap::<char, usize>::new(), |mut counts, prompt| {
+                let source = if part == BenchPart::C {
+                    prompt.reading.as_deref().unwrap()
+                } else {
+                    prompt.text.as_str()
+                };
+                *counts.entry(source.chars().next().unwrap()).or_default() += 1;
+                counts
+            });
+            assert!(
+                opening_counts.len() >= 5,
+                "{} stage starting at {stage_start} has biased openings: {opening_counts:?}",
+                version.id
+            );
+            assert!(
+                opening_counts.values().all(|count| *count <= stage.len() / 2),
+                "{} stage starting at {stage_start} has a majority opening: {opening_counts:?}",
+                version.id
+            );
+            if part == BenchPart::A {
+                let first_word_counts = stage.iter().fold(BTreeMap::<String, usize>::new(), |mut counts, prompt| {
+                    let first_word = prompt
+                        .text
+                        .split(|character: char| !character.is_ascii_alphabetic())
+                        .find(|word| !word.is_empty())
+                        .unwrap();
+                    *counts.entry(first_word.to_ascii_lowercase()).or_default() += 1;
+                    counts
+                });
+                assert!(
+                    first_word_counts.values().all(|count| *count <= stage.len() / 2),
+                    "{} stage starting at {stage_start} has a majority first word: {first_word_counts:?}",
+                    version.id
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn bench_v2_has_more_than_one_minute_of_targets_at_150_wpm() {
+    let (_home, data) = catalog();
+    for part in [BenchPart::A, BenchPart::C] {
+        let version = &generate_parallel_versions_for_series(
+            BENCH_SERIES_V2,
+            part,
+            &data,
+            &builtin_layout("qwerty").unwrap(),
+            &geometry("ansi").unwrap(),
+        )[0];
+        let keystrokes = version.prompts.iter().map(|prompt| prompt.target.chars().count()).sum::<usize>();
+        assert!(keystrokes > 750, "{} has only {keystrokes} target characters", version.id);
+    }
+}
+
+#[test]
+fn bench_v2_b_and_d_reuse_v1_prompts_but_have_v2_ids() {
+    let (_home, data) = catalog();
+    let layout = builtin_layout("qwerty").unwrap();
+    let keyboard = geometry("ansi").unwrap();
+    for part in [BenchPart::B, BenchPart::D] {
+        let v1 = generate_parallel_versions(part, &data, &layout, &keyboard);
+        let v2 = generate_parallel_versions_for_series(BENCH_SERIES_V2, part, &data, &layout, &keyboard);
+        for (index, (left, right)) in v1.iter().zip(&v2).enumerate() {
+            assert_eq!(left.prompts, right.prompts);
+            assert_eq!(right.id, format!("bench-v2/{}/{:02}", part.as_str(), index + 1));
+        }
+    }
 }
 
 #[test]
@@ -236,26 +467,26 @@ fn part_b_parallel_versions_are_distinct_and_balanced() {
 fn benchmark_result_names_part_version_comparisons_and_next_part() {
     let directory = TempDir::new().unwrap();
     let path = directory.path().join("sessions.db");
-    save_bench_record(&path, "bench-v1/A/01", 40.0, 0.90, 1);
-    save_bench_record(&path, "bench-v1/A/02", 50.0, 0.95, 2);
+    save_bench_record(&path, "bench-v2/A/01", 40.0, 0.90, 1);
+    save_bench_record(&path, "bench-v2/A/02", 50.0, 0.95, 2);
     let mut config = Config::default();
     config.general.lang = Lang::Ja;
     config.storage.db_path = Some(path.clone());
     let mut app = test_app(config.clone());
     app.handle_key(key(KeyCode::Char('b')));
     app.handle_key(key(KeyCode::Enter));
-    assert_eq!(app.active_bench_id.as_deref(), Some("bench-v1/A/03"));
+    assert_eq!(app.active_bench_id.as_deref(), Some("bench-v2/A/03"));
     let mut result = rs_typing_trainer::metrics::stats::GameResult::from_metrics(&config, Default::default(), Duration::from_secs(60));
     result.wpm = 60.0;
     result.accuracy = 0.98;
-    app.bench_comparison = Some(db::bench_comparison(&path, "bench-v1/A/03", result.wpm, result.accuracy).unwrap());
+    app.bench_comparison = Some(db::bench_comparison(&path, "bench-v2/A/03", result.wpm, result.accuracy).unwrap());
     app.last_result = Some(result);
     app.screen = Screen::Result;
 
     let output = render(&app);
     let compact = output.chars().filter(|character| !character.is_whitespace()).collect::<String>();
-    assert!(compact.contains("パートA英単語"), "{output}");
-    assert!(compact.contains("bench-v1/A/03"), "{output}");
+    assert!(compact.contains("パートA英単語と句"), "{output}");
+    assert!(compact.contains("bench-v2/A/03"), "{output}");
     assert!(compact.contains("前回比"), "{output}");
     assert!(compact.contains("直近3回の中央値との差"), "{output}");
     assert!(compact.contains("[ENTER]次へ:パートB網羅"), "{output}");
@@ -310,7 +541,7 @@ fn escape_from_benchmark_result_returns_to_title_without_quitting_and_keeps_comp
     assert!(!app.should_quit);
     let records = db::load_records_filtered(&app.db_path(), None, Some("bench")).unwrap();
     assert_eq!(records.len(), 1);
-    assert_eq!(records[0].header.bench_id.as_deref(), Some("bench-v1/A/01"));
+    assert_eq!(records[0].header.bench_id.as_deref(), Some("bench-v2/A/01"));
 }
 
 #[test]
@@ -383,7 +614,7 @@ fn benchmark_summary_ignores_enter_and_escape_during_result_delay() {
 fn benchmark_selection_offers_resume_from_first_missing_part_of_latest_form_today() {
     let directory = TempDir::new().unwrap();
     let path = directory.path().join("sessions.db");
-    save_bench_record(&path, "bench-v1/A/03", 40.0, 0.90, 14);
+    save_bench_record(&path, "bench-v2/A/03", 40.0, 0.90, 14);
     let mut config = Config::default();
     config.general.lang = Lang::Ja;
     config.storage.db_path = Some(path);
@@ -396,7 +627,7 @@ fn benchmark_selection_offers_resume_from_first_missing_part_of_latest_form_toda
 
     app.handle_key(key(KeyCode::Enter));
     assert!(matches!(app.screen, Screen::Countdown { .. }));
-    assert_eq!(app.active_bench_id.as_deref(), Some("bench-v1/B/03"));
+    assert_eq!(app.active_bench_id.as_deref(), Some("bench-v2/B/03"));
 }
 
 #[test]
@@ -406,7 +637,7 @@ fn benchmark_selection_does_not_offer_resume_for_complete_or_old_forms() {
     let complete_directory = TempDir::new().unwrap();
     let complete_path = complete_directory.path().join("sessions.db");
     for part in ['A', 'B', 'C'] {
-        save_bench_record(&complete_path, &format!("bench-v1/{part}/03"), 40.0, 0.90, 14);
+        save_bench_record(&complete_path, &format!("bench-v2/{part}/03"), 40.0, 0.90, 14);
     }
     let mut complete_config = Config::default();
     complete_config.storage.db_path = Some(complete_path);
@@ -428,7 +659,7 @@ fn benchmark_selection_does_not_offer_resume_for_complete_or_old_forms() {
 fn resumed_benchmark_summary_includes_parts_completed_earlier_today() {
     let directory = TempDir::new().unwrap();
     let path = directory.path().join("sessions.db");
-    save_bench_record(&path, "bench-v1/A/03", 40.0, 0.90, 16);
+    save_bench_record(&path, "bench-v2/A/03", 40.0, 0.90, 16);
     let mut config = Config::default();
     config.storage.db_path = Some(path);
     let today = chrono::NaiveDate::from_ymd_opt(2026, 11, 16).unwrap();
@@ -436,7 +667,7 @@ fn resumed_benchmark_summary_includes_parts_completed_earlier_today() {
     let started = Instant::now();
     app.handle_key_at(key(KeyCode::Char('b')), started);
     app.handle_key_at(key(KeyCode::Enter), started);
-    assert_eq!(app.active_bench_id.as_deref(), Some("bench-v1/B/03"));
+    assert_eq!(app.active_bench_id.as_deref(), Some("bench-v2/B/03"));
 
     for offset in 0..2 {
         let base = started + Duration::from_secs(offset * 70);
@@ -446,9 +677,9 @@ fn resumed_benchmark_summary_includes_parts_completed_earlier_today() {
     }
     assert_eq!(app.screen, Screen::BenchSummary);
     let output = render(&app);
-    assert!(output.contains("Part A English words"), "{output}");
+    assert!(output.contains("Part A English words and phrases"), "{output}");
     assert!(output.contains("Part B Coverage"), "{output}");
-    assert!(output.contains("Part C Japanese"), "{output}");
+    assert!(output.contains("Part C Japanese words and phrases"), "{output}");
 }
 
 #[test]
@@ -504,7 +735,7 @@ fn title_starts_a_fixed_benchmark_session() {
     assert_eq!(app.screen, Screen::BenchSelect);
     app.handle_key_at(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
     assert!(matches!(app.screen, Screen::Countdown { .. }));
-    assert_eq!(app.active_bench_id.as_deref(), Some("bench-v1/A/01"));
+    assert_eq!(app.active_bench_id.as_deref(), Some("bench-v2/A/01"));
     assert_eq!(app.config.session.duration_seconds, 60);
     assert_eq!(app.config.session.item_timeout_seconds, 0);
     assert_eq!(app.config.session.error_mode, ErrorMode::Stop);
@@ -519,10 +750,10 @@ fn title_starts_a_fixed_benchmark_session() {
         .unwrap()
         .unwrap();
     assert_eq!(saved.header.mode, "bench");
-    assert_eq!(saved.header.bench_id.as_deref(), Some("bench-v1/A/01"));
+    assert_eq!(saved.header.bench_id.as_deref(), Some("bench-v2/A/01"));
     assert_eq!(saved.header.error_mode, "stop");
 
     app.handle_key_at(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now + Duration::from_secs(62));
     assert!(matches!(app.screen, Screen::Countdown { .. }));
-    assert_eq!(app.active_bench_id.as_deref(), Some("bench-v1/B/01"));
+    assert_eq!(app.active_bench_id.as_deref(), Some("bench-v2/B/01"));
 }

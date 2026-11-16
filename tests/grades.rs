@@ -220,6 +220,36 @@ fn source_selection_distinguishes_official_interim_and_provisional() {
 }
 
 #[test]
+fn one_v2_benchmark_makes_the_grade_interim_without_mixing_three_v1_results() {
+    let start = Utc.with_ymd_and_hms(2026, 1, 1, 12, 0, 0).unwrap();
+    let mut records = (0..3)
+        .map(|day| bench_record(start + chrono::Duration::days(day), "A", 60.0 + day as f64))
+        .collect::<Vec<_>>();
+    let mut v2 = bench_record(start + chrono::Duration::days(3), "A", 90.0);
+    v2.header.bench_id = Some("bench-v2/A/01".to_owned());
+    records.push(v2);
+    let grades = analyze_grades(
+        &records,
+        &[],
+        &builtin_layout("qwerty").unwrap(),
+        &geometry("ansi").unwrap(),
+        GradeOptions {
+            model: AnalysisSettings::default(),
+        },
+        start + chrono::Duration::days(4),
+        &["ab".to_owned()],
+        &[JapaneseText {
+            text: "あ".to_owned(),
+            reading: "あ".to_owned(),
+        }],
+    );
+    let english = grades.languages.iter().find(|grade| grade.language == "en").unwrap();
+    assert_eq!(english.source, GradeSource::Bench);
+    assert_eq!(english.status, GradeStatus::Interim);
+    assert_eq!(english.n_sessions, 1);
+}
+
+#[test]
 fn provisional_speed_falls_back_to_recent_net_wpm_and_prefers_corrected_wpm() {
     let start = Utc.with_ymd_and_hms(2026, 1, 1, 12, 0, 0).unwrap();
     let layout = builtin_layout("qwerty").unwrap();

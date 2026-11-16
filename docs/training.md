@@ -2,7 +2,7 @@
 
 # Training tools
 
-rs-typing-trainer separates practice from measurement. Practice deliberately changes the prompt distribution or difficulty, so its WPM is not evidence of improvement. Use the fixed parallel forms in `bench-v1` to check progress.
+rs-typing-trainer separates practice from measurement. Practice deliberately changes the prompt distribution or difficulty, so its WPM is not evidence of improvement. Use the fixed parallel forms in the current `bench-v2` to check progress. Retained `bench-v1` results stay visible but are not compared with v2.
 
 ## Adaptive weak-transition practice
 
@@ -42,7 +42,7 @@ auto_difficulty = true
 
 ## Pacer
 
-Press `P` on the mode-selection screen to enable the pacer for `words`, `sentence` or `adaptive`. A `▾` cursor moves above the prompt at the target rate. The initial target is the most recent benchmark A net WPM multiplied by `ratio`. If benchmark A is unavailable, the median net WPM of the latest five sessions is used. The target never falls below `min_wpm`; when neither benchmark nor practice records are available, `min_wpm` is used directly.
+Press `P` on the mode-selection screen to enable the pacer for `words`, `sentence`, `phrase` or `adaptive`. A `▾` cursor moves above the prompt at the target rate. The initial target is the most recent current-series benchmark A net WPM multiplied by `ratio`. If benchmark A is unavailable, the median net WPM of the latest five sessions is used. The target never falls below `min_wpm`; when neither benchmark nor practice records are available, `min_wpm` is used directly.
 
 The initial ratio is 1.07. After a paced session, accuracy below 92% lowers the next target by 3%. Accuracy of at least 95% together with reaching the target raises it by 2%. Otherwise it stays unchanged. The result screen shows the next target.
 
@@ -55,7 +55,7 @@ min_wpm = 20.0
 
 ## Ghost
 
-A `◆` cursor replays comparable historical keystroke timing. Sentence practice uses the fastest previous run containing the same sentence. A benchmark uses the previous run of exactly the same version, such as `bench-v1/A/03`; benchmark prompts and scoring are unchanged. Other modes do not show a ghost because their prompts are not identical enough for a meaningful comparison.
+A `◆` cursor replays comparable historical keystroke timing. Sentence practice uses the fastest previous run containing the same sentence. A benchmark uses the previous run of exactly the same series, part and form, such as `bench-v2/A/03`; benchmark prompts and scoring are unchanged. Other modes do not show a ghost because their prompts are not identical enough for a meaningful comparison.
 
 ## Gradual key unlocks
 

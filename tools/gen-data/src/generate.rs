@@ -29,6 +29,7 @@ const BLOCKLIST_EN: &str = include_str!("../blocklist_en.txt");
 const IPADIC_COPYING: &str = include_str!("../licenses/IPADIC-COPYING.txt");
 const REVIEWED_JA_WORDS: &str = include_str!("../reviewed/ja_words.tsv");
 const REVIEWED_JA_SENTENCES: &str = include_str!("../reviewed/ja_sentences.tsv");
+const JA_PHRASES: &str = include_str!("../phrases/ja_phrases.tsv");
 
 #[derive(Clone, Debug)]
 pub struct GenerationOptions {
@@ -42,8 +43,12 @@ pub struct GenerationOptions {
 pub struct GenerationReport {
     pub en_words: usize,
     pub ja_words: usize,
+    pub en_phrases: usize,
+    pub ja_phrases: usize,
     pub en_sentences: usize,
     pub ja_sentences: usize,
+    pub phrase_reading_mismatches: usize,
+    pub phrase_reading_mismatch_examples: Vec<String>,
     pub ruby_compared: usize,
     pub ruby_mismatches: usize,
     pub ruby_mismatch_examples: Vec<String>,
@@ -87,6 +92,13 @@ struct EnglishSentence {
     id: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct JapanesePhrase {
+    surface: String,
+    reading: String,
+    source_line: usize,
+}
+
 impl AsRef<str> for EnglishSentence {
     fn as_ref(&self) -> &str {
         &self.text
@@ -120,11 +132,12 @@ pub fn generate(options: &GenerationOptions) -> Result<GenerationReport> {
 
     let blocklist = load_blocklist();
     let mut input_files = collect_input_files(&options.input)?;
+    input_files.push(japanese_phrase_source_path());
     if let Some(extra) = &options.extra_aozora {
         input_files.extend(collect_aozora_input_files(extra)?);
-        input_files.sort();
-        input_files.dedup();
     }
+    input_files.sort();
+    input_files.dedup();
     let generated_date = options.date.unwrap_or(max_modified_date(&input_files)?);
     let scowl_root = options.input.join("scowl/scowl-2020.12.07");
     let scowl = load_scowl_words(&scowl_root)?;
@@ -142,6 +155,16 @@ pub fn generate(options: &GenerationOptions) -> Result<GenerationReport> {
     let sentence_overrides = load_overrides(&overrides_dir.join("ja_sentences.tsv"))?;
     let ja_sentences = generate_japanese_sentences(&works, &segmenter, fields, &sentence_overrides)?;
     let en_sentences = generate_english_sentences(&options.input, &blocklist)?;
+    let ja_phrases = parse_japanese_phrases(JA_PHRASES)?;
+    let en_phrases = generate_english_phrases(&options.input, &blocklist)?;
+    let phrase_mismatches = compare_phrase_readings(&ja_phrases, &segmenter, fields)?;
+    let phrase_mismatch_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/regen-out/ja_phrases_mismatch.tsv");
+    let phrase_mismatch_tsv = if phrase_mismatches.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", phrase_mismatches.join("\n"))
+    };
+    write_if_changed(&phrase_mismatch_path, &phrase_mismatch_tsv)?;
 
     let en_words_tsv = render_en_words(&en_words);
     let reviewed_words = load_reviewed_pairs(REVIEWED_JA_WORDS)?;
@@ -150,6 +173,8 @@ pub fn generate(options: &GenerationOptions) -> Result<GenerationReport> {
     let en_core = en_words.iter().take(2_000).map(|(word, _)| word.as_str()).collect::<BTreeSet<_>>();
     let en_sentences_tsv = render_en_sentences(&en_sentences, &en_core);
     let ja_sentences_tsv = render_ja_sentences(&ja_sentences, &reviewed_sentences);
+    let en_phrases_tsv = render_en_sentences(&en_phrases, &en_core);
+    let ja_phrases_tsv = render_japanese_phrases(&ja_phrases);
     let review_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("review");
     fs::create_dir_all(&review_dir).with_context(|| format!("failed to create {}", review_dir.display()))?;
     let review_words = render_ja_word_review(&ja_words);
@@ -159,6 +184,8 @@ pub fn generate(options: &GenerationOptions) -> Result<GenerationReport> {
     let outputs = [
         ("en_words.tsv.gz", gzip(en_words_tsv.as_bytes())?, en_words.len()),
         ("ja_words.tsv.gz", gzip(ja_words_tsv.as_bytes())?, ja_words.len()),
+        ("en_phrases.tsv.gz", gzip(en_phrases_tsv.as_bytes())?, en_phrases.len()),
+        ("ja_phrases.tsv.gz", gzip(ja_phrases_tsv.as_bytes())?, ja_phrases.len()),
         ("en_sentences.tsv.gz", gzip(en_sentences_tsv.as_bytes())?, en_sentences.len()),
         ("ja_sentences.tsv.gz", gzip(ja_sentences_tsv.as_bytes())?, ja_sentences.len()),
         ("NOTICE", notice.into_bytes(), 1),
@@ -175,8 +202,12 @@ pub fn generate(options: &GenerationOptions) -> Result<GenerationReport> {
     Ok(GenerationReport {
         en_words: en_words.len(),
         ja_words: ja_words.len(),
+        en_phrases: en_phrases.len(),
+        ja_phrases: ja_phrases.len(),
         en_sentences: en_sentences.len(),
         ja_sentences: ja_sentences.len(),
+        phrase_reading_mismatches: phrase_mismatches.len(),
+        phrase_reading_mismatch_examples: phrase_mismatches.iter().take(10).cloned().collect(),
         ruby_compared,
         ruby_mismatches,
         ruby_mismatch_examples,
@@ -646,7 +677,7 @@ fn ipadic_reading(text: &str, segmenter: &Segmenter, fields: IpadicFields, prese
     let mut tokens = segmenter.segment(Cow::Borrowed(text))?;
     for token in &mut tokens {
         let surface = token.surface.to_string();
-        if matches!(surface.as_str(), "、" | "。" | "「" | "」") {
+        if matches!(surface.as_str(), "、" | "。" | "「" | "」" | "！" | "？") {
             reading.push_str(&surface);
             continue;
         }
@@ -666,6 +697,20 @@ fn ipadic_reading(text: &str, segmenter: &Segmenter, fields: IpadicFields, prese
 }
 
 fn generate_english_sentences(input: &Path, blocklist: &BTreeSet<String>) -> Result<Vec<EnglishSentence>> {
+    generate_english_texts(input, blocklist, prepare_english_sentence, 15_000, "sentence")
+}
+
+fn generate_english_phrases(input: &Path, blocklist: &BTreeSet<String>) -> Result<Vec<EnglishSentence>> {
+    generate_english_texts(input, blocklist, prepare_english_phrase, 8_000, "phrase")
+}
+
+fn generate_english_texts(
+    input: &Path,
+    blocklist: &BTreeSet<String>,
+    prepare: for<'a> fn(&'a str) -> Option<Cow<'a, str>>,
+    minimum: usize,
+    label: &str,
+) -> Result<Vec<EnglishSentence>> {
     let path = input.join("tatoeba/eng_sentences_CC0.tsv.bz2");
     let file = File::open(&path).with_context(|| format!("failed to open {}", path.display()))?;
     let decoder = BzDecoder::new(file);
@@ -675,7 +720,7 @@ fn generate_english_sentences(input: &Path, blocklist: &BTreeSet<String>) -> Res
         let line = line.with_context(|| format!("failed to decode {} line {}", path.display(), index + 1))?;
         let fields = line.splitn(4, '\t').collect::<Vec<_>>();
         ensure!(fields.len() == 4, "{} line {} must have four fields", path.display(), index + 1);
-        let Some(text) = prepare_english_sentence(fields[2]) else {
+        let Some(text) = prepare(fields[2]) else {
             continue;
         };
         if fields[1] != "eng" || contains_blocklisted_word(&text, blocklist) {
@@ -687,14 +732,92 @@ fn generate_english_sentences(input: &Path, blocklist: &BTreeSet<String>) -> Res
         });
     }
     let selected = unique.into_values().collect::<Vec<_>>();
-    ensure!(selected.len() >= 15_000, "only {} English sentence candidates survived", selected.len());
+    ensure!(selected.len() >= minimum, "only {} English {label} candidates survived", selected.len());
     Ok(selected)
 }
 
 pub fn prepare_english_sentence(text: &str) -> Option<Cow<'_, str>> {
+    prepare_english_text(text, 30..=90)
+}
+
+pub fn prepare_english_phrase(text: &str) -> Option<Cow<'_, str>> {
+    prepare_english_text(text, 10..=29)
+}
+
+fn prepare_english_text(text: &str, length_range: std::ops::RangeInclusive<usize>) -> Option<Cow<'_, str>> {
     let text = remove_surrounding_dialogue_quotes(text).map_or(Cow::Borrowed(text), Cow::Owned);
     let length = text.chars().count();
-    ((30..=90).contains(&length) && text.bytes().all(|byte| (0x20..=0x7e).contains(&byte))).then_some(text)
+    (length_range.contains(&length) && text.bytes().all(|byte| (0x20..=0x7e).contains(&byte))).then_some(text)
+}
+
+pub fn prepare_japanese_phrases(source: &str) -> Result<String> {
+    Ok(render_japanese_phrases(&parse_japanese_phrases(source)?))
+}
+
+fn parse_japanese_phrases(source: &str) -> Result<Vec<JapanesePhrase>> {
+    let mut phrases = Vec::new();
+    let mut surfaces = BTreeSet::new();
+    let mut readings = BTreeSet::new();
+    for (index, line) in source.lines().enumerate() {
+        let line_number = index + 1;
+        let fields = line.split('\t').collect::<Vec<_>>();
+        ensure!(fields.len() == 2, "Japanese phrase line {line_number} must have two fields");
+        let surface = fields[0];
+        let reading = fields[1];
+        ensure!(!surface.is_empty(), "Japanese phrase line {line_number} has an empty surface");
+        ensure!(!reading.is_empty(), "Japanese phrase line {line_number} has an empty reading");
+        ensure!(
+            !surface.chars().any(|character| character.is_ascii_alphanumeric()
+                || character.is_ascii_punctuation()
+                || character.is_whitespace()
+                || matches!(character, '、' | '。')),
+            "Japanese phrase line {line_number} has a forbidden surface character"
+        );
+        ensure!(
+            reading
+                .chars()
+                .all(|character| matches!(character, '\u{3041}'..='\u{3096}' | 'ー' | '！' | '？')),
+            "Japanese phrase line {line_number} has a forbidden reading character"
+        );
+        ensure!(
+            (6..=20).contains(&reading.chars().count()),
+            "Japanese phrase line {line_number} reading must have 6-20 characters"
+        );
+        ensure!(surfaces.insert(surface), "Japanese phrase line {line_number} duplicates a surface");
+        ensure!(readings.insert(reading), "Japanese phrase line {line_number} duplicates a reading");
+        phrases.push(JapanesePhrase {
+            surface: surface.to_owned(),
+            reading: reading.to_owned(),
+            source_line: line_number,
+        });
+    }
+    ensure!(!phrases.is_empty(), "Japanese phrase source contains no rows");
+    phrases.sort_by_key(|phrase| (phrase.reading.chars().count(), phrase.source_line));
+    Ok(phrases)
+}
+
+fn render_japanese_phrases(phrases: &[JapanesePhrase]) -> String {
+    phrases
+        .iter()
+        .enumerate()
+        .map(|(index, phrase)| format!("{}\t{}\t{}\tcore\n", phrase.surface, phrase.reading, index + 1))
+        .collect()
+}
+
+fn compare_phrase_readings(phrases: &[JapanesePhrase], segmenter: &Segmenter, fields: IpadicFields) -> Result<Vec<String>> {
+    let mut mismatches = Vec::new();
+    for phrase in phrases {
+        let ipadic = ipadic_reading(&phrase.surface, segmenter, fields, true)?.unwrap_or_else(|| "*".to_owned());
+        if katakana_to_hiragana(&phrase.reading) != katakana_to_hiragana(&ipadic) {
+            mismatches.push(format!("{}\t{}\t{}\t{}", phrase.source_line, phrase.surface, phrase.reading, ipadic));
+        }
+    }
+    mismatches.sort_by_key(|line| {
+        line.split_once('\t')
+            .and_then(|(number, _)| number.parse::<usize>().ok())
+            .unwrap_or(usize::MAX)
+    });
+    Ok(mismatches)
 }
 
 fn remove_surrounding_dialogue_quotes(text: &str) -> Option<String> {
@@ -843,7 +966,10 @@ fn render_notice(input: &Path, works: &[Work]) -> Result<String> {
         ensure!(fields.len() == 3, "public_domain_books.tsv needs three fields");
         notice.push_str(&format!("{}\t{}\n", fields[1], fields[2]));
     }
-    notice.push_str("\nTatoeba\n=======\n\nEnglish sentences were selected from the CC0 export from tatoeba.org.\n");
+    notice.push_str("\nTatoeba\n=======\n\nEnglish sentences and phrases were selected from the CC0 export from tatoeba.org.\n");
+    notice.push_str(
+        "\nJapanese phrases\n================\n\nJapanese phrases were written for this project and are distributed under the same license as the repository.\n",
+    );
     Ok(notice)
 }
 
@@ -922,10 +1048,12 @@ fn render_manifest(
     outputs: &[(&str, Vec<u8>, usize)],
 ) -> Result<String> {
     let mut manifest = format!(
-        "generated_date = \"{generated_date}\"\nlindera_version = \"{LINDERA_VERSION}\"\ndictionary = \"{IPADIC_VERSION}\"\ndictionary_license = \"NAIST and ICOT terms\"\n\n[filters]\nen_words = \"SCOWL levels 10,20,35,40,50,60; ASCII letters; no apostrophes; top 20000 by public-domain books and Tatoeba CC0 frequency; blocklist\"\nja_words = \"selected IPADIC POS; base forms reanalyzed for readings; 2-8 mora; no old kana or old-style glyphs; top 12000 by corpus frequency\"\nen_sentences = \"CC0; surrounding dialogue quotes removed; 30-90 characters; printable ASCII; unique; blocklist; all matching rows\"\nja_sentences = \"15-45 characters; allowed Japanese characters and punctuation; balanced quotes; no gaiji or unknown readings; at most 15 per work\"\n"
+        "generated_date = \"{generated_date}\"\nlindera_version = \"{LINDERA_VERSION}\"\ndictionary = \"{IPADIC_VERSION}\"\ndictionary_license = \"NAIST and ICOT terms\"\n\n[filters]\nen_words = \"SCOWL levels 10,20,35,40,50,60; ASCII letters; no apostrophes; top 20000 by public-domain books and Tatoeba CC0 frequency; blocklist\"\nja_words = \"selected IPADIC POS; base forms reanalyzed for readings; 2-8 mora; no old kana or old-style glyphs; top 12000 by corpus frequency\"\nen_phrases = \"CC0; surrounding dialogue quotes removed; 10-29 characters; printable ASCII; unique; blocklist; all matching rows\"\nja_phrases = \"project-original phrases; 6-20 reading characters; no ASCII alphanumerics, whitespace, or sentence punctuation in surfaces; unique surfaces and readings\"\nen_sentences = \"CC0; surrounding dialogue quotes removed; 30-90 characters; printable ASCII; unique; blocklist; all matching rows\"\nja_sentences = \"15-45 characters; allowed Japanese characters and punctuation; balanced quotes; no gaiji or unknown readings; at most 15 per work\"\n"
     );
     for path in input_files {
-        let relative = if let Ok(relative) = path.strip_prefix(input) {
+        let relative = if path == &japanese_phrase_source_path() {
+            "phrases/ja_phrases.tsv".to_owned()
+        } else if let Ok(relative) = path.strip_prefix(input) {
             let value = relative.to_string_lossy();
             if let Some(number) = value.strip_prefix("gutenberg/pg").and_then(|value| value.strip_suffix(".txt")) {
                 format!("pd_books/{number}.txt")
@@ -952,6 +1080,10 @@ fn render_manifest(
         ));
     }
     Ok(manifest)
+}
+
+fn japanese_phrase_source_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("phrases/ja_phrases.tsv")
 }
 
 fn toml_escape(value: &str) -> String {

@@ -100,8 +100,14 @@ fn main() -> Result<()> {
     })?;
     println!("English words: {}", report.en_words);
     println!("Japanese words: {}", report.ja_words);
+    println!("English phrases: {}", report.en_phrases);
+    println!("Japanese phrases: {}", report.ja_phrases);
     println!("English sentences: {}", report.en_sentences);
     println!("Japanese sentences: {}", report.ja_sentences);
+    println!("Japanese phrase reading mismatches: {}", report.phrase_reading_mismatches);
+    for example in report.phrase_reading_mismatch_examples {
+        println!("Japanese phrase reading mismatch: {example}");
+    }
     println!("Ruby comparisons: {}, mismatches: {}", report.ruby_compared, report.ruby_mismatches);
     for example in report.ruby_mismatch_examples {
         println!("Ruby mismatch: {example}");

@@ -13,7 +13,7 @@ pub use font::{
     generate_bizud_font, generate_fonts, gzip_deterministic, jis_x0208_to_char, parse_bdf, update_bizud_manifest, update_bizud_notice,
     update_shinonome_manifest, update_shinonome_notice,
 };
-pub use generate::{GenerationOptions, GenerationReport, generate, prepare_english_sentence};
+pub use generate::{GenerationOptions, GenerationReport, generate, prepare_english_phrase, prepare_english_sentence, prepare_japanese_phrases};
 
 const SCOWL_LEVELS: [u8; 6] = [10, 20, 35, 40, 50, 60];
 

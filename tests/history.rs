@@ -29,6 +29,7 @@ fn record(started_at: chrono::DateTime<Utc>, mode: &str, bench_id: Option<&str>,
         "words" => ModeKind::Words,
         "romaji" => ModeKind::Romaji,
         "sentence" => ModeKind::Sentence,
+        "phrase" => ModeKind::Phrase,
         "ngram" => ModeKind::Ngram,
         _ => ModeKind::Random,
     };
@@ -174,23 +175,27 @@ fn history_content_and_detail_show_only_display_mode_names() {
         &english,
         &record(base + chrono::Duration::hours(1), "sentence", None, Some("en"), 55.0, 0.96),
     );
+    save(
+        &english,
+        &record(base + chrono::Duration::hours(2), "phrase", None, Some("en"), 57.0, 0.97),
+    );
     open_history(&mut english);
     let list = render(&english, 140, 30);
-    for expected in ["Words", "Sentences"] {
+    for expected in ["Words", "Sentences", "Phrases"] {
         assert!(list.contains(expected), "missing {expected:?}:\n{list}");
     }
-    for internal in ["words —", "sentence —"] {
+    for internal in ["words —", "sentence —", "phrase —"] {
         assert!(!list.contains(internal), "internal mode name {internal:?} leaked:\n{list}");
     }
     english.handle_key(key(KeyCode::Enter));
     let detail = render(&english, 140, 42);
-    assert!(detail.contains("Mode: Sentences"), "{detail}");
-    assert!(!detail.contains("sentence —"), "{detail}");
+    assert!(detail.contains("Mode: Phrases"), "{detail}");
+    assert!(!detail.contains("phrase —"), "{detail}");
 
     let mut config = Config::default();
     config.general.lang = Lang::Ja;
     let mut japanese = test_app_at(config, date);
-    for (hour, mode, lang) in [(8, "words", "en"), (9, "romaji", "ja"), (10, "sentence", "ja")] {
+    for (hour, mode, lang) in [(8, "words", "en"), (9, "romaji", "ja"), (10, "sentence", "ja"), (11, "phrase", "ja")] {
         save(
             &japanese,
             &record(
@@ -206,15 +211,15 @@ fn history_content_and_detail_show_only_display_mode_names() {
     open_history(&mut japanese);
     let list = render(&japanese, 140, 30);
     let compact_list = list.replace(' ', "");
-    for expected in ["英単語", "日本語の単語", "短文"] {
+    for expected in ["英単語", "日本語の単語", "短文", "句"] {
         assert!(compact_list.contains(expected), "missing {expected:?}:\n{list}");
     }
-    for internal in ["words —", "romaji —", "sentence —"] {
+    for internal in ["words —", "romaji —", "sentence —", "phrase —"] {
         assert!(!list.contains(internal), "internal mode name {internal:?} leaked:\n{list}");
     }
     japanese.handle_key(key(KeyCode::Enter));
     let detail = render(&japanese, 140, 42);
-    assert!(detail.replace(' ', "").contains("モード:短文"), "{detail}");
+    assert!(detail.replace(' ', "").contains("モード:句"), "{detail}");
 }
 
 #[test]

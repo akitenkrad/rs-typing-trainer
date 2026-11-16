@@ -37,3 +37,38 @@ fn configured_file_replaces_only_its_bundled_category() {
     assert_eq!(catalog.words_en(), ["alpha", "beta"]);
     assert!(catalog.words_ja().len() >= 75);
 }
+
+#[test]
+fn configured_phrase_files_extend_their_bundled_categories() {
+    let directory = TempDir::new().unwrap();
+    let english_path = directory.path().join("phrases-en.tsv");
+    let japanese_path = directory.path().join("phrases-ja.tsv");
+    fs::write(&english_path, "hello there\ngood morning\n").unwrap();
+    fs::write(&japanese_path, "朝の挨拶\tあさのあいさつ\n帰りの挨拶\tかえりのあいさつ\n").unwrap();
+    let config = DataConfig {
+        phrases_en: Some(english_path),
+        phrases_ja: Some(japanese_path),
+        ..DataConfig::default()
+    };
+
+    let catalog = DataCatalog::load(&config, directory.path()).unwrap();
+
+    assert!(catalog.phrases_en().len() > 2);
+    assert!(catalog.phrases_en().iter().any(|text| text == "hello there"));
+    assert!(catalog.phrases_en().iter().any(|text| text == "good morning"));
+    assert!(catalog.phrases_ja().len() > 2);
+    assert!(
+        catalog
+            .phrases_ja()
+            .iter()
+            .any(|row| row.text == "朝の挨拶" && row.reading == "あさのあいさつ")
+    );
+    assert!(
+        catalog
+            .phrases_ja()
+            .iter()
+            .any(|row| row.text == "帰りの挨拶" && row.reading == "かえりのあいさつ")
+    );
+    assert!(catalog.words_en().len() >= 140);
+    assert!(catalog.sentences_en().len() >= 20);
+}

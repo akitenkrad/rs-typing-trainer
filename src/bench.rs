@@ -1,4 +1,4 @@
-//! Fixed, deterministic `bench-v1` parallel forms.
+//! Fixed, deterministic benchmark parallel forms.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -15,11 +15,90 @@ use crate::engine::romaji::RomajiJudge;
 use crate::layout::KeyboardLayout;
 use crate::layout::geometry::{Finger, KeyboardGeometry};
 
-pub const BENCH_SERIES: &str = "bench-v1";
+pub const BENCH_SERIES_V1: &str = "bench-v1";
+pub const BENCH_SERIES_V2: &str = "bench-v2";
+pub const BENCH_SERIES: &str = BENCH_SERIES_V2;
+pub const V2_SELECTION_RULE: &str = "sha256-v1";
 pub const PARALLEL_VERSION_COUNT: u8 = 8;
 const PART_B_SOURCE_WORDS: usize = 5_000;
 const PART_B_WORDS_PER_LENGTH: usize = 60;
 const PART_B_CANDIDATES_PER_LENGTH: usize = 800;
+const SHA256_INITIAL_STATE: [u32; 8] = [
+    0x6a09_e667,
+    0xbb67_ae85,
+    0x3c6e_f372,
+    0xa54f_f53a,
+    0x510e_527f,
+    0x9b05_688c,
+    0x1f83_d9ab,
+    0x5be0_cd19,
+];
+const SHA256_ROUND_CONSTANTS: [u32; 64] = [
+    0x428a_2f98,
+    0x7137_4491,
+    0xb5c0_fbcf,
+    0xe9b5_dba5,
+    0x3956_c25b,
+    0x59f1_11f1,
+    0x923f_82a4,
+    0xab1c_5ed5,
+    0xd807_aa98,
+    0x1283_5b01,
+    0x2431_85be,
+    0x550c_7dc3,
+    0x72be_5d74,
+    0x80de_b1fe,
+    0x9bdc_06a7,
+    0xc19b_f174,
+    0xe49b_69c1,
+    0xefbe_4786,
+    0x0fc1_9dc6,
+    0x240c_a1cc,
+    0x2de9_2c6f,
+    0x4a74_84aa,
+    0x5cb0_a9dc,
+    0x76f9_88da,
+    0x983e_5152,
+    0xa831_c66d,
+    0xb003_27c8,
+    0xbf59_7fc7,
+    0xc6e0_0bf3,
+    0xd5a7_9147,
+    0x06ca_6351,
+    0x1429_2967,
+    0x27b7_0a85,
+    0x2e1b_2138,
+    0x4d2c_6dfc,
+    0x5338_0d13,
+    0x650a_7354,
+    0x766a_0abb,
+    0x81c2_c92e,
+    0x9272_2c85,
+    0xa2bf_e8a1,
+    0xa81a_664b,
+    0xc24b_8b70,
+    0xc76c_51a3,
+    0xd192_e819,
+    0xd699_0624,
+    0xf40e_3585,
+    0x106a_a070,
+    0x19a4_c116,
+    0x1e37_6c08,
+    0x2748_774c,
+    0x34b0_bcb5,
+    0x391c_0cb3,
+    0x4ed8_aa4a,
+    0x5b9c_ca4f,
+    0x682e_6ff3,
+    0x748f_82ee,
+    0x78a5_636f,
+    0x84c8_7814,
+    0x8cc7_0208,
+    0x90be_fffa,
+    0xa450_6ceb,
+    0xbef9_a3f7,
+    0xc671_78f2,
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum BenchPart {
@@ -123,6 +202,35 @@ pub fn next_parallel_index(previous: Option<u8>) -> u8 {
     previous.map_or(1, |value| value % PARALLEL_VERSION_COUNT + 1)
 }
 
+pub fn parse_bench_id(id: &str) -> Option<(&str, BenchPart, u8)> {
+    let mut fields = id.split('/');
+    let series = fields.next()?;
+    if !matches!(series, BENCH_SERIES_V1 | BENCH_SERIES_V2) {
+        return None;
+    }
+    let part = match fields.next()? {
+        "A" => BenchPart::A,
+        "B" => BenchPart::B,
+        "C" => BenchPart::C,
+        "D" => BenchPart::D,
+        _ => return None,
+    };
+    let parallel_index = fields.next()?.parse().ok()?;
+    (fields.next().is_none() && (1..=PARALLEL_VERSION_COUNT).contains(&parallel_index)).then_some((series, part, parallel_index))
+}
+
+pub fn preferred_bench_series<'a>(ids: impl Iterator<Item = &'a str>, part: BenchPart) -> Option<&'static str> {
+    let mut has_v1 = false;
+    for id in ids {
+        match parse_bench_id(id) {
+            Some((BENCH_SERIES_V2, candidate, _)) if candidate == part => return Some(BENCH_SERIES_V2),
+            Some((BENCH_SERIES_V1, candidate, _)) if candidate == part => has_v1 = true,
+            _ => {}
+        }
+    }
+    has_v1.then_some(BENCH_SERIES_V1)
+}
+
 pub fn generate_parallel_versions(part: BenchPart, data: &DataCatalog, layout: &KeyboardLayout, geometry: &KeyboardGeometry) -> Vec<BenchVersion> {
     if part == BenchPart::B {
         return generate_comprehensive_versions(data, layout, geometry);
@@ -135,7 +243,7 @@ pub fn generate_parallel_versions(part: BenchPart, data: &DataCatalog, layout: &
             prompts.shuffle(&mut StdRng::seed_from_u64(seed));
             let transition_class_counts = count_transition_classes(&prompts, layout, geometry);
             BenchVersion {
-                id: format!("{BENCH_SERIES}/{}/{parallel_index:02}", part.as_str()),
+                id: format!("{BENCH_SERIES_V1}/{}/{parallel_index:02}", part.as_str()),
                 part,
                 parallel_index,
                 settings: BenchSettings::fixed(part, &Config::default()),
@@ -144,6 +252,216 @@ pub fn generate_parallel_versions(part: BenchPart, data: &DataCatalog, layout: &
             }
         })
         .collect()
+}
+
+pub fn generate_parallel_versions_for_series(
+    series: &str,
+    part: BenchPart,
+    data: &DataCatalog,
+    layout: &KeyboardLayout,
+    geometry: &KeyboardGeometry,
+) -> Vec<BenchVersion> {
+    match series {
+        BENCH_SERIES_V1 => generate_parallel_versions(part, data, layout, geometry),
+        BENCH_SERIES_V2 if matches!(part, BenchPart::B | BenchPart::D) => generate_parallel_versions(part, data, layout, geometry)
+            .into_iter()
+            .map(|mut version| {
+                version.id = format!("{BENCH_SERIES_V2}/{}/{:02}", part.as_str(), version.parallel_index);
+                version
+            })
+            .collect(),
+        BENCH_SERIES_V2 => generate_v2_staged_versions(part, data, layout, geometry),
+        _ => Vec::new(),
+    }
+}
+
+fn generate_v2_staged_versions(part: BenchPart, data: &DataCatalog, layout: &KeyboardLayout, geometry: &KeyboardGeometry) -> Vec<BenchVersion> {
+    let stages = v2_stages(part, data);
+    (1..=PARALLEL_VERSION_COUNT)
+        .map(|parallel_index| {
+            let mut prompts = Vec::new();
+            for (stage_index, stage) in stages.iter().enumerate() {
+                let mut stage = stage.clone();
+                let seed = 0xB3EC_2000_D15C_A11Eu64 ^ ((part as u64) << 24) ^ ((stage_index as u64) << 8) ^ u64::from(parallel_index);
+                stage.shuffle(&mut StdRng::seed_from_u64(seed));
+                prompts.extend(stage);
+            }
+            let transition_class_counts = count_transition_classes(&prompts, layout, geometry);
+            BenchVersion {
+                id: format!("{BENCH_SERIES_V2}/{}/{parallel_index:02}", part.as_str()),
+                part,
+                parallel_index,
+                settings: BenchSettings::fixed(part, &Config::default()),
+                prompts,
+                transition_class_counts,
+            }
+        })
+        .collect()
+}
+
+fn v2_stages(part: BenchPart, data: &DataCatalog) -> Vec<Vec<BenchPrompt>> {
+    match part {
+        BenchPart::A => vec![
+            english_word_stage(data, 3, 5, 15),
+            english_word_stage(data, 6, 8, 15),
+            english_phrase_stage(data, 10, 15, 12),
+            english_phrase_stage(data, 16, 22, 12),
+            english_phrase_stage(data, 23, 29, 12),
+        ],
+        BenchPart::C => vec![
+            japanese_word_stage(data, 2, 4, 15),
+            japanese_word_stage(data, 5, 8, 15),
+            japanese_phrase_stage(data, 6, 10, 12),
+            japanese_phrase_stage(data, 11, 15, 12),
+            japanese_phrase_stage(data, 16, 20, 12),
+        ],
+        BenchPart::B | BenchPart::D => unreachable!("v2 B and D reuse v1 forms"),
+    }
+}
+
+fn english_word_stage(data: &DataCatalog, minimum: usize, maximum: usize, count: usize) -> Vec<BenchPrompt> {
+    let mut rows = data.fixed_items(DataKind::EnglishWord);
+    rows.sort_by_key(|row| row.rank.unwrap_or(usize::MAX));
+    rows.into_iter()
+        .filter(|row| (minimum..=maximum).contains(&row.text.chars().count()))
+        .take(count)
+        .map(|row| BenchPrompt {
+            text: row.text.clone(),
+            reading: None,
+            target: row.text.clone(),
+        })
+        .collect()
+}
+
+fn english_phrase_stage(data: &DataCatalog, minimum: usize, maximum: usize, count: usize) -> Vec<BenchPrompt> {
+    let mut words = data.fixed_items(DataKind::EnglishWord);
+    words.sort_by_key(|row| row.rank.unwrap_or(usize::MAX));
+    let common = words
+        .into_iter()
+        .take(3_000)
+        .map(|row| row.text.to_ascii_lowercase())
+        .collect::<HashSet<_>>();
+    let mut rows = data
+        .fixed_items(DataKind::EnglishPhrase)
+        .into_iter()
+        .filter(|row| row.tier == Tier::Core)
+        .filter(|row| (minimum..=maximum).contains(&row.text.chars().count()))
+        .filter(|row| {
+            row.text
+                .split(|character: char| !character.is_ascii_alphabetic())
+                .filter(|word| !word.is_empty())
+                .all(|word| common.contains(&word.to_ascii_lowercase()))
+        })
+        .map(|row| (sha256(&row.text), row))
+        .collect::<Vec<_>>();
+    rows.sort_by(|(left_hash, left), (right_hash, right)| left_hash.cmp(right_hash).then_with(|| left.text.cmp(&right.text)));
+    rows.into_iter()
+        .take(count)
+        .map(|(_, row)| BenchPrompt {
+            text: row.text.clone(),
+            reading: None,
+            target: row.text.clone(),
+        })
+        .collect()
+}
+
+fn japanese_word_stage(data: &DataCatalog, minimum: usize, maximum: usize, count: usize) -> Vec<BenchPrompt> {
+    let mut rows = data
+        .fixed_items(DataKind::JapaneseWord)
+        .into_iter()
+        .filter(|row| row.tier == Tier::Core)
+        .collect::<Vec<_>>();
+    rows.sort_by_key(|row| row.rank.unwrap_or(usize::MAX));
+    rows.into_iter()
+        .filter(|row| {
+            row.reading
+                .as_deref()
+                .is_some_and(|reading| (minimum..=maximum).contains(&reading.chars().count()))
+        })
+        .take(count)
+        .filter_map(japanese_prompt)
+        .collect()
+}
+
+fn japanese_phrase_stage(data: &DataCatalog, minimum: usize, maximum: usize, count: usize) -> Vec<BenchPrompt> {
+    let mut rows = data
+        .fixed_items(DataKind::JapanesePhrase)
+        .into_iter()
+        .filter(|row| {
+            row.reading
+                .as_deref()
+                .is_some_and(|reading| (minimum..=maximum).contains(&reading.chars().count()))
+        })
+        .map(|row| (sha256(row.reading.as_deref().unwrap_or_default()), row))
+        .collect::<Vec<_>>();
+    rows.sort_by(|(left_hash, left), (right_hash, right)| {
+        let left_reading = left.reading.as_deref().unwrap_or_default();
+        let right_reading = right.reading.as_deref().unwrap_or_default();
+        left_hash
+            .cmp(right_hash)
+            .then_with(|| left.text.cmp(&right.text))
+            .then_with(|| left_reading.cmp(right_reading))
+    });
+    rows.into_iter().take(count).filter_map(|(_, row)| japanese_prompt(row)).collect()
+}
+
+fn sha256(value: &str) -> [u8; 32] {
+    let mut padded = value.as_bytes().to_vec();
+    let bit_length = (padded.len() as u64).wrapping_mul(8);
+    padded.push(0x80);
+    while padded.len() % 64 != 56 {
+        padded.push(0);
+    }
+    padded.extend_from_slice(&bit_length.to_be_bytes());
+
+    let mut state = SHA256_INITIAL_STATE;
+    for block in padded.as_chunks::<64>().0 {
+        let mut words = [0_u32; 64];
+        for (index, bytes) in block.as_chunks::<4>().0.iter().enumerate() {
+            words[index] = u32::from_be_bytes(*bytes);
+        }
+        for index in 16..64 {
+            let s0 = words[index - 15].rotate_right(7) ^ words[index - 15].rotate_right(18) ^ (words[index - 15] >> 3);
+            let s1 = words[index - 2].rotate_right(17) ^ words[index - 2].rotate_right(19) ^ (words[index - 2] >> 10);
+            words[index] = words[index - 16].wrapping_add(s0).wrapping_add(words[index - 7]).wrapping_add(s1);
+        }
+
+        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = state;
+        for (constant, word) in SHA256_ROUND_CONSTANTS.into_iter().zip(words) {
+            let sum1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let choice = (e & f) ^ (!e & g);
+            let temporary1 = h.wrapping_add(sum1).wrapping_add(choice).wrapping_add(constant).wrapping_add(word);
+            let sum0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let majority = (a & b) ^ (a & c) ^ (b & c);
+            let temporary2 = sum0.wrapping_add(majority);
+            h = g;
+            g = f;
+            f = e;
+            e = d.wrapping_add(temporary1);
+            d = c;
+            c = b;
+            b = a;
+            a = temporary1.wrapping_add(temporary2);
+        }
+        for (target, value) in state.iter_mut().zip([a, b, c, d, e, f, g, h]) {
+            *target = target.wrapping_add(value);
+        }
+    }
+
+    let mut digest = [0_u8; 32];
+    for (chunk, word) in digest.as_chunks_mut::<4>().0.iter_mut().zip(state) {
+        chunk.copy_from_slice(&word.to_be_bytes());
+    }
+    digest
+}
+
+fn japanese_prompt(row: &crate::data::DataItem) -> Option<BenchPrompt> {
+    let reading = row.reading.clone()?;
+    Some(BenchPrompt {
+        text: row.text.clone(),
+        target: RomajiJudge::new(&reading).guide().to_owned(),
+        reading: Some(reading),
+    })
 }
 
 pub fn generate_version(
@@ -245,7 +563,7 @@ fn generate_comprehensive_versions(data: &DataCatalog, layout: &KeyboardLayout, 
             prompts.shuffle(&mut rng);
             let transition_class_counts = count_transition_classes(&prompts, layout, geometry);
             BenchVersion {
-                id: format!("{BENCH_SERIES}/B/{parallel_index:02}"),
+                id: format!("{BENCH_SERIES_V1}/B/{parallel_index:02}"),
                 part: BenchPart::B,
                 parallel_index,
                 settings: BenchSettings::fixed(BenchPart::B, &Config::default()),

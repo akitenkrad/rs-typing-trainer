@@ -60,6 +60,8 @@ pub struct ModeGenerator {
     original_candidate_count: usize,
     warning: Option<String>,
     recent: VecDeque<String>,
+    phrase_stages: Vec<Vec<GeneratedPrompt>>,
+    phrase_counter: usize,
     rng: StdRng,
 }
 
@@ -114,12 +116,35 @@ impl ModeGenerator {
                 })
                 .collect(),
             ModeKind::Sentence | ModeKind::Endurance => data.sentences_en().iter().map(|sentence| exact_prompt(sentence, false, 1)).collect(),
+            ModeKind::Phrase if config.phrase.lang == "ja" => data
+                .phrases_ja()
+                .iter()
+                .map(|entry| {
+                    let judge = RomajiJudge::new(&entry.reading);
+                    GeneratedPrompt {
+                        text: entry.text.clone(),
+                        reading: Some(entry.reading.clone()),
+                        target: judge.guide().to_owned(),
+                        fallback: false,
+                        kind: ItemKind::Word,
+                        weight: 1,
+                        romaji_options: Some(romaji_options),
+                    }
+                })
+                .filter(|prompt| phrase_length_matches(&config.phrase.course, prompt.reading.as_deref().unwrap_or(""), true))
+                .collect(),
+            ModeKind::Phrase => data
+                .phrases_en()
+                .iter()
+                .filter(|phrase| phrase_length_matches(&config.phrase.course, phrase, false))
+                .map(|phrase| exact_prompt(phrase, false, 1))
+                .collect(),
             ModeKind::Ngram => ngram_prompts(&config, &data, &selected),
         };
 
         if config.kind == ModeKind::Random {
             candidates = random_prompt_pool(&config);
-        } else if !selected.is_empty() && !matches!(config.kind, ModeKind::Sentence | ModeKind::Endurance | ModeKind::Ngram) {
+        } else if !selected.is_empty() && !matches!(config.kind, ModeKind::Sentence | ModeKind::Phrase | ModeKind::Endurance | ModeKind::Ngram) {
             candidates.retain(|prompt| match config.key_filter {
                 KeyFilter::Include => prompt.weight > 0,
                 KeyFilter::Only if config.kind == ModeKind::Romaji => prompt
@@ -146,6 +171,20 @@ impl ModeGenerator {
         {
             supplement_with_pseudo_words(&mut candidates, &config, &selected);
         }
+        let phrase_stages = if config.kind == ModeKind::Phrase && config.phrase.course == "mixed" {
+            let japanese = config.phrase.lang == "ja";
+            (0..3)
+                .map(|stage| {
+                    candidates
+                        .iter()
+                        .filter(|prompt| phrase_stage(prompt.reading.as_deref().unwrap_or(&prompt.text), japanese) == Some(stage))
+                        .cloned()
+                        .collect()
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
 
         Self {
             config,
@@ -154,6 +193,8 @@ impl ModeGenerator {
             original_candidate_count,
             warning,
             recent: VecDeque::new(),
+            phrase_stages,
+            phrase_counter: 0,
             rng: StdRng::seed_from_u64(seed),
         }
     }
@@ -211,6 +252,8 @@ impl ModeGenerator {
             original_texts,
             warning: None,
             recent: VecDeque::new(),
+            phrase_stages: Vec::new(),
+            phrase_counter: 0,
             rng: StdRng::seed_from_u64(seed),
         }
     }
@@ -231,15 +274,24 @@ impl ModeGenerator {
         if self.candidates.is_empty() {
             return exact_prompt("aaa", true, 1);
         }
-        let available = self
-            .candidates
+        let candidates = if self.phrase_stages.is_empty() {
+            &self.candidates
+        } else {
+            let stage = (self.phrase_counter / 5) % self.phrase_stages.len();
+            self.phrase_counter += 1;
+            &self.phrase_stages[stage]
+        };
+        if candidates.is_empty() {
+            return exact_prompt("aaa", true, 1);
+        }
+        let available = candidates
             .iter()
             .enumerate()
             .filter(|(_, prompt)| !self.recent.contains(&prompt.text))
             .map(|(index, prompt)| (index, prompt.weight.max(1)))
             .collect::<Vec<_>>();
         let index = if available.is_empty() {
-            self.rng.gen_range(0..self.candidates.len())
+            self.rng.gen_range(0..candidates.len())
         } else {
             let weights = available.iter().map(|(_, weight)| *weight).collect::<Vec<_>>();
             let selected = WeightedIndex::new(weights)
@@ -247,7 +299,7 @@ impl ModeGenerator {
                 .unwrap_or(0);
             available[selected].0
         };
-        let prompt = self.candidates[index].clone();
+        let prompt = candidates[index].clone();
         self.recent.push_back(prompt.text.clone());
         if self.recent.len() > 10 {
             self.recent.pop_front();
@@ -263,6 +315,26 @@ impl ModeGenerator {
         self.candidates
             .retain(|prompt| prompt.text != text || prompt.reading.as_deref() != reading);
         self.original_texts.retain(|candidate| candidate != text);
+    }
+}
+
+fn phrase_stage(text: &str, japanese: bool) -> Option<usize> {
+    let length = text.chars().count();
+    let ranges = if japanese {
+        [(6, 10), (11, 15), (16, 20)]
+    } else {
+        [(10, 15), (16, 22), (23, 29)]
+    };
+    ranges.iter().position(|(minimum, maximum)| (*minimum..=*maximum).contains(&length))
+}
+
+fn phrase_length_matches(course: &str, text: &str, japanese: bool) -> bool {
+    match course {
+        "short" => phrase_stage(text, japanese) == Some(0),
+        "normal" => phrase_stage(text, japanese) == Some(1),
+        "long" => phrase_stage(text, japanese) == Some(2),
+        "mixed" => phrase_stage(text, japanese).is_some(),
+        _ => false,
     }
 }
 

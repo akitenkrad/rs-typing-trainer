@@ -6,6 +6,19 @@ use rs_typing_trainer::ui::bigtext::{BigTextSize, font};
 use tempfile::TempDir;
 
 const BLOCKLIST_EN: &str = include_str!("../tools/gen-data/blocklist_en.txt");
+const MANIFEST: &str = include_str!("../data/manifest.toml");
+
+fn manifest_count(path: &str) -> usize {
+    let manifest = MANIFEST.parse::<toml::Value>().unwrap();
+    manifest["outputs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|output| output["path"].as_str() == Some(path))
+        .and_then(|output| output["count"].as_integer())
+        .and_then(|count| usize::try_from(count).ok())
+        .unwrap()
+}
 
 fn guide_is_accepted(reading: &str) -> bool {
     let mut judge = RomajiJudge::new(reading);
@@ -55,6 +68,37 @@ fn bundled_data_has_expected_counts_and_romaji_coverage() {
     }
     for row in catalog.sentences_ja() {
         assert!(guide_is_accepted(&row.reading), "untypable sentence: {}\t{}", row.text, row.reading);
+    }
+}
+
+#[test]
+fn bundled_phrases_match_the_manifest_and_input_contracts() {
+    let home = TempDir::new().unwrap();
+    let catalog = DataCatalog::load(&DataConfig::default(), home.path()).unwrap();
+    let english = catalog.fixed_items(DataKind::EnglishPhrase);
+    let japanese = catalog.fixed_items(DataKind::JapanesePhrase);
+
+    assert_eq!(english.len(), manifest_count("en_phrases.tsv.gz"));
+    assert_eq!(japanese.len(), manifest_count("ja_phrases.tsv.gz"));
+    for row in english {
+        let length = row.text.chars().count();
+        assert!((10..=29).contains(&length), "English phrase has {length} characters: {}", row.text);
+        assert!(
+            row.text.bytes().all(|byte| (0x20..=0x7e).contains(&byte)),
+            "English phrase is not printable ASCII: {}",
+            row.text
+        );
+    }
+    for row in japanese {
+        let reading = row.reading.as_deref().unwrap();
+        let length = reading.chars().count();
+        assert!(
+            (6..=20).contains(&length),
+            "Japanese phrase reading has {length} characters: {}\t{reading}",
+            row.text
+        );
+        assert!(guide_is_accepted(reading), "untypable Japanese phrase: {}\t{reading}", row.text);
+        assert_eq!(row.tier, Tier::Core);
     }
 }
 

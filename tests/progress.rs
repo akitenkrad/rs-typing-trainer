@@ -226,6 +226,38 @@ fn four_week_trend_uses_as_of_window_and_requires_records_in_two_weeks() {
 }
 
 #[test]
+fn four_week_benchmark_trend_uses_only_the_preferred_series() {
+    let as_of = Utc.with_ymd_and_hms(2026, 11, 16, 12, 0, 0).unwrap();
+    let make_bench = |id, day, bench_id: &str, wpm| {
+        let mut record = synthetic_record(id, Utc.with_ymd_and_hms(2026, 11, day, 12, 0, 0).unwrap(), "as", 1.0);
+        record.header.mode = "bench".into();
+        record.header.bench_id = Some(bench_id.into());
+        record.header.net_wpm = wpm;
+        record
+    };
+    let records = [
+        make_bench(40, 2, "bench-v1/A/01", 100.0),
+        make_bench(41, 9, "bench-v1/A/02", 50.0),
+        make_bench(42, 1, "bench-v2/A/01", 10.0),
+        make_bench(43, 15, "bench-v2/A/02", 20.0),
+    ];
+    let result = analyze_progress(
+        &records,
+        &builtin_layout("qwerty").unwrap(),
+        &geometry("ansi").unwrap(),
+        ProgressOptions {
+            model: AnalysisSettings::default(),
+            min_transition_n: 5,
+        },
+        as_of,
+        &ReferencePrompts::default(),
+    );
+    let trend = result.trends.iter().find(|trend| trend.target == "en").unwrap();
+    assert_eq!(trend.speed.iter().map(|point| point.value).collect::<Vec<_>>(), [10.0, 20.0]);
+    assert!(trend.speed_slope_per_week.is_some_and(|slope| slope > 0.0), "{trend:?}");
+}
+
+#[test]
 fn session_language_recognizes_mode_sentence_setting_and_benchmark_c() {
     let at = Utc.with_ymd_and_hms(2026, 11, 15, 12, 0, 0).unwrap();
     let mut romaji = synthetic_record(30, at, "as", 1.0);

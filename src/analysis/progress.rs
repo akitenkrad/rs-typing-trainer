@@ -11,6 +11,7 @@ use crate::analysis::model::{
     append_sufficient_statistics, build_player_model, build_player_model_from_statistics, build_player_model_from_statistics_with_layout,
     build_sufficient_statistics, expected_performance, session_language,
 };
+use crate::bench::{BenchPart, parse_bench_id, preferred_bench_series};
 use crate::engine::romaji::RomajiJudge;
 use crate::engine::session::KeystrokeKind;
 use crate::layout::KeyboardLayout;
@@ -443,7 +444,8 @@ fn aggregate_expected(model: &PlayerModel, prompts: &[ExpectedPrompt], min_n: u6
 }
 
 fn daily_trend(target: &str, records: &[SessionRecord], forms: &[SessionForm], as_of: NaiveDate) -> Option<DailyTrend> {
-    let bench_part = if target == "ja" { "/C/" } else { "/A/" };
+    let bench_part = if target == "ja" { BenchPart::C } else { BenchPart::A };
+    let bench_series = preferred_bench_series(records.iter().filter_map(|record| record.header.bench_id.as_deref()), bench_part);
     let mut by_day = BTreeMap::<NaiveDate, Vec<&SessionRecord>>::new();
     for record in records.iter().filter(|record| session_language(record) == target) {
         if let Some(date) = parse_time(&record.header.started_at).map(|time| time.date_naive()) {
@@ -456,18 +458,25 @@ fn daily_trend(target: &str, records: &[SessionRecord], forms: &[SessionForm], a
     for (date, day_records) in by_day {
         let bench = day_records
             .iter()
-            .filter(|record| record.header.bench_id.as_deref().is_some_and(|id| id.contains(bench_part)))
-            .map(|record| record.header.net_wpm)
+            .filter(|record| {
+                record
+                    .header
+                    .bench_id
+                    .as_deref()
+                    .and_then(parse_bench_id)
+                    .is_some_and(|(series, part, _)| Some(series) == bench_series && part == bench_part)
+            })
+            .copied()
             .collect::<Vec<_>>();
-        let values = if bench.is_empty() {
+        let values = if bench_series.is_some() {
+            benches.extend(bench.iter().map(|record| record.header.net_wpm));
+            bench.iter().map(|record| record.header.net_wpm).collect::<Vec<_>>()
+        } else {
             forms
                 .iter()
                 .filter(|form| form.language == target && form.started_at.date_naive() == date)
                 .map(|form| form.corrected_wpm)
                 .collect::<Vec<_>>()
-        } else {
-            benches.extend(bench.iter().copied());
-            bench
         };
         if !values.is_empty() {
             speed.push(DailyPoint {
@@ -475,7 +484,11 @@ fn daily_trend(target: &str, records: &[SessionRecord], forms: &[SessionForm], a
                 value: median(&values).unwrap_or_default(),
             });
         }
-        let accuracies = day_records.iter().map(|record| record.header.accuracy).collect::<Vec<_>>();
+        let accuracies = if bench_series.is_some() {
+            bench.iter().map(|record| record.header.accuracy).collect::<Vec<_>>()
+        } else {
+            day_records.iter().map(|record| record.header.accuracy).collect::<Vec<_>>()
+        };
         if !accuracies.is_empty() {
             accuracy.push(DailyPoint {
                 date,

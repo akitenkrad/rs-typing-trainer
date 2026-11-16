@@ -11,6 +11,7 @@ use ratatui_image::Image;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::{AnalysisPeriod, App};
+use crate::bench::{BenchPart, parse_bench_id, preferred_bench_series};
 use crate::graphics::GraphicsMode;
 use crate::i18n::{Lang, Msg};
 use crate::layout::geometry::geometry;
@@ -1622,6 +1623,13 @@ fn bench_part_label(part: &str, lang: Lang) -> &'static str {
 }
 
 fn bench_values<T>(app: &App, part: &str, value: impl Fn(&crate::record::SessionRecord) -> T) -> Vec<T> {
+    let part = match part {
+        "A" => BenchPart::A,
+        "B" => BenchPart::B,
+        "C" => BenchPart::C,
+        _ => BenchPart::D,
+    };
+    let series = preferred_bench_series(app.analysis_records.iter().filter_map(|record| record.header.bench_id.as_deref()), part);
     app.analysis_records
         .iter()
         .filter(|record| {
@@ -1629,7 +1637,8 @@ fn bench_values<T>(app: &App, part: &str, value: impl Fn(&crate::record::Session
                 .header
                 .bench_id
                 .as_deref()
-                .is_some_and(|id| id.starts_with(&format!("bench-v1/{part}/")))
+                .and_then(parse_bench_id)
+                .is_some_and(|(candidate_series, candidate_part, _)| Some(candidate_series) == series && candidate_part == part)
         })
         .map(value)
         .collect()

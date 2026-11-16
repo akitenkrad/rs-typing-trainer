@@ -12,6 +12,8 @@ use crate::error::{AppError, AppResult};
 
 const WORDS_EN_GZ: &[u8] = include_bytes!("../../data/en_words.tsv.gz");
 const WORDS_JA_GZ: &[u8] = include_bytes!("../../data/ja_words.tsv.gz");
+const PHRASES_EN_GZ: &[u8] = include_bytes!("../../data/en_phrases.tsv.gz");
+const PHRASES_JA_GZ: &[u8] = include_bytes!("../../data/ja_phrases.tsv.gz");
 const SENTENCES_EN_GZ: &[u8] = include_bytes!("../../data/en_sentences.tsv.gz");
 const SENTENCES_JA_GZ: &[u8] = include_bytes!("../../data/ja_sentences.tsv.gz");
 
@@ -21,6 +23,8 @@ static BUNDLED: OnceLock<Result<BundledText, String>> = OnceLock::new();
 pub enum DataKind {
     EnglishWord,
     JapaneseWord,
+    EnglishPhrase,
+    JapanesePhrase,
     EnglishSentence,
     JapaneseSentence,
 }
@@ -47,6 +51,8 @@ pub struct DataItem {
 struct BundledText {
     words_en: String,
     words_ja: String,
+    phrases_en: String,
+    phrases_ja: String,
     sentences_en: String,
     sentences_ja: String,
 }
@@ -60,6 +66,8 @@ pub struct JapaneseText {
 pub trait TrainingDataSource {
     fn words_en(&self) -> &[String];
     fn words_ja(&self) -> &[JapaneseText];
+    fn phrases_en(&self) -> &[String];
+    fn phrases_ja(&self) -> &[JapaneseText];
     fn sentences_en(&self) -> &[String];
     fn sentences_ja(&self) -> &[JapaneseText];
 }
@@ -68,6 +76,8 @@ pub trait TrainingDataSource {
 pub struct DataCatalog {
     words_en: Vec<String>,
     words_ja: Vec<JapaneseText>,
+    phrases_en: Vec<String>,
+    phrases_ja: Vec<JapaneseText>,
     sentences_en: Vec<String>,
     sentences_ja: Vec<JapaneseText>,
     fixed: Vec<DataItem>,
@@ -78,11 +88,35 @@ impl DataCatalog {
         let bundled = bundled_text()?;
         let words_en_source = read_or_bundled(config.words_en.as_deref(), &bundled.words_en, home)?;
         let words_ja_source = read_or_bundled(config.words_ja.as_deref(), &bundled.words_ja, home)?;
+        let phrases_en_user = config
+            .phrases_en
+            .as_deref()
+            .map(|path| std::fs::read_to_string(expand_tilde(path, home)))
+            .transpose()?;
+        let phrases_ja_user = config
+            .phrases_ja
+            .as_deref()
+            .map(|path| std::fs::read_to_string(expand_tilde(path, home)))
+            .transpose()?;
         let sentences_en_source = read_or_bundled(config.sentences_en.as_deref(), &bundled.sentences_en, home)?;
         let sentences_ja_source = read_or_bundled(config.sentences_ja.as_deref(), &bundled.sentences_ja, home)?;
         let mut fixed = Vec::new();
         fixed.extend(parse_english_items(&words_en_source, DataKind::EnglishWord, config.words_en.is_none())?);
         fixed.extend(parse_japanese_items(&words_ja_source, DataKind::JapaneseWord, config.words_ja.is_none())?);
+        let mut english_phrase_items = parse_english_items(&bundled.phrases_en, DataKind::EnglishPhrase, true)?;
+        if let Some(source) = &phrases_en_user {
+            english_phrase_items.extend(parse_english_items(source, DataKind::EnglishPhrase, false)?);
+        }
+        let mut seen_phrase_keys = HashSet::new();
+        english_phrase_items.retain(|item| seen_phrase_keys.insert(item.key.clone()));
+        fixed.extend(english_phrase_items);
+        let mut japanese_phrase_items = parse_japanese_items(&bundled.phrases_ja, DataKind::JapanesePhrase, true)?;
+        if let Some(source) = &phrases_ja_user {
+            japanese_phrase_items.extend(parse_japanese_items(source, DataKind::JapanesePhrase, false)?);
+        }
+        seen_phrase_keys.clear();
+        japanese_phrase_items.retain(|item| seen_phrase_keys.insert(item.key.clone()));
+        fixed.extend(japanese_phrase_items);
         fixed.extend(parse_english_items(
             &sentences_en_source,
             DataKind::EnglishSentence,
@@ -93,9 +127,23 @@ impl DataCatalog {
             DataKind::JapaneseSentence,
             config.sentences_ja.is_none(),
         )?);
+        let mut phrases_en = load_one_column_source(&bundled.phrases_en, true)?;
+        if let Some(source) = &phrases_en_user {
+            phrases_en.extend(load_one_column_source(source, false)?);
+        }
+        let mut seen_english_phrases = HashSet::new();
+        phrases_en.retain(|text| seen_english_phrases.insert(text.clone()));
+        let mut phrases_ja = load_japanese_source(&bundled.phrases_ja)?;
+        if let Some(source) = &phrases_ja_user {
+            phrases_ja.extend(load_japanese_source(source)?);
+        }
+        let mut seen_japanese_phrases = HashSet::new();
+        phrases_ja.retain(|row| seen_japanese_phrases.insert((row.text.clone(), row.reading.clone())));
         Ok(Self {
             words_en: load_one_column_source(&words_en_source, config.words_en.is_none())?,
             words_ja: load_japanese_source(&words_ja_source)?,
+            phrases_en,
+            phrases_ja,
             sentences_en: load_one_column_source(&sentences_en_source, config.sentences_en.is_none())?,
             sentences_ja: load_japanese_source(&sentences_ja_source)?,
             fixed,
@@ -117,10 +165,14 @@ impl DataCatalog {
         self.fixed.retain(|item| item.kind != kind || keys.contains(&item.key));
         match kind {
             DataKind::EnglishWord => self.words_en.retain(|text| keys.contains(&format!("en-word:{text}"))),
+            DataKind::EnglishPhrase => self.phrases_en.retain(|text| keys.contains(&format!("en-phrase:{text}"))),
             DataKind::EnglishSentence => self.sentences_en.retain(|text| keys.contains(&format!("en-sentence:{text}"))),
             DataKind::JapaneseWord => self
                 .words_ja
                 .retain(|row| keys.contains(&format!("ja-word:{}\t{}", row.text, row.reading))),
+            DataKind::JapanesePhrase => self
+                .phrases_ja
+                .retain(|row| keys.contains(&format!("ja-phrase:{}\t{}", row.text, row.reading))),
             DataKind::JapaneseSentence => self
                 .sentences_ja
                 .retain(|row| keys.contains(&format!("ja-sentence:{}\t{}", row.text, row.reading))),
@@ -129,6 +181,7 @@ impl DataCatalog {
 
     pub fn exclude_readings(&mut self, excluded: &HashSet<(String, String)>) {
         self.words_ja.retain(|row| !excluded.contains(&(row.text.clone(), row.reading.clone())));
+        self.phrases_ja.retain(|row| !excluded.contains(&(row.text.clone(), row.reading.clone())));
         self.sentences_ja
             .retain(|row| !excluded.contains(&(row.text.clone(), row.reading.clone())));
         self.fixed.retain(|item| {
@@ -146,6 +199,14 @@ impl TrainingDataSource for DataCatalog {
 
     fn words_ja(&self) -> &[JapaneseText] {
         &self.words_ja
+    }
+
+    fn phrases_en(&self) -> &[String] {
+        &self.phrases_en
+    }
+
+    fn phrases_ja(&self) -> &[JapaneseText] {
+        &self.phrases_ja
     }
 
     fn sentences_en(&self) -> &[String] {
@@ -216,6 +277,7 @@ fn parse_english_items(source: &str, kind: DataKind, bundled: bool) -> AppResult
         let (rank, tier) = if bundled {
             let tier_index = match kind {
                 DataKind::EnglishWord => 2,
+                DataKind::EnglishPhrase => 2,
                 DataKind::EnglishSentence => 2,
                 _ => unreachable!(),
             };
@@ -266,6 +328,15 @@ fn parse_japanese_items(source: &str, kind: DataKind, bundled: bool) -> AppResul
                         .map_err(|_| AppError::Record(format!("bundled Japanese word line {} has an invalid rank", index + 1)))?;
                     (Some(rank), None, None, parse_tier(fields[3], index + 1)?)
                 }
+                DataKind::JapanesePhrase => {
+                    if fields.len() != 4 {
+                        return Err(AppError::Record(format!("bundled Japanese phrase line {} needs four fields", index + 1)));
+                    }
+                    let rank = fields[2]
+                        .parse::<usize>()
+                        .map_err(|_| AppError::Record(format!("bundled Japanese phrase line {} has an invalid rank", index + 1)))?;
+                    (Some(rank), None, None, parse_tier(fields[3], index + 1)?)
+                }
                 DataKind::JapaneseSentence => {
                     if fields.len() != 5 {
                         return Err(AppError::Record(format!(
@@ -311,6 +382,8 @@ fn kind_key(kind: DataKind) -> &'static str {
     match kind {
         DataKind::EnglishWord => "en-word",
         DataKind::JapaneseWord => "ja-word",
+        DataKind::EnglishPhrase => "en-phrase",
+        DataKind::JapanesePhrase => "ja-phrase",
         DataKind::EnglishSentence => "en-sentence",
         DataKind::JapaneseSentence => "ja-sentence",
     }
@@ -322,6 +395,8 @@ fn bundled_text() -> AppResult<&'static BundledText> {
             Ok(BundledText {
                 words_en: decompress(WORDS_EN_GZ)?,
                 words_ja: decompress(WORDS_JA_GZ)?,
+                phrases_en: decompress(PHRASES_EN_GZ)?,
+                phrases_ja: decompress(PHRASES_JA_GZ)?,
                 sentences_en: decompress(SENTENCES_EN_GZ)?,
                 sentences_ja: decompress(SENTENCES_JA_GZ)?,
             })

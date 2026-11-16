@@ -11,6 +11,7 @@ use unicode_width::UnicodeWidthChar;
 
 use crate::analysis::grades::Level;
 use crate::analysis::metrics::GroupMetric;
+use crate::bench::parse_bench_id;
 use crate::graphics::{CellPixels, GraphicsDetection};
 use crate::i18n::Lang;
 use crate::layout::geometry::Finger;
@@ -1376,11 +1377,8 @@ fn aggregate_trend(records: &[SessionRecord], kind: MetricKind, lang: Lang) -> B
             .header
             .bench_id
             .as_deref()
-            .and_then(|id| id.split('/').nth(1))
-            .map(|part| match lang {
-                Lang::En => format!("bench-{part}"),
-                Lang::Ja => format!("ベンチ-{part}"),
-            })
+            .and_then(parse_bench_id)
+            .map(|(bench_series, part, _)| format!("{bench_series}-{}", part.as_str()))
             .unwrap_or_else(|| mode_label(&record.header.mode, lang));
         groups
             .entry(series)
@@ -1409,6 +1407,7 @@ pub(crate) fn mode_label(mode: &str, lang: Lang) -> String {
         "words" => "単語",
         "romaji" => "ローマ字",
         "sentence" => "短文",
+        "phrase" => "句",
         "ngram" => "n-gram",
         "bench" => "ベンチ",
         "adaptive" => "適応",

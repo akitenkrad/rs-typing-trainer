@@ -15,7 +15,10 @@ use crate::analysis::prescription::{
     ControlCandidate, DifficultyState, Evidence, Posterior, PrescriptionBaseline, PrescriptionTarget, adjust_difficulty,
     evaluate_stored_prescription, prescription_trends, real_word_records_since, record_prescription_session, select_controls,
 };
-use crate::bench::{BenchPart, BenchResultSummary, BenchResume, BenchSettings, generate_version, next_parallel_index};
+use crate::bench::{
+    BenchPart, BenchResultSummary, BenchResume, BenchSettings, generate_parallel_versions_for_series, next_parallel_index, parse_bench_id,
+    preferred_bench_series,
+};
 use crate::config::{Config, KeyFilter, KeyboardConfig, ModeConfig, ModeKind, SessionConfig};
 use crate::data::{DataCatalog, DataKind, TrainingDataSource};
 use crate::engine::modes::{GeneratedPrompt, ModeGenerator};
@@ -458,6 +461,10 @@ impl App {
         if let Ok(params) = serde_json::from_str::<serde_json::Value>(&record.header.mode_params) {
             if let Some(lang) = params.get("lang").and_then(serde_json::Value::as_str) {
                 config.mode.sentence.lang = lang.to_owned();
+                config.mode.phrase.lang = lang.to_owned();
+            }
+            if let Some(course) = params.get("course").and_then(serde_json::Value::as_str) {
+                config.mode.phrase.course = course.to_owned();
             }
             config.pacer.target_wpm = params.get("pacer_target_wpm").and_then(serde_json::Value::as_f64);
         }
@@ -672,9 +679,17 @@ impl App {
         let records = db::load_records_filtered(&self.db_path(), None, None).unwrap_or_default();
         let geometry = crate::layout::geometry::geometry(&self.config.keyboard.geometry).or_else(|| crate::layout::geometry::geometry("ansi"));
         let Some(geometry) = geometry else { return };
+        let series = preferred_bench_series(records.iter().filter_map(|record| record.header.bench_id.as_deref()), BenchPart::A);
         let bench_a = records
             .iter()
-            .filter(|record| record.header.bench_id.as_deref().is_some_and(|id| id.contains("/A/")))
+            .filter(|record| {
+                record
+                    .header
+                    .bench_id
+                    .as_deref()
+                    .and_then(parse_bench_id)
+                    .is_some_and(|(candidate_series, part, _)| Some(candidate_series) == series && part == BenchPart::A)
+            })
             .collect::<Vec<_>>();
         let reaction_scores = bench_a
             .iter()
@@ -865,7 +880,7 @@ impl App {
             KeyCode::Down | KeyCode::Char('j') => self.mode_selected = (self.mode_selected + 1).min(MODES.len() - 1),
             KeyCode::Char('p') | KeyCode::Char('P') => {
                 let selected = MODES[self.mode_selected];
-                if matches!(selected, ModeKind::Words | ModeKind::Sentence | ModeKind::Adaptive) {
+                if matches!(selected, ModeKind::Words | ModeKind::Sentence | ModeKind::Phrase | ModeKind::Adaptive) {
                     self.config.pacer.enabled = !self.config.pacer.enabled;
                 }
             }
@@ -879,6 +894,18 @@ impl App {
             }
             KeyCode::Char('l') | KeyCode::Char('L') if MODES[self.mode_selected] == ModeKind::Adaptive => {
                 self.config.adaptive.lang = if self.config.adaptive.lang == "en" { "ja" } else { "en" }.to_owned();
+            }
+            KeyCode::Char('l') | KeyCode::Char('L') if MODES[self.mode_selected] == ModeKind::Phrase => {
+                self.config.mode.phrase.lang = if self.config.mode.phrase.lang == "en" { "ja" } else { "en" }.to_owned();
+            }
+            KeyCode::Char('c') | KeyCode::Char('C') if MODES[self.mode_selected] == ModeKind::Phrase => {
+                self.config.mode.phrase.course = match self.config.mode.phrase.course.as_str() {
+                    "short" => "normal",
+                    "normal" => "long",
+                    "long" => "mixed",
+                    _ => "short",
+                }
+                .to_owned();
             }
             KeyCode::Char(']') => {
                 self.config.session.preview_items = (self.config.session.preview_items + 1).min(3);
@@ -900,6 +927,7 @@ impl App {
                     self.config.mode.kind,
                     ModeKind::Random
                         | ModeKind::Sentence
+                        | ModeKind::Phrase
                         | ModeKind::Adaptive
                         | ModeKind::Unlock
                         | ModeKind::Rhythm
@@ -1040,12 +1068,13 @@ impl App {
                 self.reload_analysis();
             }
             KeyCode::Char('m') | KeyCode::Char('M') => {
-                const MODES: [Option<&str>; 12] = [
+                const MODES: [Option<&str>; 13] = [
                     None,
                     Some("random"),
                     Some("words"),
                     Some("romaji"),
                     Some("sentence"),
+                    Some("phrase"),
                     Some("ngram"),
                     Some("bench"),
                     Some("adaptive"),
@@ -1959,11 +1988,12 @@ impl App {
             .filter(|summary| summary_matches(summary, filter))
             .map(history_effective_mode)
             .collect::<BTreeSet<_>>();
-        const ORDER: [&str; 10] = [
+        const ORDER: [&str; 11] = [
             "random",
             "words",
             "romaji",
             "sentence",
+            "phrase",
             "ngram",
             "adaptive",
             "unlock",
@@ -2142,7 +2172,10 @@ impl App {
         } else {
             self.unlock_state = None;
         }
-        let pacer_supported = matches!(self.config.mode.kind, ModeKind::Words | ModeKind::Sentence | ModeKind::Adaptive);
+        let pacer_supported = matches!(
+            self.config.mode.kind,
+            ModeKind::Words | ModeKind::Sentence | ModeKind::Phrase | ModeKind::Adaptive
+        );
         self.config.pacer.target_wpm = (!is_bench && pacer_supported && self.config.pacer.enabled)
             .then(|| crate::practice::pacer::target_wpm(&records, self.config.pacer.ratio, self.config.pacer.min_wpm));
         if !is_bench
@@ -2169,7 +2202,10 @@ impl App {
             let options = DeckOptions {
                 date,
                 user_salt: salt,
-                size: if matches!(kind, DataKind::EnglishSentence | DataKind::JapaneseSentence) {
+                size: if matches!(
+                    kind,
+                    DataKind::EnglishPhrase | DataKind::JapanesePhrase | DataKind::EnglishSentence | DataKind::JapaneseSentence
+                ) {
                     512
                 } else {
                     2_048
@@ -2274,11 +2310,13 @@ impl App {
             None
         };
         let bench_prompts = self.bench_run.as_ref().map(|run| {
-            generate_version(run.part, run.parallel_index, &catalog, &practice_layout, &physical)
-                .prompts
-                .into_iter()
-                .map(|prompt| GeneratedPrompt::fixed(prompt.text, prompt.reading, prompt.target))
-                .collect::<Vec<_>>()
+            generate_parallel_versions_for_series(crate::bench::BENCH_SERIES, run.part, &catalog, &practice_layout, &physical)
+                [usize::from(run.parallel_index.clamp(1, crate::bench::PARALLEL_VERSION_COUNT) - 1)]
+            .clone()
+            .prompts
+            .into_iter()
+            .map(|prompt| GeneratedPrompt::fixed(prompt.text, prompt.reading, prompt.target))
+            .collect::<Vec<_>>()
         });
         let mut mode_generator = if let Some(plan) = adaptive_plan.as_ref() {
             ModeGenerator::new_adaptive(
@@ -2322,7 +2360,7 @@ impl App {
         };
         let first = word_from_text(&first_prompt.target);
         let next = word_from_text(&next_prompt.target);
-        let item_timeout = if matches!(self.config.mode.kind, ModeKind::Sentence | ModeKind::Endurance) {
+        let item_timeout = if matches!(self.config.mode.kind, ModeKind::Sentence | ModeKind::Phrase | ModeKind::Endurance) {
             Duration::ZERO
         } else {
             self.config.session.item_timeout()
@@ -2907,11 +2945,12 @@ fn posterior_from_metrics(metrics: &DetailedMetrics, from: &str, to: &str, fallb
     )
 }
 
-const MODES: [ModeKind; 10] = [
+const MODES: [ModeKind; 11] = [
     ModeKind::Random,
     ModeKind::Words,
     ModeKind::Romaji,
     ModeKind::Sentence,
+    ModeKind::Phrase,
     ModeKind::Ngram,
     ModeKind::Adaptive,
     ModeKind::Unlock,
@@ -2927,6 +2966,8 @@ fn daily_data_kind(config: &Config) -> Option<DataKind> {
         ModeKind::Romaji => Some(DataKind::JapaneseWord),
         ModeKind::Sentence | ModeKind::Endurance if config.mode.sentence.lang == "ja" => Some(DataKind::JapaneseSentence),
         ModeKind::Sentence | ModeKind::Endurance => Some(DataKind::EnglishSentence),
+        ModeKind::Phrase if config.mode.phrase.lang == "ja" => Some(DataKind::JapanesePhrase),
+        ModeKind::Phrase => Some(DataKind::EnglishPhrase),
         ModeKind::Ngram if config.mode.ngram.source == "corpus" => Some(DataKind::EnglishWord),
         ModeKind::Random | ModeKind::Ngram => None,
     }
@@ -2936,6 +2977,8 @@ fn daily_kind_name(kind: DataKind) -> &'static str {
     match kind {
         DataKind::EnglishWord => "word-en",
         DataKind::JapaneseWord => "word-ja",
+        DataKind::EnglishPhrase => "phrase-en",
+        DataKind::JapanesePhrase => "phrase-ja",
         DataKind::EnglishSentence => "sentence-en",
         DataKind::JapaneseSentence => "sentence-ja",
     }
@@ -2944,8 +2987,10 @@ fn daily_kind_name(kind: DataKind) -> &'static str {
 fn data_item_key(kind: DataKind, text: &str, reading: Option<&str>) -> String {
     match kind {
         DataKind::EnglishWord => format!("en-word:{text}"),
+        DataKind::EnglishPhrase => format!("en-phrase:{text}"),
         DataKind::EnglishSentence => format!("en-sentence:{text}"),
         DataKind::JapaneseWord => format!("ja-word:{text}\t{}", reading.unwrap_or_default()),
+        DataKind::JapanesePhrase => format!("ja-phrase:{text}\t{}", reading.unwrap_or_default()),
         DataKind::JapaneseSentence => format!("ja-sentence:{text}\t{}", reading.unwrap_or_default()),
     }
 }
@@ -2985,6 +3030,7 @@ fn replay_mode_kind(name: &str) -> ModeKind {
         "words" => ModeKind::Words,
         "romaji" => ModeKind::Romaji,
         "sentence" => ModeKind::Sentence,
+        "phrase" => ModeKind::Phrase,
         "ngram" => ModeKind::Ngram,
         "adaptive" => ModeKind::Adaptive,
         "unlock" => ModeKind::Unlock,

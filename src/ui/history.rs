@@ -310,6 +310,8 @@ pub(crate) fn mode_label(mode: &str, lang: Lang) -> &str {
         ("romaji", Lang::Ja) => "日本語の単語",
         ("sentence", Lang::En) => "Sentences",
         ("sentence", Lang::Ja) => "短文",
+        ("phrase", Lang::En) => "Phrases",
+        ("phrase", Lang::Ja) => "句",
         ("ngram", Lang::En) => "N-grams",
         ("ngram", Lang::Ja) => "文字の組み合わせ",
         ("adaptive", Lang::En) => "Adaptive",

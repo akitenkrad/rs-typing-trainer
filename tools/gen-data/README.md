@@ -8,6 +8,8 @@ The generator pins lindera 6.2.0 and enables its `embed-ipadic` feature. During 
 
 The generator uses IPADIC's `reading` field and never its `pronunciation` field. Sentence readings preserve the written particles `は`, `へ`, and `を`; ruby readings override morphological readings at annotated positions. A sentence containing a token whose reading is `*` is excluded. Japanese words are counted by IPADIC base form, and each base form is segmented again so its reading is obtained from the base form rather than copied from an inflected occurrence.
 
+The authored Japanese phrase source is `phrases/ja_phrases.tsv`. The generator validates every row instead of discarding invalid rows, ranks rows by reading length with source order as the tie-breaker, and emits every row with `tier=core`. It also compares the authored reading with an IPADIC reading and writes mismatches to `target/regen-out/ja_phrases_mismatch.tsv` without changing the source.
+
 ## Inputs
 
 Use the supplied input directory, or recreate its layout with:
@@ -50,7 +52,9 @@ The font files start with the 8-byte magic `SHNFONT\0`, a format version byte (1
 
 `--extra-aozora` is optional and points directly to a directory containing `selection.tsv` and `zips/`. Missing archives in that supplemental selection are reported and skipped. The generator writes gzip-compressed TSV files to the selected output directory and review candidates to `tools/gen-data/review/`. Repeated writes are content-aware and replace changed files atomically. Gzip timestamps are fixed at zero; sampling uses a fixed seed and an in-tree FNV-1a implementation; maps and tie-breaking use sorted order.
 
-For English sentences made entirely of one or more quoted dialogue parts, the generator removes the surrounding double quotes, trims each part, and joins the parts with one ASCII space before applying the sentence filters.
+English phrases use the same Tatoeba CC0 processing, blocklist, printable-ASCII check, duplicate handling, and tier calculation as English sentences, with a 10–29 character range instead of 30–90. For English phrases and sentences made entirely of one or more quoted dialogue parts, the generator removes the surrounding double quotes, trims each part, and joins the parts with one ASCII space before applying the length filter.
+
+Japanese phrase surfaces reject ASCII alphanumerics, whitespace, and `、`/`。`; readings must contain 6–20 hiragana, long-vowel marks, or `！`/`？`. Surfaces and readings must each be unique. The IPADIC comparison uses the sentence-reading path: katakana readings are converted to hiragana, written particles `は`, `へ`, and `を` are preserved, and written `！`/`？` are retained.
 
 ## Review and overrides
 

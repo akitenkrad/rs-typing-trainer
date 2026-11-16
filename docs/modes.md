@@ -10,6 +10,7 @@
 | `words` | English words | `include` or `only` |
 | `romaji` | Japanese words shown with their kana reading | `include` or `only`, evaluated against accepted romaji spellings |
 | `sentence` | English or Japanese sentences | No key picker; set `mode.sentence.lang` to `en` or `ja` |
+| `phrase` | English or Japanese phrases | No key picker; choose the language and length course on the mode screen |
 | `ngram` | Two- or three-character transitions | Cartesian `pairs` or n-grams found in the bundled corpus |
 | `adaptive` | Cost-weighted weak transitions in real words and drills | Automatic from shrinkage estimates |
 | `unlock` | Words and fallback pseudo-words using unlocked keys | Automatic, stored per layout |
@@ -23,15 +24,15 @@ The title opens the mode selector. `words`, `romaji`, and `ngram` then open the 
 
 The previous ten prompts are excluded from each draw while enough candidates remain. With fewer than 20 matches, the UI warns. Only `words` with `only` adds pseudo-words, made strictly from the selected keys. `romaji`, `sentence`, and `words` with `include` repeat real candidates by relaxing the previous-ten rule.
 
-Japanese sentences display the surface form, kana reading, and live romaji guide as three independently wrapped rows. Completed kana use a distinct style. Sentence mode never applies the per-item timeout; setting `item_timeout_seconds = 0` also hides the timer in every other mode.
+Japanese sentences and phrases display the surface form, kana reading, and live romaji guide as three independently wrapped rows. Completed kana use a distinct style. Sentence and phrase modes never apply or display the per-item timeout. Phrase mode still follows the normal session duration. Setting `item_timeout_seconds = 0` hides the timer in every timed mode.
 
-`adaptive`, `unlock`, `rhythm`, `burst` and `endurance` start directly. Press `P` on the mode-selection screen to toggle the pacer for `words`, `sentence` or `adaptive`; press `L` on `adaptive` to switch its practice language independently of the interface; use `[` and `]` for zero through three preview items. See [Training tools](training.md) for goals, initial values and configuration.
+`phrase`, `adaptive`, `unlock`, `rhythm`, `burst` and `endurance` start directly. In phrase mode, `L` switches English/Japanese and `C` cycles short, normal, long and mixed. English length ranges are 10–15, 16–22 and 23–29 display characters; Japanese ranges are 6–10, 11–15 and 16–20 reading characters. Mixed repeats five short, five normal and five long prompts in that order. Press `P` on the mode-selection screen to toggle the pacer for `words`, `sentence`, `phrase` or `adaptive`; `L` on `adaptive` switches its practice language independently of the interface; `[` and `]` choose zero through three preview items. See [Training tools](training.md) for goals, initial values and configuration.
 
 ## Daily rotation
 
 Practice modes use a deterministic daily deck. The complete bundled catalog remains available separately for fixed benchmarks. `include` and `only` filter the complete candidate population before it is divided into high-frequency core and broad-tail pools. A user-specific random salt stored in the session database keeps two installations from receiving the same deck.
 
-The default mix is 65% core. Previously mistyped items return after 1, 3, 7, and 14 days, up to 10% of a deck. Sentences not shown before are selected first, then less-exposed sentences. Weekly themes favor digits and symbols on Wednesday, one Japanese author on Friday, and a 50% broad tail on Sunday. The theme appears on the title and mode-selection screens.
+The default mix is 65% core. Previously mistyped items return after 1, 3, 7, and 14 days, up to 10% of a deck. Phrases and sentences not shown before are selected first, then less-exposed items. Weekly themes favor digits and symbols on Wednesday, one Japanese author on Friday, and a 50% broad tail on Sunday. The theme appears on the title and mode-selection screens.
 
 ```toml
 [practice]
@@ -79,16 +80,16 @@ Blind practice forces `advance`. With `retry_on_error = true`, a mistyped item i
 
 ## User data files
 
-Set any of `data.words_en`, `data.words_ja`, `data.sentences_en`, or `data.sentences_ja` to replace that bundled sample category. Blank lines and lines beginning with `#` are ignored.
+`data.words_en`, `data.words_ja`, `data.sentences_en` and `data.sentences_ja` replace the corresponding bundled category. `data.phrases_en` and `data.phrases_ja` add user phrases to the bundled phrases; duplicate rows keep the bundled copy. Blank lines and lines beginning with `#` are ignored.
 
-English words and sentences use one UTF-8 TSV column:
+English words, phrases and sentences use one UTF-8 TSV column:
 
 ```text
 quiet
 river
 ```
 
-Japanese words and sentences use `text<TAB>reading`:
+Japanese words, phrases and sentences use `text<TAB>reading`:
 
 ```text
 公園	こうえん

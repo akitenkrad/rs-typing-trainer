@@ -45,6 +45,8 @@ fn configuration_tables_match_every_struct_default() {
     flatten("", &toml::Value::try_from(Config::default()).unwrap(), &mut actual);
     let unset = [
         "adaptive.error_weight",
+        "data.phrases_en",
+        "data.phrases_ja",
         "data.sentences_en",
         "data.sentences_ja",
         "data.words_en",

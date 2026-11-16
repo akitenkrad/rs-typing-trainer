@@ -171,3 +171,29 @@ fn sparse_transitions_are_not_ranked_as_high_cost_candidates() {
     assert!(text.contains("a→s"), "{text}");
     assert!(!text.contains("z→z"), "{text}");
 }
+
+#[test]
+fn mixed_benchmark_series_keep_previous_percentiles_and_four_week_trend_separate() {
+    let records = vec![
+        record("2026-10-21", "bench", Some("bench-v1/A/01"), 100.0, 0.98),
+        record("2026-10-28", "bench", Some("bench-v1/A/02"), 80.0, 0.98),
+        record("2026-11-04", "bench", Some("bench-v1/A/03"), 60.0, 0.98),
+        record("2026-10-25", "bench", Some("bench-v2/A/01"), 10.0, 0.98),
+        record("2026-11-15", "bench", Some("bench-v2/A/02"), 20.0, 0.98),
+    ];
+    let config = Config::default();
+    let axes = summary::skill_axis_values(&records, &builtin_layout("qwerty").unwrap(), &config);
+    let speed = axes.iter().find(|value| value.axis == summary::SkillAxis::SustainedSpeed).unwrap();
+    assert_eq!(speed.raw, Some(20.0));
+    assert_eq!(
+        speed.percentile, None,
+        "three v1 results must not make two v2 results percentile-eligible"
+    );
+
+    let text = summary::generate(&records, &config, NaiveDate::from_ymd_opt(2026, 11, 16).unwrap(), Lang::En).to_text();
+    assert!(text.contains("+3.3 WPM/week"), "{text}");
+    assert!(
+        text.contains("+10.0 vs previous"),
+        "the latest v2 result must compare only with v2: {text}"
+    );
+}

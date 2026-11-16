@@ -143,6 +143,29 @@ fn mode_menu_and_help_are_left_aligned_in_both_languages() {
 }
 
 #[test]
+fn phrase_mode_is_shown_and_language_and_course_can_be_changed() {
+    for lang in [Lang::En, Lang::Ja] {
+        let mut config = Config::default();
+        config.general.lang = lang;
+        config.mode.kind = ModeKind::Phrase;
+        let mut app = test_app(config);
+        app.handle_key(key(KeyCode::Enter));
+        let output = text(&render(&app, 100, 28));
+        assert!(
+            output.contains(if lang == Lang::En { "phrase — Phrases" } else { "phrase — 句" }),
+            "{output}"
+        );
+        assert!(output.contains("[L]"), "{output}");
+        assert!(output.contains("[C]"), "{output}");
+
+        app.handle_key(key(KeyCode::Char('l')));
+        app.handle_key(key(KeyCode::Char('c')));
+        assert_eq!(app.config.mode.phrase.lang, "ja");
+        assert_eq!(app.config.mode.phrase.course, "long");
+    }
+}
+
+#[test]
 fn benchmark_selection_uses_arrows_and_enter_for_part_d() {
     let mut app = test_app(Config::default());
     app.handle_key(key(KeyCode::Char('b')));
@@ -189,7 +212,7 @@ fn benchmark_result_and_summary_text_are_left_aligned_at_80_by_24() {
     ));
     app.screen = Screen::Result;
     let result = render(&app, 80, 24);
-    assert_eq!(phrase_column(&result, "Part A English words"), 3);
+    assert_eq!(phrase_column(&result, "Part A English words and phrases"), 3);
     assert_eq!(phrase_column(&result, "Version:"), 3);
 
     app.active_bench_id = None;
@@ -428,6 +451,41 @@ fn sentence_mode_ignores_the_item_timeout() {
 }
 
 #[test]
+fn phrase_mode_ignores_the_item_timeout() {
+    let mut config = Config::default();
+    config.mode.kind = ModeKind::Phrase;
+    config.mode.phrase.lang = "ja".to_owned();
+    config.mode.phrase.course = "mixed".to_owned();
+    config.session.item_timeout_seconds = 5;
+    config.ui.animation_enabled = false;
+    let mut app = test_app(config);
+    let now = Instant::now();
+    start_selected_mode(&mut app, now);
+
+    app.on_tick_at(Duration::from_secs(6), now + Duration::from_secs(6)).unwrap();
+
+    assert_eq!(app.game.as_ref().unwrap().session.phase(), SessionPhase::Active);
+}
+
+#[test]
+fn phrase_mode_hides_the_item_timer() {
+    let mut config = Config::default();
+    config.general.lang = Lang::Ja;
+    config.mode.kind = ModeKind::Phrase;
+    config.mode.phrase.lang = "ja".to_owned();
+    config.mode.phrase.course = "mixed".to_owned();
+    config.session.item_timeout_seconds = 5;
+    config.ui.animation_enabled = false;
+    let mut app = test_app(config);
+    start_selected_mode(&mut app, Instant::now());
+
+    let layout = resolve_playing_layout(&app, Rect::new(1, 1, 118, 78));
+    assert!(!layout.show_timer, "{layout:?}");
+    let output = text(&render(&app, 120, 80));
+    assert!(!output.contains("単語タイマー"), "{output}");
+}
+
+#[test]
 fn zero_item_timeout_hides_the_timer_bar() {
     let mut config = Config::default();
     config.session.item_timeout_seconds = 0;
@@ -479,11 +537,16 @@ fn mode_app(kind: ModeKind, lang: Lang, configure: impl FnOnce(&mut Config)) -> 
     let mut config = Config::default();
     config.general.lang = lang;
     config.mode.kind = kind;
-    if kind == ModeKind::Sentence {
-        config.mode.sentence.lang = match lang {
+    if matches!(kind, ModeKind::Sentence | ModeKind::Phrase) {
+        let selected_lang = match lang {
             Lang::En => "en".to_owned(),
             Lang::Ja => "ja".to_owned(),
         };
+        if kind == ModeKind::Sentence {
+            config.mode.sentence.lang = selected_lang;
+        } else {
+            config.mode.phrase.lang = selected_lang;
+        }
     }
     config.ui.animation_enabled = false;
     configure(&mut config);
@@ -768,6 +831,31 @@ fn prompt_style_setting_chooses_large_or_normal_text() {
     let tiny = resolve_playing_layout(&large, Rect::new(1, 1, 78, 8));
     assert_eq!(tiny.bigtext, None, "{tiny:?}");
     assert_eq!(tiny.stage, PromptLayoutStage::NormalKeyboard);
+}
+
+#[test]
+fn phrase_prompts_use_item_and_romaji_layouts_with_small_screen_fallback() {
+    let english = mode_app(ModeKind::Phrase, Lang::En, |config| {
+        config.display.prompt_style = "large".to_owned();
+        config.mode.phrase.course = "long".to_owned();
+    });
+    let roomy = resolve_playing_layout(&english, Rect::new(1, 1, 118, 38));
+    assert!(roomy.bigtext.is_some(), "{roomy:?}");
+    let tiny = resolve_playing_layout(&english, Rect::new(1, 1, 78, 8));
+    assert_eq!(tiny.bigtext, None, "{tiny:?}");
+    assert_eq!(tiny.stage, PromptLayoutStage::NormalKeyboard);
+
+    let japanese = mode_app(ModeKind::Phrase, Lang::Ja, |config| {
+        config.display.prompt_style = "normal".to_owned();
+        config.mode.phrase.course = "short".to_owned();
+    });
+    let game = japanese.game.as_ref().unwrap();
+    let reading = game.current_prompt.reading.as_ref().unwrap();
+    let terminal = render(&japanese, 100, 30);
+    let compact = text(&terminal).chars().filter(|character| !character.is_whitespace()).collect::<String>();
+    assert!(compact.contains(&format!("表記{}", game.current_prompt.text)), "{compact}");
+    assert!(compact.contains(&format!("かな{reading}")), "{compact}");
+    assert!(compact.contains("ローマ字"), "{compact}");
 }
 
 #[test]

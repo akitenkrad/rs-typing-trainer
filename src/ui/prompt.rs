@@ -53,6 +53,7 @@ fn prompt_kind(app: &App, game: &GameState) -> PromptKind {
     let japanese = game.current_prompt.reading.is_some();
     match app.config.mode.kind {
         ModeKind::Romaji => PromptKind::Japanese { sentence: false },
+        ModeKind::Phrase if japanese => PromptKind::Japanese { sentence: false },
         ModeKind::Adaptive if japanese => PromptKind::Japanese { sentence: false },
         ModeKind::Sentence | ModeKind::Endurance if japanese => PromptKind::Japanese { sentence: true },
         ModeKind::Sentence | ModeKind::Endurance => PromptKind::Sentence,

@@ -132,6 +132,7 @@ fn is_core(item: &DataItem) -> bool {
     match item.kind {
         DataKind::EnglishWord => item.rank.is_some_and(|rank| rank <= 2_000),
         DataKind::JapaneseWord => item.rank.is_some_and(|rank| rank <= 1_500),
+        DataKind::EnglishPhrase | DataKind::JapanesePhrase => item.tier == Tier::Core,
         DataKind::EnglishSentence | DataKind::JapaneseSentence => item.tier == Tier::Core,
     }
 }
@@ -165,7 +166,10 @@ fn featured_author(items: &[DataItem], theme: WeeklyTheme, seed: u64) -> Option<
 
 fn sort_pool(pool: &mut [DataItem], exposures: &HashMap<String, Exposure>, theme: WeeklyTheme, author: Option<&str>, seed: u64) {
     pool.sort_by(|left, right| {
-        let exposure_cmp = if matches!(left.kind, DataKind::EnglishSentence | DataKind::JapaneseSentence) {
+        let exposure_cmp = if matches!(
+            left.kind,
+            DataKind::EnglishPhrase | DataKind::JapanesePhrase | DataKind::EnglishSentence | DataKind::JapaneseSentence
+        ) {
             exposure_count(exposures, left).cmp(&exposure_count(exposures, right))
         } else {
             Ordering::Equal

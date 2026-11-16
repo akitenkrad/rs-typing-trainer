@@ -237,7 +237,7 @@ fn resolve_optional_rows(app: &App, available: u16, required: u16) -> (bool, u16
 fn timer_requested(app: &App) -> bool {
     !matches!(
         app.config.mode.kind,
-        crate::config::ModeKind::Sentence | crate::config::ModeKind::Endurance
+        crate::config::ModeKind::Sentence | crate::config::ModeKind::Phrase | crate::config::ModeKind::Endurance
     ) && !app.config.session.item_timeout().is_zero()
 }
 

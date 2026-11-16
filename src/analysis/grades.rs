@@ -11,6 +11,7 @@ use crate::analysis::metrics::AnalysisSettings;
 use crate::analysis::model::{ModelView, PlayerModel, build_player_model, session_language};
 use crate::analysis::progress::SessionForm;
 use crate::analysis::style::diagnose_style;
+use crate::bench::{BenchPart, parse_bench_id, preferred_bench_series};
 use crate::data::JapaneseText;
 use crate::engine::romaji::RomajiJudge;
 use crate::layout::KeyboardLayout;
@@ -490,11 +491,19 @@ fn current_language_grade(
 }
 
 fn benchmark_records<'a>(records: &'a [SessionRecord], language: &str, at: Option<DateTime<Utc>>) -> Vec<&'a SessionRecord> {
-    let part = if language == "ja" { "/C/" } else { "/A/" };
+    let part = if language == "ja" { BenchPart::C } else { BenchPart::A };
+    let series = preferred_bench_series(records.iter().filter_map(|record| record.header.bench_id.as_deref()), part);
     let mut rows = records
         .iter()
         .filter(|record| record.header.metrics_version > 0)
-        .filter(|record| record.header.bench_id.as_deref().is_some_and(|id| id.contains(part)))
+        .filter(|record| {
+            record
+                .header
+                .bench_id
+                .as_deref()
+                .and_then(parse_bench_id)
+                .is_some_and(|(candidate_series, candidate_part, _)| Some(candidate_series) == series && candidate_part == part)
+        })
         .filter(|record| at.is_none_or(|at| parse_time(&record.header.started_at).is_some_and(|started| started <= at)))
         .collect::<Vec<_>>();
     rows.sort_by_key(|record| parse_time(&record.header.started_at));

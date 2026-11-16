@@ -22,7 +22,7 @@ Every supported key is listed here. “Unset” means that the application deriv
 | `keyboard.finger_guide` | boolean | `true` | Show the coloured finger guide. |
 | `keyboard.digit6_finger` | `left-index` / `right-index` | `"left-index"` | Finger assigned to the `6` key. |
 | `session.duration_seconds` | integer | `60` | Normal session duration. |
-| `session.item_timeout_seconds` | integer | `5` | Per-item limit; zero disables it. |
+| `session.item_timeout_seconds` | integer | `5` | Per-item limit for modes other than `sentence`, `phrase` and `endurance`; zero disables it. |
 | `session.error_mode` | `stop` / `advance` | `"stop"` | Whether a mistype blocks progress or advances the cursor. |
 | `session.preview_items` | integer | `1` | Look-ahead items, from 0 through 3. |
 | `session.blind` | boolean | `false` | Hide typed progress until an item ends. |
@@ -41,8 +41,12 @@ Every supported key is listed here. “Unset” means that the application deriv
 | `mode.romaji.accept_xn` | boolean | `true` | Accept `xn` for ん. |
 | `mode.sentence.lang` | `en` / `ja` | `"en"` | Sentence language. |
 | `mode.sentence.hide_typed` | boolean | `false` | Hide the completed sentence prefix. |
+| `mode.phrase.lang` | `en` / `ja` | `"en"` | Phrase language. Also changed with `L` on the mode selection screen. |
+| `mode.phrase.course` | `short` / `normal` / `long` / `mixed` | `"normal"` | Phrase-length course. Also cycled with `C` on the mode selection screen. |
 | `data.words_en` | path | `—` | Replacement English-word TSV; unset uses bundled data. |
 | `data.words_ja` | path | `—` | Replacement Japanese-word TSV. |
+| `data.phrases_en` | path | `—` | Additional English-phrase TSV; bundled phrases remain available. |
+| `data.phrases_ja` | path | `—` | Additional Japanese-phrase TSV; bundled phrases remain available. |
 | `data.sentences_en` | path | `—` | Replacement English-sentence TSV. |
 | `data.sentences_ja` | path | `—` | Replacement Japanese-sentence TSV. |
 | `practice.daily_rotation` | boolean | `true` | Use deterministic daily decks. |

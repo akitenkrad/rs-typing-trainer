@@ -1,11 +1,16 @@
 use std::collections::HashSet;
 use std::fs;
 
+use chrono::{TimeZone, Utc};
 use rs_typing_trainer::config::{Config, KeyFilter, ModeKind};
 use rs_typing_trainer::data::DataCatalog;
+use rs_typing_trainer::engine::item::Item;
 use rs_typing_trainer::engine::modes::ModeGenerator;
 use rs_typing_trainer::engine::session::ItemKind;
+use rs_typing_trainer::engine::session::Session;
 use rs_typing_trainer::layout::builtin_layout;
+use rs_typing_trainer::record::SessionRecord;
+use std::time::Duration;
 use tempfile::TempDir;
 
 fn generator(config: &Config, seed: u64) -> ModeGenerator {
@@ -189,4 +194,88 @@ fn small_ngram_pool_keeps_the_candidate_warning() {
 
     assert_eq!(generator.original_candidate_count(), 1);
     assert!(generator.warning().is_some());
+}
+
+fn phrase_fixture() -> (TempDir, Config) {
+    let directory = TempDir::new().unwrap();
+    let english_path = directory.path().join("phrases_en.tsv");
+    let japanese_path = directory.path().join("phrases_ja.tsv");
+    let mut english = String::new();
+    let mut japanese = String::new();
+    for (stage, length) in [(0_usize, 10_usize), (1, 16), (2, 23)] {
+        for index in 0..8 {
+            english.push_str(&format!("{}{}\n", char::from(b'a' + stage as u8).to_string().repeat(length - 1), index));
+            japanese.push_str(&format!(
+                "表示{stage}{index}\t{}\n",
+                ['あ', 'い', 'う'][stage].to_string().repeat([6, 11, 16][stage])
+            ));
+        }
+    }
+    fs::write(&english_path, english).unwrap();
+    fs::write(&japanese_path, japanese).unwrap();
+    let mut config = Config::default();
+    config.mode.kind = ModeKind::Phrase;
+    config.data.phrases_en = Some(english_path);
+    config.data.phrases_ja = Some(japanese_path);
+    (directory, config)
+}
+
+#[test]
+fn phrase_courses_enforce_english_and_japanese_length_boundaries() {
+    let (_directory, mut config) = phrase_fixture();
+    for (course, range) in [("short", 10..=15), ("normal", 16..=22), ("long", 23..=29)] {
+        config.mode.phrase.lang = "en".to_owned();
+        config.mode.phrase.course = course.to_owned();
+        let mut prompts = generator(&config, 100 + *range.start() as u64);
+        for _ in 0..20 {
+            let prompt = prompts.next_prompt();
+            assert!(range.contains(&prompt.text.chars().count()), "{course}: {}", prompt.text);
+            assert!(prompt.reading.is_none());
+        }
+    }
+    for (course, range) in [("short", 6..=10), ("normal", 11..=15), ("long", 16..=20)] {
+        config.mode.phrase.lang = "ja".to_owned();
+        config.mode.phrase.course = course.to_owned();
+        let mut prompts = generator(&config, 200 + *range.start() as u64);
+        for _ in 0..20 {
+            let prompt = prompts.next_prompt();
+            assert!(!prompt.text.is_empty());
+            assert!(
+                range.contains(&prompt.reading.as_deref().unwrap().chars().count()),
+                "{course}: {prompt:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn mixed_phrase_course_repeats_five_short_normal_and_long_prompts() {
+    let (_directory, mut config) = phrase_fixture();
+    config.mode.phrase.course = "mixed".to_owned();
+    for (lang, ranges) in [("en", [(10, 15), (16, 22), (23, 29)]), ("ja", [(6, 10), (11, 15), (16, 20)])] {
+        config.mode.phrase.lang = lang.to_owned();
+        let mut prompts = generator(&config, 301);
+        for index in 0..45 {
+            let prompt = prompts.next_prompt();
+            let length = prompt.reading.as_deref().unwrap_or(&prompt.text).chars().count();
+            let stage = (index / 5) % 3;
+            assert!((ranges[stage].0..=ranges[stage].1).contains(&length), "{lang} index {index}: {prompt:?}");
+        }
+    }
+}
+
+#[test]
+fn phrase_records_store_language_and_course() {
+    let mut config = Config::default();
+    config.mode.kind = ModeKind::Phrase;
+    config.mode.phrase.lang = "ja".to_owned();
+    config.mode.phrase.course = "long".to_owned();
+    let mut session = Session::new(Duration::from_secs(1), Duration::ZERO, Item::exact("a"));
+    session.activate(Duration::ZERO);
+    session.tick(Duration::from_secs(1));
+    let record = SessionRecord::from_log(&config, session.into_log(), Utc.with_ymd_and_hms(2026, 11, 16, 0, 0, 0).unwrap());
+    let params: serde_json::Value = serde_json::from_str(&record.header.mode_params).unwrap();
+    assert_eq!(record.header.mode, "phrase");
+    assert_eq!(params["lang"], "ja");
+    assert_eq!(params["course"], "long");
 }

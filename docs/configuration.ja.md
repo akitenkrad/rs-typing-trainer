@@ -22,7 +22,7 @@
 | `keyboard.finger_guide` | 真偽値 | `true` | 担当指の色帯を表示する． |
 | `keyboard.digit6_finger` | `left-index` / `right-index` | `"left-index"` | `6` キーを担当する指． |
 | `session.duration_seconds` | 整数 | `60` | 通常セッションの時間． |
-| `session.item_timeout_seconds` | 整数 | `5` | 1 項目の制限時間．0 で無効． |
+| `session.item_timeout_seconds` | 整数 | `5` | `sentence`・`phrase`・`endurance` 以外で使う 1 項目の制限時間．0 で無効． |
 | `session.error_mode` | `stop` / `advance` | `"stop"` | 誤打で止まるか，カーソルを進めるか． |
 | `session.preview_items` | 整数 | `1` | 先読み項目数．0〜3． |
 | `session.blind` | 真偽値 | `false` | 項目終了まで入力済み部分を隠す． |
@@ -41,8 +41,12 @@
 | `mode.romaji.accept_xn` | 真偽値 | `true` | んの `xn` を受理する． |
 | `mode.sentence.lang` | `en` / `ja` | `"en"` | 短文の言語． |
 | `mode.sentence.hide_typed` | 真偽値 | `false` | 入力済みの短文接頭部を隠す． |
+| `mode.phrase.lang` | `en` / `ja` | `"en"` | 句の言語．モード選択画面の `L` でも切り替える． |
+| `mode.phrase.course` | `short` / `normal` / `long` / `mixed` | `"normal"` | 句の長さのコース．モード選択画面の `C` でも切り替える． |
 | `data.words_en` | パス | `—` | 英単語 TSV の置換．未設定なら同梱データ． |
 | `data.words_ja` | パス | `—` | 日本語単語 TSV の置換． |
+| `data.phrases_en` | パス | `—` | 追加する英語句 TSV．同梱の句も残る． |
+| `data.phrases_ja` | パス | `—` | 追加する日本語句 TSV．同梱の句も残る． |
 | `data.sentences_en` | パス | `—` | 英文 TSV の置換． |
 | `data.sentences_ja` | パス | `—` | 和文 TSV の置換． |
 | `practice.daily_rotation` | 真偽値 | `true` | 決定的な日替わり出題を使う． |

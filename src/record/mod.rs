@@ -83,7 +83,12 @@ impl SessionRecord {
     pub fn from_log(config: &Config, log: SessionLog, started_at: DateTime<Utc>) -> Self {
         let metrics = analyze_with_pause(&log, std::time::Duration::from_millis(config.analysis.pause_ms));
         let finished_at = started_at + chrono::Duration::microseconds(log.duration_us.min(i64::MAX as u64) as i64);
-        let mode_params = serde_json::json!({
+        let lang = if config.mode.kind == crate::config::ModeKind::Phrase {
+            &config.mode.phrase.lang
+        } else {
+            &config.mode.sentence.lang
+        };
+        let mut mode_params = serde_json::json!({
             "kind": config.mode.kind,
             "keys": config.mode.keys,
             "key_filter": config.mode.key_filter,
@@ -93,7 +98,7 @@ impl SessionRecord {
             "allow_consecutive_same_word": config.mode.random.allow_consecutive_same_word,
             "n": config.mode.ngram.n,
             "source": config.mode.ngram.source,
-            "lang": config.mode.sentence.lang,
+            "lang": lang,
             "pacer_enabled": config.pacer.enabled,
             "pacer_target_wpm": config.pacer.target_wpm,
             "score_eligible": crate::practice::gate::is_eligible(config.gate.min_accuracy, metrics.accuracy),
@@ -104,8 +109,11 @@ impl SessionRecord {
             "keyboard_style": config.keyboard.style,
             "prompt_style": config.display.prompt_style,
             "accuracy_gate": config.gate.min_accuracy,
-        })
-        .to_string();
+        });
+        if config.mode.kind == crate::config::ModeKind::Phrase {
+            mode_params["course"] = serde_json::Value::String(config.mode.phrase.course.clone());
+        }
+        let mode_params = mode_params.to_string();
         Self {
             header: SessionHeader {
                 id: None,

@@ -1,7 +1,9 @@
+use std::fs;
 use std::path::PathBuf;
 
-use rs_typing_trainer::config::{Config, ErrorMode, KeyFilter, ModeKind};
+use rs_typing_trainer::config::{Config, ErrorMode, KeyFilter, ModeKind, save_mode_controls};
 use rs_typing_trainer::graphics::GraphicsPreference;
+use tempfile::TempDir;
 
 #[test]
 fn reads_all_v2_training_sections() {
@@ -40,6 +42,9 @@ accept_apostrophe = false
 accept_xn = true
 [mode.sentence]
 lang = "ja"
+[mode.phrase]
+lang = "ja"
+course = "mixed"
 [data]
 words_en = "/tmp/test-words.tsv"
 words_ja = "/tmp/test-ja.tsv"
@@ -91,6 +96,8 @@ db_path = "/tmp/test-sessions.db"
     assert!(!config.mode.romaji.accept_apostrophe);
     assert!(config.mode.romaji.accept_xn);
     assert_eq!(config.mode.sentence.lang, "ja");
+    assert_eq!(config.mode.phrase.lang, "ja");
+    assert_eq!(config.mode.phrase.course, "mixed");
     assert_eq!(config.data.words_ja, Some(PathBuf::from("/tmp/test-ja.tsv")));
     assert!(!config.practice.daily_rotation);
     assert_eq!(config.practice.core_ratio, 0.7);
@@ -114,6 +121,34 @@ db_path = "/tmp/test-sessions.db"
 #[test]
 fn auto_difficulty_defaults_to_enabled() {
     assert!(Config::default().practice.auto_difficulty);
+}
+
+#[test]
+fn phrase_mode_defaults_and_validation_are_stable() {
+    let config = Config::default();
+    assert_eq!(config.mode.phrase.lang, "en");
+    assert_eq!(config.mode.phrase.course, "normal");
+    assert!(Config::from_toml("[mode.phrase]\nlang = \"ja\"\ncourse = \"long\"\n").is_ok());
+    assert!(Config::from_toml("[mode.phrase]\nlang = \"fr\"\n").is_err());
+    assert!(Config::from_toml("[mode.phrase]\ncourse = \"tiny\"\n").is_err());
+}
+
+#[test]
+fn phrase_mode_controls_are_saved_without_replacing_other_mode_settings() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("config.toml");
+    fs::write(&path, "[mode]\nkeys = \"abc\" # keep\n").unwrap();
+    let mut config = Config::from_path(&path).unwrap();
+    config.mode.phrase.lang = "ja".into();
+    config.mode.phrase.course = "long".into();
+
+    save_mode_controls(&path, &config).unwrap();
+
+    let saved = fs::read_to_string(&path).unwrap();
+    assert!(saved.contains("keys = \"abc\" # keep"), "{saved}");
+    let reloaded = Config::from_path(&path).unwrap();
+    assert_eq!(reloaded.mode.phrase.lang, "ja");
+    assert_eq!(reloaded.mode.phrase.course, "long");
 }
 
 #[test]

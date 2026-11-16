@@ -180,6 +180,7 @@ pub enum ModeKind {
     Words,
     Romaji,
     Sentence,
+    Phrase,
     Ngram,
     Adaptive,
     Unlock,
@@ -195,6 +196,7 @@ impl ModeKind {
             Self::Words => "words",
             Self::Romaji => "romaji",
             Self::Sentence => "sentence",
+            Self::Phrase => "phrase",
             Self::Ngram => "ngram",
             Self::Adaptive => "adaptive",
             Self::Unlock => "unlock",
@@ -231,6 +233,8 @@ pub struct ModeConfig {
     pub romaji: RomajiModeConfig,
     #[serde(default)]
     pub sentence: SentenceModeConfig,
+    #[serde(default)]
+    pub phrase: PhraseModeConfig,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -267,12 +271,24 @@ pub struct SentenceModeConfig {
     pub hide_typed: bool,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PhraseModeConfig {
+    #[serde(default = "default_sentence_lang")]
+    pub lang: String,
+    #[serde(default = "default_phrase_course")]
+    pub course: String,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct DataConfig {
     #[serde(default)]
     pub words_en: Option<PathBuf>,
     #[serde(default)]
     pub words_ja: Option<PathBuf>,
+    #[serde(default)]
+    pub phrases_en: Option<PathBuf>,
+    #[serde(default)]
+    pub phrases_ja: Option<PathBuf>,
     #[serde(default)]
     pub sentences_en: Option<PathBuf>,
     #[serde(default)]
@@ -530,6 +546,7 @@ impl Default for ModeConfig {
             ngram: NgramModeConfig::default(),
             romaji: RomajiModeConfig::default(),
             sentence: SentenceModeConfig::default(),
+            phrase: PhraseModeConfig::default(),
         }
     }
 }
@@ -567,6 +584,15 @@ impl Default for SentenceModeConfig {
         Self {
             lang: default_sentence_lang(),
             hide_typed: false,
+        }
+    }
+}
+
+impl Default for PhraseModeConfig {
+    fn default() -> Self {
+        Self {
+            lang: default_sentence_lang(),
+            course: default_phrase_course(),
         }
     }
 }
@@ -651,6 +677,10 @@ fn default_ngram_source() -> String {
 
 fn default_sentence_lang() -> String {
     "en".to_owned()
+}
+
+fn default_phrase_course() -> String {
+    "normal".to_owned()
 }
 
 fn default_animation_speed() -> f32 {
@@ -944,6 +974,8 @@ impl Config {
             });
         }
         if !matches!(self.adaptive.lang.as_str(), "en" | "ja")
+            || !matches!(self.mode.phrase.lang.as_str(), "en" | "ja")
+            || !matches!(self.mode.phrase.course.as_str(), "short" | "normal" | "long" | "mixed")
             || !(0.0..=1.0).contains(&self.adaptive.max_share)
             || self.adaptive.max_share == 0.0
             || self.session.preview_items > 3
@@ -953,7 +985,7 @@ impl Config {
         {
             return Err(ConfigError::UnknownKeyboardSetting {
                 field: "training",
-                value: "adaptive language/share, preview, rhythm, burst, or endurance".to_owned(),
+                value: "adaptive/phrase settings, preview, rhythm, burst, or endurance".to_owned(),
             });
         }
         if self.pacer.ratio <= 0.0 || self.pacer.min_wpm <= 0.0 || self.unlock.target_wpm <= 0.0 || !(0.0..=1.0).contains(&self.gate.min_accuracy) {
@@ -1054,10 +1086,12 @@ pub fn save_mode_selection(path: &Path, mode: &ModeConfig) -> AppResult<()> {
 /// Persist controls edited directly on the mode-selection screen.
 pub fn save_mode_controls(path: &Path, config: &Config) -> AppResult<()> {
     let raw = if path.exists() { std::fs::read_to_string(path)? } else { String::new() };
-    let mut document = document_with_sections(&raw, &["session", "adaptive", "pacer", "display"])?;
+    let mut document = document_with_sections(&raw, &["mode", "session", "adaptive", "pacer", "display"])?;
     set_integer_preserving_decor(&mut document["session"]["preview_items"], config.session.preview_items as i64);
     set_prompt_style(&mut document, &config.display.prompt_style);
     set_string_preserving_decor(&mut document["adaptive"]["lang"], &config.adaptive.lang);
+    set_string_preserving_decor(&mut document["mode"]["phrase"]["lang"], &config.mode.phrase.lang);
+    set_string_preserving_decor(&mut document["mode"]["phrase"]["course"], &config.mode.phrase.course);
     set_bool_preserving_decor(&mut document["pacer"]["enabled"], config.pacer.enabled);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;

@@ -11,11 +11,12 @@ use crate::config::ModeKind;
 use crate::i18n::Lang;
 use crate::ui::{left_inset, theme::Theme};
 
-const MODES: [(ModeKind, &str, &str); 10] = [
+const MODES: [(ModeKind, &str, &str); 11] = [
     (ModeKind::Random, "random — random character groups", "random — ランダム文字列"),
     (ModeKind::Words, "words — English words", "words — 英単語"),
     (ModeKind::Romaji, "romaji — Japanese words", "romaji — 日本語の単語"),
     (ModeKind::Sentence, "sentence — complete sentences", "sentence — 短文"),
+    (ModeKind::Phrase, "phrase — Phrases", "phrase — 句"),
     (ModeKind::Ngram, "ngram — repeated transitions", "ngram — 文字の組み合わせ"),
     (ModeKind::Adaptive, "adaptive — focus weak transitions", "adaptive — 弱い遷移を重点練習"),
     (ModeKind::Unlock, "unlock — gradually add keys", "unlock — キーを段階的に解放"),
@@ -69,7 +70,10 @@ pub fn render(frame: &mut Frame, app: &App) {
         .collect::<Vec<_>>();
     frame.render_widget(Paragraph::new(lines), left_inset(chunks[1]));
     let selected_mode = MODES[app.mode_selected].0;
-    let pacer_available = matches!(selected_mode, ModeKind::Words | ModeKind::Sentence | ModeKind::Adaptive);
+    let pacer_available = matches!(
+        selected_mode,
+        ModeKind::Words | ModeKind::Sentence | ModeKind::Phrase | ModeKind::Adaptive
+    );
     let pacer = if pacer_available {
         match (app.config.general.lang, app.config.pacer.enabled) {
             (Lang::En, true) => "[P] Pacer: ON",
@@ -88,12 +92,28 @@ pub fn render(frame: &mut Frame, app: &App) {
     } else {
         String::new()
     };
+    let phrase_options = if selected_mode == ModeKind::Phrase {
+        match app.config.general.lang {
+            Lang::En => format!(
+                "[L] Language: {}  [C] Course: {}",
+                app.config.mode.phrase.lang.to_uppercase(),
+                app.config.mode.phrase.course
+            ),
+            Lang::Ja => format!(
+                "[L] 言語: {}  [C] コース: {}",
+                app.config.mode.phrase.lang.to_uppercase(),
+                app.config.mode.phrase.course
+            ),
+        }
+    } else {
+        String::new()
+    };
     let preview = match app.config.general.lang {
         Lang::En => format!("[[]/[]] Preview: {}", app.config.session.preview_items),
         Lang::Ja => format!("[[]/[]] 先読み: {}", app.config.session.preview_items),
     };
     let prompt_style = crate::ui::settings::prompt_style_label(&app.config.display.prompt_style, app.config.general.lang);
-    let options = [pacer, adaptive_language.as_str(), preview.as_str()]
+    let options = [pacer, adaptive_language.as_str(), phrase_options.as_str(), preview.as_str()]
         .into_iter()
         .filter(|option| !option.is_empty())
         .collect::<Vec<_>>()

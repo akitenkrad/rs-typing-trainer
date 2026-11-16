@@ -6,6 +6,8 @@ dictionary_license = "NAIST and ICOT terms"
 [filters]
 en_words = "SCOWL levels 10,20,35,40,50,60; ASCII letters; no apostrophes; top 20000 by public-domain books and Tatoeba CC0 frequency; blocklist"
 ja_words = "selected IPADIC POS; base forms reanalyzed for readings; 2-8 mora; no old kana or old-style glyphs; top 12000 by corpus frequency"
+en_phrases = "CC0; surrounding dialogue quotes removed; 10-29 characters; printable ASCII; unique; blocklist; all matching rows"
+ja_phrases = "project-original phrases; 6-20 reading characters; no ASCII alphanumerics, whitespace, or sentence punctuation in surfaces; unique surfaces and readings"
 en_sentences = "CC0; surrounding dialogue quotes removed; 30-90 characters; printable ASCII; unique; blocklist; all matching rows"
 ja_sentences = "15-45 characters; allowed Japanese characters and punctuation; balanced quotes; no gaiji or unknown readings; at most 15 per work"
 
@@ -2477,6 +2479,10 @@ sha256 = "7d2b48d84ef4e65c9f85bcf65fb1fb41c92b134be641fab6a7141d597c9a92b0"
 path = "bizud/morisawa-biz-ud-gothic-1.051/OFL.txt"
 sha256 = "e753d7155d53c747d037a445e584c8ecfca6dd79846db610417e282a736b28bc"
 
+[[inputs]]
+path = "phrases/ja_phrases.tsv"
+sha256 = "8549db7ce2b51f73161a9237976cd1176822de9050efb6da66f199479a3efb31"
+
 [[outputs]]
 path = "en_words.tsv.gz"
 count = 20000
@@ -2486,6 +2492,16 @@ sha256 = "b9603d39b043166b6f37dc7d9a5973a65ffba3b32b32f7400efb55080001a682"
 path = "ja_words.tsv.gz"
 count = 12000
 sha256 = "82bb9ba580357ef769a09c54504a63671188f990fc29ec5a5c09f966481add32"
+
+[[outputs]]
+path = "en_phrases.tsv.gz"
+count = 9069
+sha256 = "f2f2e74a66cf9743cac8d255cc8ed707d9cb7ae309543f7e3bcbb99706e5aab2"
+
+[[outputs]]
+path = "ja_phrases.tsv.gz"
+count = 1989
+sha256 = "ea0d55f0c4ef6a7b93e1af10127df2c8ad1b9546eb392702c99aa668d0fcb29c"
 
 [[outputs]]
 path = "en_sentences.tsv.gz"

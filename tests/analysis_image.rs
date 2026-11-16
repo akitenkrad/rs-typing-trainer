@@ -786,6 +786,23 @@ fn record(day: u32, wpm: f64) -> SessionRecord {
 }
 
 #[test]
+fn trend_charts_keep_benchmark_series_separate() {
+    let mut v1 = record(1, 20.0);
+    v1.header.mode = "bench".into();
+    v1.header.bench_id = Some("bench-v1/A/01".into());
+    let mut v2 = record(2, 40.0);
+    v2.header.mode = "bench".into();
+    v2.header.bench_id = Some("bench-v2/A/01".into());
+
+    let spec = build_trend_data(&[v1, v2], MetricKind::NetWpm, Lang::En).unwrap();
+    assert_eq!(spec.series.len(), 2);
+    assert_eq!(spec.series[0].name, "bench-v1-A");
+    assert_eq!(spec.series[0].points[0].value, 20.0);
+    assert_eq!(spec.series[1].name, "bench-v2-A");
+    assert_eq!(spec.series[1].points[0].value, 40.0);
+}
+
+#[test]
 fn three_trend_charts_share_the_forecast_extended_date_range() {
     let mut records = vec![record(1, 20.0), record(10, 30.0)];
     for record in &mut records {

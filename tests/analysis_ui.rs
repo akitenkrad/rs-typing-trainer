@@ -43,6 +43,25 @@ fn save_record(path: &std::path::Path, mode: ModeKind, bench_id: Option<&str>, w
     db::save(path, &record).unwrap();
 }
 
+#[test]
+fn analysis_mode_filter_includes_phrase_sessions() {
+    let directory = TempDir::new().unwrap();
+    let mut config = Config::default();
+    config.storage.db_path = Some(directory.path().join("sessions.db"));
+    let mut app = test_app(config);
+    save_record(&app.db_path(), ModeKind::Phrase, None, 42.0, 1);
+    save_record(&app.db_path(), ModeKind::Words, None, 55.0, 2);
+
+    app.handle_key(key(KeyCode::Char('a')));
+    for _ in 0..5 {
+        app.handle_key(key(KeyCode::Char('m')));
+    }
+
+    assert_eq!(app.analysis_mode_filter.as_deref(), Some("phrase"));
+    assert_eq!(app.analysis_records.len(), 1);
+    assert_eq!(app.analysis_records[0].header.mode, "phrase");
+}
+
 fn render(app: &rs_typing_trainer::app::App) -> String {
     render_size(app, 120, 40)
 }

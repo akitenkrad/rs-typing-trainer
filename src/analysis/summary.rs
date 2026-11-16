@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, NaiveDate};
 
 use crate::analysis::metrics::{AnalysisSettings, DetailedMetrics, analyze_records};
+use crate::bench::{BenchPart, parse_bench_id, preferred_bench_series};
 use crate::config::Config;
 use crate::i18n::Lang;
 use crate::layout::geometry::geometry;
@@ -143,9 +144,14 @@ pub fn skill_axis_values(records: &[SessionRecord], layout: &KeyboardLayout, con
     SkillAxis::ALL
         .into_iter()
         .map(|axis| {
+            let part = bench_part_value(axis.part()).expect("skill axes use benchmark parts");
+            let series = preferred_bench_series(records.iter().filter_map(|record| record.header.bench_id.as_deref()), part);
             let matching = records
                 .iter()
-                .filter(|record| bench_part(record) == Some(axis.part()))
+                .filter(|record| {
+                    bench_identity(record)
+                        .is_some_and(|(candidate_series, candidate_part)| Some(candidate_series) == series && candidate_part == part)
+                })
                 .collect::<Vec<_>>();
             let raw = matching.last().and_then(|record| axis_value(axis, record, layout, config));
             let history = matching
@@ -203,8 +209,9 @@ fn current_ability(lines: &mut Vec<String>, recent: &[&SessionRecord], all: &[Se
     }
     if let Some(latest) = all.iter().rev().find(|record| record.header.bench_id.is_some()) {
         let part = bench_part(latest).unwrap_or("?");
+        let identity = bench_identity(latest);
         let latest_index = all.iter().rposition(|record| std::ptr::eq(record, latest)).unwrap_or(all.len());
-        let previous = all[..latest_index].iter().rev().find(|record| bench_part(record) == Some(part));
+        let previous = all[..latest_index].iter().rev().find(|record| bench_identity(record) == identity);
         let delta = previous.map(|record| latest.header.net_wpm - record.header.net_wpm);
         let delta = delta.map_or_else(
             || match lang {
@@ -239,11 +246,14 @@ fn trend(lines: &mut Vec<String>, records: &[SessionRecord], as_of: NaiveDate, l
         records.iter().rev().find_map(|record| bench_part(record))
     };
     let uses_bench = trend_bench_part.is_some();
+    let trend_part = trend_bench_part.and_then(bench_part_value);
+    let trend_series =
+        trend_part.and_then(|part| preferred_bench_series(records.iter().filter_map(|record| record.header.bench_id.as_deref()), part));
     let samples = records
         .iter()
         .filter(|record| {
-            if let Some(part) = trend_bench_part {
-                bench_part(record) == Some(part)
+            if let Some(part) = trend_part {
+                bench_identity(record).is_some_and(|(series, candidate)| Some(series) == trend_series && candidate == part)
             } else {
                 record.header.bench_id.is_none()
             }
@@ -622,7 +632,23 @@ fn record_date(record: &SessionRecord) -> Option<NaiveDate> {
 }
 
 fn bench_part(record: &SessionRecord) -> Option<&str> {
-    record.header.bench_id.as_deref()?.split('/').nth(1)
+    let (_, part, _) = parse_bench_id(record.header.bench_id.as_deref()?)?;
+    Some(part.as_str())
+}
+
+fn bench_identity(record: &SessionRecord) -> Option<(&str, BenchPart)> {
+    let (series, part, _) = parse_bench_id(record.header.bench_id.as_deref()?)?;
+    Some((series, part))
+}
+
+fn bench_part_value(part: &str) -> Option<BenchPart> {
+    match part {
+        "A" => Some(BenchPart::A),
+        "B" => Some(BenchPart::B),
+        "C" => Some(BenchPart::C),
+        "D" => Some(BenchPart::D),
+        _ => None,
+    }
 }
 
 fn median(values: &[f64]) -> f64 {
@@ -655,6 +681,7 @@ fn mode_label(mode: &str, lang: Lang) -> &str {
         "words" => "単語",
         "romaji" => "ローマ字",
         "sentence" => "短文",
+        "phrase" => "句",
         "ngram" => "n-gram",
         "adaptive" => "適応",
         "unlock" => "解放",
@@ -667,12 +694,12 @@ fn mode_label(mode: &str, lang: Lang) -> &str {
 
 fn bench_part_label(part: &str, lang: Lang) -> &'static str {
     match (part, lang) {
-        ("A", Lang::En) => "A English words",
-        ("A", Lang::Ja) => "A 英単語",
+        ("A", Lang::En) => "A English words and phrases",
+        ("A", Lang::Ja) => "A 英単語と句",
         ("B", Lang::En) => "B coverage",
         ("B", Lang::Ja) => "B 網羅",
-        ("C", Lang::En) => "C Japanese",
-        ("C", Lang::Ja) => "C 日本語",
+        ("C", Lang::En) => "C Japanese words and phrases",
+        ("C", Lang::Ja) => "C 日本語の単語と句",
         ("D", Lang::En) => "D numbers/symbols",
         ("D", Lang::Ja) => "D 数字・記号",
         (_, Lang::En) => "unknown part",

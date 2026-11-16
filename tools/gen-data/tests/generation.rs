@@ -2,8 +2,9 @@ use std::collections::BTreeSet;
 
 use gen_data::{
     BizUdGenerationReport, FontGenerationOptions, FontKind, OutlineCommand, OutlineFont, OutlineGlyph, decode_outline_font, encode_outline_font,
-    extract_aozora, extract_english_body, generate_fonts, gzip_deterministic, jis_x0208_to_char, load_scowl_words, parse_bdf,
-    prepare_english_sentence, stable_sample, update_bizud_manifest, update_bizud_notice, update_shinonome_manifest, update_shinonome_notice,
+    extract_aozora, extract_english_body, generate_fonts, gzip_deterministic, jis_x0208_to_char, load_scowl_words, parse_bdf, prepare_english_phrase,
+    prepare_english_sentence, prepare_japanese_phrases, stable_sample, update_bizud_manifest, update_bizud_notice, update_shinonome_manifest,
+    update_shinonome_notice,
 };
 use tempfile::TempDir;
 
@@ -206,6 +207,59 @@ fn english_sentence_length_is_checked_after_dialogue_quotes_are_removed() {
 
     assert!(prepare_english_sentence(&too_short_after_removal).is_none());
     assert_eq!(prepare_english_sentence(&maximum_after_removal).as_deref(), Some("a".repeat(90).as_str()));
+}
+
+#[test]
+fn english_phrase_length_is_checked_after_dialogue_quotes_are_removed() {
+    let too_short = "a".repeat(9);
+    let minimum = format!("\"{}\"", "a".repeat(10));
+    let maximum = "a".repeat(29);
+    let too_long = "a".repeat(30);
+
+    assert!(prepare_english_phrase(&too_short).is_none());
+    assert_eq!(prepare_english_phrase(&minimum).as_deref(), Some("a".repeat(10).as_str()));
+    assert_eq!(prepare_english_phrase(&maximum).as_deref(), Some(maximum.as_str()));
+    assert!(prepare_english_phrase(&too_long).is_none());
+    assert!(prepare_english_phrase("ten letters\n").is_none());
+}
+
+#[test]
+fn japanese_phrases_are_ranked_by_reading_length_then_source_order() {
+    let source = "長い表記\tあいうえおかき\n先の同順位\tあいうえおか\n後の同順位\tかきくけこさ\n";
+
+    let rendered = prepare_japanese_phrases(source).unwrap();
+
+    assert_eq!(
+        rendered,
+        "先の同順位\tあいうえおか\t1\tcore\n後の同順位\tかきくけこさ\t2\tcore\n長い表記\tあいうえおかき\t3\tcore\n"
+    );
+}
+
+#[test]
+fn japanese_phrase_validation_reports_the_bad_source_line() {
+    for (source, expected_line) in [
+        ("有効な句\tあいうえおか\n短すぎる\tあいうえお\n", 2),
+        ("長すぎる句\tあいうえおかきくけこさしすせそたちつてとな\n", 1),
+        ("ASCII1\tあいうえおか\n", 1),
+        ("空 白\tあいうえおか\n", 1),
+        ("句、読点\tあいうえおか\n", 1),
+        ("不正な読み\tあいうえおA\n", 1),
+        ("列不足だけ\n", 1),
+    ] {
+        let error = prepare_japanese_phrases(source).unwrap_err().to_string();
+        assert!(error.contains(&format!("line {expected_line}")), "{error}");
+    }
+}
+
+#[test]
+fn japanese_phrase_validation_rejects_duplicate_surfaces_and_readings() {
+    for source in [
+        "同じ表示\tあいうえおか\n同じ表示\tかきくけこさ\n",
+        "最初の表示\tあいうえおか\n別の表示\tあいうえおか\n",
+    ] {
+        let error = prepare_japanese_phrases(source).unwrap_err().to_string();
+        assert!(error.contains("line 2"), "{error}");
+    }
 }
 
 #[test]
