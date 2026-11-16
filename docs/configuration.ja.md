@@ -9,9 +9,10 @@
 | キー | 型 | 既定値 | 説明 |
 |---|---|---|---|
 | `general.lang` | `en` / `ja` | `"en"` | 表示言語． |
-| `display.prompt_style` | `large` / `normal` | `"large"` | 問題文の描き方．`large` は大きな字形（16ドット，入らなければ12ドット）で描き，どちらも入らなければ通常の文字にする．`normal` は端末の文字の大きさのまま，枠で囲んだカードに字間を広げて描く．モード選択画面の `Z` でも切り替えられる．旧キー `prompt_size` も読み込む（`normal` → `normal`，それ以外 → `large`）．アプリから保存すると `prompt_style` で書き戻す． |
+| `display.prompt_style` | `large` / `normal` | `"large"` | 問題文の描き方．`large` は端末画像を使える場合は字ごとの画像タイル，それ以外は東雲の大きな字形（16ドット，入らなければ12ドット）で描き，どちらも入らなければ通常の文字にする．`normal` は端末の文字の大きさのまま，枠で囲んだカードに字間を広げて描く．モード選択画面の `Z` でも切り替えられる．旧キー `prompt_size` も読み込む（`normal` → `normal`，それ以外 → `large`）．アプリから保存すると `prompt_style` で書き戻す． |
 | `display.feedback` | `summary` / `detailed` | `"summary"` | セッション後の気づき．`summary` は最も目立つ内容を 1 行，`detailed` は最大 3 行を示す．根拠が足りないときは値や文言を補わない． |
 | `display.graphics` | `auto` / `kitty` / `sixel` / `iterm2` / `off` | `"auto"` | 端末画像の方式．`auto` は起動時に 1 回だけ端末へ問い合わせる．方式を明示しても，1 セルの画素数を取得できなければ使わない．標準入出力が端末でなければ常に `off`．tmux／screen 内の `auto` も passthrough を確かめられないため `off`．詳しくは[端末画像](graphics.ja.md)を参照． |
+| `display.big_font` | `biz-ud-gothic` / `shinonome` / フォントのパス | `"biz-ud-gothic"` | 画像で描く出題の大きな文字に使う書体．`biz-ud-gothic` は同梱の BIZ UDゴシックの輪郭，`shinonome` は同梱のビットマップを整数倍に拡大して使う．それ以外の文字列は TTF・OTF・TTC（0 番目）のパスとして読み，`~/` はホームディレクトリを基準に展開する．ファイルを読めない・解析できない場合は BIZ UDゴシックへ戻し，理由を設定画面に表示する．端末画像を使えない場合，この設定は描画に影響しない． |
 | `keyboard.layout` | 文字列 | `"qwerty"` | 同梱または利用者定義の練習レイアウト名． |
 | `keyboard.input_layout` | 文字列 | `"same"` | 物理キーの読み替えに使う OS 側のレイアウト． |
 | `keyboard.geometry` | `ansi` / `jis` | `"ansi"` | キーボードの物理配置． |

@@ -258,6 +258,7 @@ fn normal_word_sits_in_a_rounded_card_with_spaced_letters_and_a_reversed_cursor(
     assert_eq!(app.game.as_ref().unwrap().current_prompt.target, "rust");
     app.handle_key_at(key(KeyCode::Char('r')), Instant::now() + Duration::from_millis(20));
     for (width, height) in [(120, 40), (80, 24)] {
+        let layout = resolve_playing_layout(&app, Rect::new(1, 1, width - 2, height - 2));
         let terminal = render(&app, width, height);
         let output = text(&terminal);
         let buffer = terminal.backend().buffer();
@@ -281,7 +282,11 @@ fn normal_word_sits_in_a_rounded_card_with_spaced_letters_and_a_reversed_cursor(
         assert!(top_left.0 + 2 < r && r + 7 < bottom_right.0, "two columns of padding: {output}");
         assert_eq!(top_left.1 + 2, row, "one row of padding above: {output}");
         assert_eq!(bottom_right.1, caret_y + 2, "one row of padding below: {output}");
-        assert_eq!(top_left.1, row_of(&terminal, "Combo") + 1, "card right under the metrics: {output}");
+        assert_eq!(
+            top_left.1,
+            row_of(&terminal, "Combo") + 1 + layout.prompt_gap_rows,
+            "card right under the metrics gap: {output}"
+        );
         let centre = f32::from(top_left.0 + bottom_right.0) / 2.0;
         assert!((centre - f32::from(width - 1) / 2.0).abs() <= 1.0, "card is centred: {output}");
     }
@@ -451,12 +456,13 @@ fn every_mode_in_both_styles_keeps_the_order_and_stays_inside_the_frame() {
                 if let Some(timer) = timer {
                     assert!(timer < metrics, "{label}: {output}");
                 }
-                // Large glyphs may have blank top rows; their block still starts
-                // on the row right below the metrics.
+                // Large glyphs may have blank top rows; their block starts
+                // after the optional metrics gap.
+                let prompt_start = metrics + 1 + layout.prompt_gap_rows;
                 let first_rows = if layout.bigtext.is_some() {
-                    metrics + 1..metrics + 4
+                    prompt_start..prompt_start + 3
                 } else {
-                    metrics + 1..metrics + 2
+                    prompt_start..prompt_start + 1
                 };
                 assert!(
                     first_rows.clone().any(|y| !blank_row(&terminal, y)),

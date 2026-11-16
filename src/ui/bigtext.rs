@@ -81,6 +81,9 @@ pub struct RenderedBigText {
 }
 
 impl RenderedBigText {
+    pub(crate) fn character_width(&self, index: usize) -> Option<u16> {
+        self.character_widths.get(index).copied()
+    }
     pub fn cursor_line(&self, current: usize, style: Style) -> Line<'static> {
         let spans = self
             .character_widths
@@ -265,7 +268,7 @@ fn quadrant(mask: u8) -> char {
     QUADRANTS[usize::from(mask)]
 }
 
-fn render_fallback_row(character: char, cell_width: u16, row_count: usize, row: usize) -> String {
+pub(crate) fn render_fallback_row(character: char, cell_width: u16, row_count: usize, row: usize) -> String {
     let width = usize::from(cell_width);
     if row != row_count / 2 {
         return " ".repeat(width);

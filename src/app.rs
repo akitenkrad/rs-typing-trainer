@@ -38,6 +38,7 @@ use crate::practice::session_variants::{BurstSeries, EnduranceComparison};
 use crate::practice::unlock::{UnlockState, apply_result, initial_keys, mode_config, unlock_sequence};
 use crate::record::SessionRecord;
 use crate::record::db::{self, SessionSummary};
+use crate::ui::bigtext_image::BigTextImageState;
 use crate::ui::keyboard_image::KeyboardImageCache;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -126,6 +127,7 @@ pub struct App {
     /// Image protocol selected at startup.
     pub graphics: GraphicsDetection,
     pub(crate) keyboard_images: RefCell<KeyboardImageCache>,
+    pub(crate) bigtext_images: RefCell<BigTextImageState>,
     pub game: Option<GameState>,
     pub last_result: Option<GameResult>,
     pub legacy_wpm: Option<f64>,
@@ -268,6 +270,7 @@ impl App {
             config,
             graphics: GraphicsDetection::default(),
             keyboard_images: RefCell::new(KeyboardImageCache::new()),
+            bigtext_images: RefCell::new(BigTextImageState::new()),
             game: None,
             last_result: None,
             legacy_wpm: None,
@@ -1225,7 +1228,7 @@ impl App {
                 self.settings_selected = self.settings_selected.saturating_sub(1);
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.settings_selected = (self.settings_selected + 1).min(9);
+                self.settings_selected = (self.settings_selected + 1).min(10);
             }
             KeyCode::Left | KeyCode::Char('h') => self.cycle_setting(-1),
             KeyCode::Right | KeyCode::Char('l') => self.cycle_setting(1),
@@ -1321,6 +1324,18 @@ impl App {
                 &["summary".to_owned(), "detailed".to_owned()],
                 direction,
             ),
+            10 => {
+                let configured_path = self
+                    .settings_original
+                    .as_ref()
+                    .map(|(_, display, _, _)| display.big_font.as_str())
+                    .filter(|value| !matches!(*value, "biz-ud-gothic" | "shinonome"));
+                let mut options = vec!["biz-ud-gothic".to_owned(), "shinonome".to_owned()];
+                if let Some(path) = configured_path {
+                    options.push(path.to_owned());
+                }
+                cycle_string(&mut self.config.display.big_font, &options, direction);
+            }
             _ => {}
         }
     }

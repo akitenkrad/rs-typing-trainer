@@ -63,6 +63,11 @@ impl Replay {
         &self.app
     }
 
+    pub fn set_big_font(&mut self, big_font: &str, home_dir: &std::path::Path) {
+        self.app.config.display.big_font = big_font.to_owned();
+        self.app.home_dir = home_dir.to_path_buf();
+    }
+
     pub fn set_graphics_detection(&mut self, graphics: GraphicsDetection) {
         self.app.set_graphics_detection(graphics);
     }

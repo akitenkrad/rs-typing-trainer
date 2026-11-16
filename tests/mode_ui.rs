@@ -279,6 +279,7 @@ fn sentence_body_is_below_the_keyboard_and_top_aligned() {
     start_selected_mode(&mut app, now);
 
     let terminal = render(&app, 80, 24);
+    let layout = resolve_playing_layout(&app, Rect::new(1, 1, 78, 22));
     let keyboard_row = keys_row_position(&terminal, &['a', 's', 'd', 'f']);
     let (_, stats_row) = phrase_position(&terminal, "Combo");
     let (_, first_text_row) = phrase_position(&terminal, "A patient typist");
@@ -293,7 +294,11 @@ fn sentence_body_is_below_the_keyboard_and_top_aligned() {
             })
         })
         .unwrap();
-    assert_eq!(first_big_row, stats_row + 1, "stats={stats_row}, big={first_big_row}");
+    assert_eq!(
+        first_big_row,
+        stats_row + 1 + layout.prompt_gap_rows,
+        "stats={stats_row}, big={first_big_row}"
+    );
     assert!(stats_row < first_text_row, "stats={stats_row}, text={first_text_row}");
 
     let first_line_columns = (1..terminal.backend().buffer().area.width - 1)
@@ -649,11 +654,11 @@ fn every_prompt_family_picks_the_expected_stage_at_common_sizes() {
             let game = app.game.as_ref().unwrap();
             let labelled = game.current_prompt.reading.is_some();
             if let Some(size) = size {
-                // The large glyphs start on the row right below the metrics;
-                // a label ("表記") sits to their left on the same row.
-                let glyph_row = metrics_row + 1;
+                // The large glyphs start after the optional metrics gap; a
+                // label ("表記") sits to their left on the same row.
+                let glyph_row = metrics_row + 1 + layout.prompt_gap_rows;
                 if labelled {
-                    assert!(row_has_text(&terminal, metrics_row + 1), "{label}: label missing: {output}");
+                    assert!(row_has_text(&terminal, glyph_row), "{label}: label missing: {output}");
                     assert!(
                         compact_row(&terminal, "表記") == glyph_row,
                         "{label}: label must share the glyph row: {output}"
@@ -667,12 +672,58 @@ fn every_prompt_family_picks_the_expected_stage_at_common_sizes() {
                 );
             } else {
                 assert!(
-                    row_has_text(&terminal, metrics_row + 1),
-                    "{label}: the prompt must start directly below the metrics row: {output}"
+                    row_has_text(&terminal, metrics_row + 1 + layout.prompt_gap_rows),
+                    "{label}: the prompt must start after the metrics gap: {output}"
                 );
             }
         }
     }
+}
+
+#[test]
+fn roomy_japanese_and_english_prompts_leave_space_below_the_metrics() {
+    for (kind, lang, metrics_label) in [(ModeKind::Romaji, Lang::Ja, "連続正解"), (ModeKind::Words, Lang::En, "Combo")] {
+        let app = mode_app(kind, lang, |_| {});
+        let terminal = render(&app, 160, 45);
+        let output = text(&terminal);
+        let metrics_row = compact_row(&terminal, metrics_label);
+        let layout = resolve_playing_layout(&app, Rect::new(1, 1, 158, 43));
+
+        assert!(layout.prompt_gap_rows >= 1, "{kind:?}/{lang:?}: {layout:?}");
+        for row in metrics_row + 1..metrics_row + 1 + layout.prompt_gap_rows {
+            assert!(!row_has_text(&terminal, row), "{kind:?}/{lang:?}: row {row} is not blank: {output}");
+        }
+        if lang == Lang::Ja {
+            assert_eq!(compact_row(&terminal, "表記"), metrics_row + 1 + layout.prompt_gap_rows, "{output}");
+        } else {
+            let first = app.game.as_ref().unwrap().current_prompt.target.chars().next().unwrap();
+            let (_, prompt_row) = find_raster(&terminal, &raster_of(layout.bigtext.unwrap(), first))
+                .unwrap_or_else(|| panic!("English prompt was not rendered: {output}"));
+            assert_eq!(prompt_row, metrics_row + 1 + layout.prompt_gap_rows, "{output}");
+        }
+    }
+}
+
+#[test]
+fn a_single_spare_row_keeps_the_timer_and_does_not_shorten_the_prompt() {
+    let app = mode_app(ModeKind::Words, Lang::En, |config| {
+        config.display.prompt_style = "normal".to_owned();
+        config.keyboard.show = "hidden".to_owned();
+    });
+    let roomy = resolve_playing_layout(&app, Rect::new(1, 1, 78, 38));
+    let inner_height = roomy.prompt_rows + 4; // top bar, timer, metrics, footer
+    let layout = resolve_playing_layout(&app, Rect::new(1, 1, 78, inner_height));
+
+    assert!(layout.show_timer, "{layout:?}");
+    assert_eq!(layout.prompt_gap_rows, 0, "{layout:?}");
+    assert_eq!(layout.prompt_rows, roomy.prompt_rows, "{layout:?}");
+
+    let terminal = render(&app, 80, inner_height + 2);
+    let output = text(&terminal);
+    assert!(output.contains("Word timer"), "{output}");
+    assert!(output.contains("╭") && output.contains("╯"), "prompt card was clipped: {output}");
+    assert!(output.contains("▲"), "prompt caret was clipped: {output}");
+    assert!(output.contains("[ESC] Abort"), "{output}");
 }
 
 #[test]
@@ -698,8 +749,8 @@ fn prompt_style_setting_chooses_large_or_normal_text() {
     assert!(output.contains(&spaced), "{output}");
     let caret_row = phrase_position(&terminal, "▲").1;
     assert!(
-        caret_row <= metrics_row + 5,
-        "normal-size prompt must sit right below the metrics: {output}"
+        caret_row <= metrics_row + 5 + layout.prompt_gap_rows,
+        "normal-size prompt must sit right below the metrics gap: {output}"
     );
 
     // Large text picks 16 dots when they fit and steps down to 12 dots.
@@ -884,11 +935,11 @@ fn every_mode_orders_keyboard_timer_metrics_prompt_and_footer() {
                 row.contains("Wordtimer") || row.contains("単語タイマー")
             });
             assert_eq!(timer_row.is_some(), layout.show_timer, "{label}: {output}");
-            // The prompt is top-aligned on the row right below the metrics: a
+            // The prompt is top-aligned after the optional metrics gap: a
             // label row ("表記:") for Japanese prompts, otherwise the first
             // large glyph itself (whose top block rows may be blank).
             let game = app.game.as_ref().unwrap();
-            let prompt_row = metrics_row + 1;
+            let prompt_row = metrics_row + 1 + layout.prompt_gap_rows;
             if let (None, Some(size)) = (game.current_prompt.reading.as_ref(), layout.bigtext) {
                 let first = game.current_prompt.target.chars().next().unwrap();
                 let raster = raster_of(size, first);

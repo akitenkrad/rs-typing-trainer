@@ -1,8 +1,9 @@
 use std::collections::BTreeSet;
 
 use gen_data::{
-    FontGenerationOptions, FontKind, extract_aozora, extract_english_body, generate_fonts, jis_x0208_to_char, load_scowl_words, parse_bdf,
-    stable_sample, update_shinonome_manifest, update_shinonome_notice,
+    BizUdGenerationReport, FontGenerationOptions, FontKind, OutlineCommand, OutlineFont, OutlineGlyph, decode_outline_font, encode_outline_font,
+    extract_aozora, extract_english_body, generate_fonts, gzip_deterministic, jis_x0208_to_char, load_scowl_words, parse_bdf, stable_sample,
+    update_bizud_manifest, update_bizud_notice, update_shinonome_manifest, update_shinonome_notice,
 };
 use tempfile::TempDir;
 
@@ -188,6 +189,69 @@ fn jis_codes_map_to_the_expected_unicode_characters() {
 }
 
 #[test]
+fn outline_font_round_trips_every_command_and_metric() {
+    let font = OutlineFont {
+        units_per_em: 1_000,
+        ascender: 880,
+        descender: -120,
+        glyphs: [
+            (
+                'A',
+                OutlineGlyph {
+                    advance: 600,
+                    commands: vec![
+                        OutlineCommand::MoveTo(10, 20),
+                        OutlineCommand::LineTo(40, 80),
+                        OutlineCommand::QuadTo(50, 90, 60, 20),
+                        OutlineCommand::CurveTo(70, 10, 80, -10, 90, 0),
+                        OutlineCommand::Close,
+                    ],
+                },
+            ),
+            (
+                ' ',
+                OutlineGlyph {
+                    advance: 500,
+                    commands: Vec::new(),
+                },
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    };
+
+    let encoded = encode_outline_font(&font).unwrap();
+    let decoded = decode_outline_font(&encoded).unwrap();
+
+    assert_eq!(decoded, font);
+}
+
+#[test]
+fn outline_font_gzip_is_byte_for_byte_deterministic() {
+    let font = OutlineFont {
+        units_per_em: 2_048,
+        ascender: 1_800,
+        descender: -500,
+        glyphs: [(
+            '亜',
+            OutlineGlyph {
+                advance: 2_048,
+                commands: vec![
+                    OutlineCommand::MoveTo(100, 200),
+                    OutlineCommand::LineTo(1_900, 200),
+                    OutlineCommand::Close,
+                ],
+            },
+        )]
+        .into_iter()
+        .collect(),
+    };
+    let encoded = encode_outline_font(&font).unwrap();
+
+    assert_eq!(gzip_deterministic(&encoded).unwrap(), gzip_deterministic(&encoded).unwrap());
+}
+
+#[test]
 fn font_generation_is_byte_for_byte_deterministic() {
     let source = TempDir::new().unwrap();
     let bdf = source.path().join("bdf");
@@ -309,4 +373,76 @@ fn shinonome_manifest_update_records_counts_hashes_and_is_idempotent() {
     assert!(text.contains("count = 7037"));
     assert!(!text.contains("sha256 = \"old\""));
     assert!(text.contains("path = \"shinonome/shinonome-0.9.11/bdf/shnmk12.bdf\"\nsha256 = \"abc123\""));
+}
+
+#[test]
+fn both_font_blocks_are_restored_after_data_outputs_are_rewritten() {
+    let directory = TempDir::new().unwrap();
+    let shinonome = directory.path().join("shinonome-0.9.11");
+    std::fs::create_dir(&shinonome).unwrap();
+    std::fs::write(shinonome.join("LICENSE"), b"Public Domain license\n").unwrap();
+    std::fs::write(shinonome.join("AUTHORS"), b"Font authors\n").unwrap();
+    let bizud = directory.path().join("morisawa-biz-ud-gothic-1.051");
+    std::fs::create_dir(&bizud).unwrap();
+    std::fs::write(bizud.join("OFL.txt"), b"SIL OPEN FONT LICENSE Version 1.1\n").unwrap();
+    let font_dir = directory.path().join("font");
+    std::fs::create_dir(&font_dir).unwrap();
+    std::fs::write(font_dir.join("shinonome12.bin.gz"), b"font12").unwrap();
+    std::fs::write(font_dir.join("shinonome16.bin.gz"), b"font16").unwrap();
+    std::fs::write(font_dir.join("bizud-gothic.outl.gz"), b"outline").unwrap();
+    let notice = directory.path().join("NOTICE");
+    let manifest = directory.path().join("manifest.toml");
+    let base_notice = "Generated data notices\n";
+    let base_manifest = "generated_date = \"2026-11-15\"\n\n[[outputs]]\npath = \"NOTICE\"\ncount = 1\nsha256 = \"old\"\n";
+    std::fs::write(&notice, base_notice).unwrap();
+    std::fs::write(&manifest, base_manifest).unwrap();
+    let shinonome_report = gen_data::FontGenerationReport {
+        dot12_glyphs: 7_037,
+        dot16_glyphs: 7_037,
+        fullwidth_glyphs: 6_879,
+        halfwidth_glyphs: 158,
+        input_hashes: vec![("LICENSE".to_owned(), "license-hash".to_owned())],
+    };
+    let bizud_report = BizUdGenerationReport {
+        requested_glyphs: 6_974,
+        glyphs: 6_950,
+        missing_glyphs: 24,
+        uncompressed_bytes: 123,
+        compressed_bytes: 45,
+        input_hashes: vec![
+            ("fonts/ttf/BIZUDGothic-Regular.ttf".to_owned(), "ttf-hash".to_owned()),
+            ("OFL.txt".to_owned(), "ofl-hash".to_owned()),
+        ],
+    };
+
+    update_shinonome_notice(&shinonome, &notice).unwrap();
+    update_bizud_notice(&bizud, &notice).unwrap();
+    update_shinonome_manifest(&manifest, &font_dir, &shinonome_report).unwrap();
+    update_bizud_manifest(&manifest, &font_dir, &bizud_report).unwrap();
+    let once_notice = std::fs::read(&notice).unwrap();
+    let once_manifest = std::fs::read(&manifest).unwrap();
+    update_shinonome_notice(&shinonome, &notice).unwrap();
+    update_bizud_notice(&bizud, &notice).unwrap();
+    update_shinonome_manifest(&manifest, &font_dir, &shinonome_report).unwrap();
+    update_bizud_manifest(&manifest, &font_dir, &bizud_report).unwrap();
+    assert_eq!(std::fs::read(&notice).unwrap(), once_notice);
+    assert_eq!(std::fs::read(&manifest).unwrap(), once_manifest);
+    let text = std::str::from_utf8(&once_notice).unwrap();
+    assert!(text.contains("Shinonome bitmap fonts"));
+    assert!(text.contains("BIZ UD Gothic"));
+    assert!(text.contains("SIL OPEN FONT LICENSE Version 1.1"));
+    let text = std::str::from_utf8(&once_manifest).unwrap();
+    assert!(text.contains("font/shinonome12.bin.gz"));
+    assert!(text.contains("font/bizud-gothic.outl.gz"));
+
+    // Simulate the data command replacing both files, then run both font
+    // updates again. Both font blocks must come back.
+    std::fs::write(&notice, base_notice).unwrap();
+    std::fs::write(&manifest, base_manifest).unwrap();
+    update_shinonome_notice(&shinonome, &notice).unwrap();
+    update_bizud_notice(&bizud, &notice).unwrap();
+    update_shinonome_manifest(&manifest, &font_dir, &shinonome_report).unwrap();
+    update_bizud_manifest(&manifest, &font_dir, &bizud_report).unwrap();
+    assert_eq!(std::fs::read(&notice).unwrap(), once_notice);
+    assert_eq!(std::fs::read(&manifest).unwrap(), once_manifest);
 }

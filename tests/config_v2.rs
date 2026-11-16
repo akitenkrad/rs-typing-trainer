@@ -135,6 +135,17 @@ fn graphics_defaults_to_auto_and_round_trips_all_values() {
 }
 
 #[test]
+fn big_font_defaults_to_biz_ud_and_accepts_builtins_or_a_path() {
+    assert_eq!(Config::default().display.big_font, "biz-ud-gothic");
+    assert_eq!(Config::from_toml("[display]\n").unwrap().display.big_font, "biz-ud-gothic");
+
+    for value in ["biz-ud-gothic", "shinonome", "~/Fonts/my font.ttc", "/tmp/custom.otf"] {
+        let config = Config::from_toml(&format!("[display]\nbig_font = {value:?}\n")).unwrap();
+        assert_eq!(config.display.big_font, value);
+    }
+}
+
+#[test]
 fn v1_fixture_is_mapped_to_v2() {
     let config = Config::from_toml(include_str!("fixtures/config_v1.toml")).unwrap();
 

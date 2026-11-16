@@ -26,6 +26,7 @@ unicode-width = "0.2"
 ratatui-image = { version = "11.1.0", default-features = false, features = ["crossterm"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd"] }
+ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 proptest = "1.5"

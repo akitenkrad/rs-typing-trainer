@@ -1,18 +1,15 @@
 //! Pixel rendering and fixed-protocol caching for keyboard key tiles.
 
-use std::collections::HashMap;
-
-use image::{DynamicImage, RgbaImage};
+use image::RgbaImage;
 use ratatui::layout::Size;
 use ratatui::style::Color;
 use ratatui_image::protocol::Protocol;
-use ratatui_image::{Resize, picker::Picker};
 use tiny_skia::{FillRule, Paint, Path, PathBuilder, Pixmap, Rect, Transform};
 
 use crate::graphics::{CellPixels, GraphicsDetection, GraphicsMode};
 use crate::ui::bigtext::{BigTextSize, BitmapFont, font};
+use crate::ui::image_cache::{DEFAULT_TILE_CACHE_LIMIT, ProtocolCache, color_rgb};
 
-const DEFAULT_CACHE_LIMIT: usize = 1024;
 const DEFAULT_FACE: [u8; 3] = [75, 81, 91];
 const BACKSLASH_16: [u16; 16] = [
     0x8000, 0x8000, 0x4000, 0x4000, 0x2000, 0x2000, 0x1000, 0x1000, 0x0800, 0x0800, 0x0400, 0x0400, 0x0200, 0x0200, 0x0100, 0x0100,
@@ -58,11 +55,7 @@ struct TileKey {
 }
 
 pub struct KeyboardImageCache {
-    signature: Option<(GraphicsMode, CellPixels)>,
-    picker: Option<Picker>,
-    tiles: HashMap<TileKey, Protocol>,
-    limit: usize,
-    creation_count: usize,
+    cache: ProtocolCache<TileKey>,
 }
 
 impl Default for KeyboardImageCache {
@@ -73,72 +66,46 @@ impl Default for KeyboardImageCache {
 
 impl KeyboardImageCache {
     pub fn new() -> Self {
-        Self::with_limit(DEFAULT_CACHE_LIMIT)
+        Self::with_limit(DEFAULT_TILE_CACHE_LIMIT)
     }
 
     pub fn with_limit(limit: usize) -> Self {
         Self {
-            signature: None,
-            picker: None,
-            tiles: HashMap::new(),
-            limit: limit.max(1),
-            creation_count: 0,
+            cache: ProtocolCache::new(limit),
         }
     }
 
     pub fn len(&self) -> usize {
-        self.tiles.len()
+        self.cache.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.tiles.is_empty()
+        self.cache.len() == 0
     }
 
     pub fn creation_count(&self) -> usize {
-        self.creation_count
+        self.cache.creation_count()
     }
 
     pub fn clear(&mut self) {
-        self.signature = None;
-        self.picker = None;
-        self.tiles.clear();
+        self.cache.clear();
     }
 
     pub fn prepare(&mut self, detection: &GraphicsDetection, spec: &KeyTileSpec) -> Result<(), String> {
         let key = self.key(detection, spec)?;
-        if self.tiles.contains_key(&key) {
-            return Ok(());
-        }
-        if self.tiles.len() >= self.limit {
-            self.tiles.clear();
-        }
-        let image = DynamicImage::ImageRgba8(render_key_tile(key.cell_pixels, spec));
-        let protocol = self
-            .picker
-            .as_ref()
-            .ok_or_else(|| "image picker is unavailable".to_owned())?
-            .new_protocol(image, spec.cells, Resize::Fit(None))
-            .map_err(|error| error.to_string())?;
-        self.tiles.insert(key, protocol);
-        self.creation_count += 1;
-        Ok(())
+        self.cache
+            .prepare(detection, key, spec.cells, |cell_pixels| Ok(render_key_tile(cell_pixels, spec)))
     }
 
     pub(crate) fn protocol<'a>(&'a mut self, detection: &GraphicsDetection, spec: &KeyTileSpec) -> Option<&'a Protocol> {
         let key = self.key(detection, spec).ok()?;
-        self.tiles.get(&key)
+        self.cache.protocol(detection, &key)
     }
 
     fn key(&mut self, detection: &GraphicsDetection, spec: &KeyTileSpec) -> Result<TileKey, String> {
         let cell_pixels = detection.cell_pixels.ok_or_else(|| "cell pixel size is unavailable".to_owned())?;
         if detection.mode == GraphicsMode::Off {
             return Err("image protocol is disabled".to_owned());
-        }
-        let signature = (detection.mode, cell_pixels);
-        if self.signature != Some(signature) {
-            self.tiles.clear();
-            self.picker = detection.picker();
-            self.signature = Some(signature);
         }
         let mut face = color_rgb(spec.face_color, DEFAULT_FACE);
         if spec.modifier {
@@ -366,59 +333,4 @@ fn darken(color: [u8; 3], percentage: u16) -> [u8; 3] {
 
 fn lighten(color: [u8; 3], amount: u8) -> [u8; 3] {
     color.map(|channel| channel.saturating_add(amount))
-}
-
-fn color_rgb(color: Color, reset: [u8; 3]) -> [u8; 3] {
-    match color {
-        Color::Reset => reset,
-        Color::Black => [0, 0, 0],
-        Color::Red => [205, 49, 49],
-        Color::Green => [13, 188, 121],
-        Color::Yellow => [229, 229, 16],
-        Color::Blue => [36, 114, 200],
-        Color::Magenta => [188, 63, 188],
-        Color::Cyan => [17, 168, 205],
-        Color::Gray => [204, 204, 204],
-        Color::DarkGray => [102, 102, 102],
-        Color::LightRed => [241, 76, 76],
-        Color::LightGreen => [144, 238, 144],
-        Color::LightYellow => [245, 245, 67],
-        Color::LightBlue => [59, 142, 234],
-        Color::LightMagenta => [214, 112, 214],
-        Color::LightCyan => [41, 184, 219],
-        Color::White => [255, 255, 255],
-        Color::Rgb(red, green, blue) => [red, green, blue],
-        Color::Indexed(index) => indexed_rgb(index),
-    }
-}
-
-fn indexed_rgb(index: u8) -> [u8; 3] {
-    const ANSI: [[u8; 3]; 16] = [
-        [0, 0, 0],
-        [128, 0, 0],
-        [0, 128, 0],
-        [128, 128, 0],
-        [0, 0, 128],
-        [128, 0, 128],
-        [0, 128, 128],
-        [192, 192, 192],
-        [128, 128, 128],
-        [255, 0, 0],
-        [0, 255, 0],
-        [255, 255, 0],
-        [0, 0, 255],
-        [255, 0, 255],
-        [0, 255, 255],
-        [255, 255, 255],
-    ];
-    if index < 16 {
-        return ANSI[usize::from(index)];
-    }
-    if index < 232 {
-        let cube = index - 16;
-        let value = |component: u8| if component == 0 { 0 } else { 55 + component * 40 };
-        return [value(cube / 36), value((cube / 6) % 6), value(cube % 6)];
-    }
-    let gray = 8 + (index - 232) * 10;
-    [gray, gray, gray]
 }

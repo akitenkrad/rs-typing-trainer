@@ -14,18 +14,21 @@
 //!   the rows.
 
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Rect};
+use ratatui::layout::{Alignment, Rect, Size};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Paragraph};
+use ratatui_image::Image;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::{App, GameState};
 use crate::config::ModeKind;
 use crate::game::word::{ExitKind, WordState};
+use crate::graphics::GraphicsMode;
 use crate::i18n::{Lang, Msg};
-use crate::ui::bigtext::{BigTextSize, BitmapFont, RenderedBigText, StyledCharacter, font, window_by_widths, window_range};
+use crate::ui::bigtext::{BigTextSize, BitmapFont, RenderedBigText, StyledCharacter, font, render_fallback_row, window_by_widths, window_range};
+use crate::ui::bigtext_image::{BigTileSpec, image_cell_height};
 use crate::ui::playing::{mistype_flash_active, progress_positions};
 use crate::ui::theme::Theme;
 
@@ -199,9 +202,9 @@ pub(crate) fn render(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, bi
         && let Ok(bitmap_font) = font(size)
     {
         match kind {
-            PromptKind::Word => render_big_word(frame, &ctx, area, bitmap_font),
-            PromptKind::Sentence => render_big_sentence(frame, &ctx, area, bitmap_font),
-            PromptKind::Japanese { sentence } => render_big_japanese(frame, &ctx, area, bitmap_font, sentence),
+            PromptKind::Word => render_big_word(frame, &ctx, area, size, bitmap_font),
+            PromptKind::Sentence => render_big_sentence(frame, &ctx, area, size, bitmap_font),
+            PromptKind::Japanese { sentence } => render_big_japanese(frame, &ctx, area, size, bitmap_font, sentence),
         }
         return;
     }
@@ -231,7 +234,7 @@ pub(crate) fn rows(app: &App, size: Option<BigTextSize>, width: u16) -> u16 {
         let gap_rows = if gaps { segments.len().saturating_sub(1) as u16 } else { 0 };
         return content + gap_rows + 2 + 2 * CARD_PAD_Y + 1;
     };
-    let height = size.cell_height();
+    let height = big_glyph_rows(app, size);
     match kind {
         // Surface, gap, kana, gap, romaji, cursor.
         PromptKind::Japanese { sentence: false } => 2 * height + 4 + markers,
@@ -510,27 +513,108 @@ fn big_marker_line(ctx: &Ctx<'_>, rendered: &RenderedBigText, range: &std::ops::
     Some(rendered.marker_line(&markers))
 }
 
+fn big_glyph_rows(app: &App, size: BigTextSize) -> u16 {
+    if app.graphics.mode != GraphicsMode::Off
+        && let Some(cell_pixels) = app.graphics.cell_pixels
+    {
+        image_cell_height(size, cell_pixels)
+    } else {
+        size.cell_height()
+    }
+}
+
+struct BigImageBlock<'a> {
+    size: BigTextSize,
+    characters: &'a [StyledCharacter],
+    rendered: &'a RenderedBigText,
+    rows: u16,
+}
+
+fn draw_big_images(frame: &mut Frame, ctx: &Ctx<'_>, area: Rect, x: u16, y: u16, block: BigImageBlock<'_>) -> bool {
+    if ctx.app.graphics.mode == GraphicsMode::Off || ctx.app.graphics.cell_pixels.is_none() {
+        return false;
+    }
+    let configured = ctx.app.config.display.big_font.as_str();
+    let home = ctx.app.home_dir.as_path();
+    let mut images = ctx.app.bigtext_images.borrow_mut();
+    for (index, character) in block.characters.iter().enumerate() {
+        if !character.visible || !images.can_render(configured, home, block.size, character.character) {
+            continue;
+        }
+        let Some(width) = block.rendered.character_width(index) else {
+            return false;
+        };
+        let spec = BigTileSpec {
+            size: block.size,
+            cells: Size::new(width, block.rows),
+            character: *character,
+        };
+        if images.prepare(configured, home, &ctx.app.graphics, &spec).is_err() {
+            return false;
+        }
+    }
+    for (index, character) in block.characters.iter().enumerate() {
+        if !character.visible {
+            continue;
+        }
+        let Some(width) = block.rendered.character_width(index) else {
+            return false;
+        };
+        let column = block.rendered.character_columns.get(index).copied().unwrap_or(0);
+        if !images.can_render(configured, home, block.size, character.character) {
+            put(
+                frame,
+                area,
+                x + column,
+                y + block.rows / 2,
+                Line::from(Span::styled(
+                    render_fallback_row(character.character, width, usize::from(block.rows), usize::from(block.rows / 2)),
+                    character.style,
+                )),
+            );
+            continue;
+        }
+        let spec = BigTileSpec {
+            size: block.size,
+            cells: Size::new(width, block.rows),
+            character: *character,
+        };
+        let Some(protocol) = images.protocol(configured, home, &ctx.app.graphics, &spec) else {
+            return false;
+        };
+        frame.render_widget(Image::new(protocol), Rect::new(x + column, area.y + y, width, block.rows));
+    }
+    true
+}
+
 /// A large window of `text` around `current`, with its marker row (if any).
 struct BigBlock {
     rendered: RenderedBigText,
+    characters: Vec<StyledCharacter>,
     markers: Option<Line<'static>>,
     cursor: usize,
+    size: BigTextSize,
+    glyph_rows: u16,
 }
 
 impl BigBlock {
-    fn new(ctx: &Ctx<'_>, bitmap_font: &BitmapFont, text: &str, current: usize, max_width: u16) -> Option<Self> {
+    fn new(ctx: &Ctx<'_>, size: BigTextSize, bitmap_font: &BitmapFont, text: &str, current: usize, max_width: u16) -> Option<Self> {
         let count = text.chars().count();
         if count == 0 {
             return None;
         }
         let current_clamped = current.min(count - 1);
         let range = window_range(bitmap_font, text, current_clamped, max_width);
-        let rendered = bitmap_font.render(&big_window(text, range.clone(), current, ctx));
+        let characters = big_window(text, range.clone(), current, ctx);
+        let rendered = bitmap_font.render(&characters);
         let markers = big_marker_line(ctx, &rendered, &range);
         Some(Self {
             rendered,
+            characters,
             markers,
             cursor: current_clamped.saturating_sub(range.start),
+            size,
+            glyph_rows: big_glyph_rows(ctx.app, size),
         })
     }
 
@@ -545,9 +629,25 @@ impl BigBlock {
             put(frame, area, x, y, markers.clone());
             y += 1;
         }
-        for line in &self.rendered.lines {
-            put(frame, area, x, y, line.clone());
-            y += 1;
+        if draw_big_images(
+            frame,
+            ctx,
+            area,
+            x,
+            y,
+            BigImageBlock {
+                size: self.size,
+                characters: &self.characters,
+                rendered: &self.rendered,
+                rows: self.glyph_rows,
+            },
+        ) {
+            y += self.glyph_rows;
+        } else {
+            for line in &self.rendered.lines {
+                put(frame, area, x, y, line.clone());
+                y += 1;
+            }
         }
         match status {
             Some(status) => put_centered(frame, area, y, status),
@@ -557,13 +657,13 @@ impl BigBlock {
     }
 
     fn rows(&self) -> u16 {
-        u16::from(self.markers.is_some()) + self.rendered.lines.len() as u16 + 1
+        u16::from(self.markers.is_some()) + self.glyph_rows + 1
     }
 }
 
-fn render_big_word(frame: &mut Frame, ctx: &Ctx<'_>, area: Rect, bitmap_font: &BitmapFont) {
+fn render_big_word(frame: &mut Frame, ctx: &Ctx<'_>, area: Rect, size: BigTextSize, bitmap_font: &BitmapFont) {
     let text = ctx.game.current_prompt.target.as_str();
-    let Some(block) = BigBlock::new(ctx, bitmap_font, text, ctx.game.typed_index, area.width) else {
+    let Some(block) = BigBlock::new(ctx, size, bitmap_font, text, ctx.game.typed_index, area.width) else {
         return;
     };
     let helper = ctx.word_helper_line();
@@ -578,9 +678,9 @@ fn render_big_word(frame: &mut Frame, ctx: &Ctx<'_>, area: Rect, bitmap_font: &B
     }
 }
 
-fn render_big_sentence(frame: &mut Frame, ctx: &Ctx<'_>, area: Rect, bitmap_font: &BitmapFont) {
+fn render_big_sentence(frame: &mut Frame, ctx: &Ctx<'_>, area: Rect, size: BigTextSize, bitmap_font: &BitmapFont) {
     let text = ctx.game.current_prompt.text.as_str();
-    let Some(block) = BigBlock::new(ctx, bitmap_font, text, ctx.game.typed_index, area.width) else {
+    let Some(block) = BigBlock::new(ctx, size, bitmap_font, text, ctx.game.typed_index, area.width) else {
         return;
     };
     let mut y = block.draw(frame, ctx, area, centered_x(area, block.width()), 0, ctx.status_line());
@@ -596,7 +696,7 @@ fn render_big_sentence(frame: &mut Frame, ctx: &Ctx<'_>, area: Rect, bitmap_font
     }
 }
 
-fn render_big_japanese(frame: &mut Frame, ctx: &Ctx<'_>, area: Rect, bitmap_font: &BitmapFont, sentence: bool) {
+fn render_big_japanese(frame: &mut Frame, ctx: &Ctx<'_>, area: Rect, size: BigTextSize, bitmap_font: &BitmapFont, sentence: bool) {
     let game = ctx.game;
     let labels = ctx.labels();
     let label_column = labels.iter().map(|label| UnicodeWidthStr::width(*label)).max().unwrap_or(0) as u16 + 2;
@@ -615,16 +715,15 @@ fn render_big_japanese(frame: &mut Frame, ctx: &Ctx<'_>, area: Rect, bitmap_font
         0
     };
     let surface_range = window_range(bitmap_font, surface, surface_current, body_width);
-    let surface_rendered = bitmap_font.render(
-        &surface
-            .chars()
-            .skip(surface_range.start)
-            .take(surface_range.len())
-            .map(|character| StyledCharacter::new(character, Style::default().fg(ctx.theme.fg).add_modifier(Modifier::BOLD)))
-            .collect::<Vec<_>>(),
-    );
+    let surface_characters = surface
+        .chars()
+        .skip(surface_range.start)
+        .take(surface_range.len())
+        .map(|character| StyledCharacter::new(character, Style::default().fg(ctx.theme.fg).add_modifier(Modifier::BOLD)))
+        .collect::<Vec<_>>();
+    let surface_rendered = bitmap_font.render(&surface_characters);
     let kana = big_kana_line(ctx, reading, completed_reading, body_width);
-    let romaji = BigBlock::new(ctx, bitmap_font, &guide, game.typed_index, body_width);
+    let romaji = BigBlock::new(ctx, size, bitmap_font, &guide, game.typed_index, body_width);
 
     let content_width = surface_rendered
         .width
@@ -634,7 +733,7 @@ fn render_big_japanese(frame: &mut Frame, ctx: &Ctx<'_>, area: Rect, bitmap_font
     let body_x = x0 + label_column;
     let label = |text: &'static str| Line::from(Span::styled(text, ctx.label_style()));
 
-    let surface_rows = surface_rendered.lines.len() as u16;
+    let surface_rows = big_glyph_rows(ctx.app, size);
     let romaji_rows = romaji.as_ref().map_or(0, BigBlock::rows);
     let table_rows = if sentence { 3 } else { 0 };
     let fixed = surface_rows + 1 + romaji_rows + table_rows;
@@ -642,9 +741,25 @@ fn render_big_japanese(frame: &mut Frame, ctx: &Ctx<'_>, area: Rect, bitmap_font
 
     let mut y = 0;
     put(frame, area, x0, y, label(labels[0]));
-    for line in surface_rendered.lines {
-        put(frame, area, body_x, y, line);
-        y += 1;
+    if draw_big_images(
+        frame,
+        ctx,
+        area,
+        body_x,
+        y,
+        BigImageBlock {
+            size,
+            characters: &surface_characters,
+            rendered: &surface_rendered,
+            rows: surface_rows,
+        },
+    ) {
+        y += surface_rows;
+    } else {
+        for line in surface_rendered.lines {
+            put(frame, area, body_x, y, line);
+            y += 1;
+        }
     }
     y += u16::from(gaps >= 1);
     put(frame, area, x0, y, label(labels[1]));

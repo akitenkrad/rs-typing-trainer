@@ -223,7 +223,8 @@ fn run_replay(cli: &Cli, home: &std::path::Path, file: &std::path::Path, options
             interval: Duration::from_millis(milliseconds),
         },
     );
-    let replay = rs_typing_trainer::replay::Replay::new_with_lang(record, timing, options.paused, options.exit_on_end, lang);
+    let mut replay = rs_typing_trainer::replay::Replay::new_with_lang(record, timing, options.paused, options.exit_on_end, lang);
+    replay.set_big_font(&config.display.big_font, home);
     run_replay_tui(replay, lang, config.display.graphics, cli.graphics)
 }
 

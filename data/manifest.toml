@@ -2465,6 +2465,18 @@ sha256 = "86fbc28a39b01c4c0368e60b5234508353e860aeb10786057bf8ceb9b280afda"
 path = "shinonome/shinonome-0.9.11/AUTHORS"
 sha256 = "91d7736899f9683aaf47aa33a7ceb78f62316a2316fb95ba44e4a7e0902fae1e"
 
+[[inputs]]
+path = "bizud/v1.051.zip"
+sha256 = "73b7fc086ed39d00219437b68593e86aa535c8590d9975936f7f45e8b3f94bde"
+
+[[inputs]]
+path = "bizud/morisawa-biz-ud-gothic-1.051/fonts/ttf/BIZUDGothic-Regular.ttf"
+sha256 = "7d2b48d84ef4e65c9f85bcf65fb1fb41c92b134be641fab6a7141d597c9a92b0"
+
+[[inputs]]
+path = "bizud/morisawa-biz-ud-gothic-1.051/OFL.txt"
+sha256 = "e753d7155d53c747d037a445e584c8ecfca6dd79846db610417e282a736b28bc"
+
 [[outputs]]
 path = "en_words.tsv.gz"
 count = 20000
@@ -2488,7 +2500,7 @@ sha256 = "17e706d91b028a8462440617df858b0f8b2914a2e0bda17e3734636e2b9e0587"
 [[outputs]]
 path = "NOTICE"
 count = 1
-sha256 = "5bfc245fb64710b0517af6c8e67a52b7344fe469496318bfeca3812fb02128b7"
+sha256 = "c3f7b3586d0292bf0a63e8c91ad90d4f39f18bafeb76efd623026c17d51cb10c"
 
 [[outputs]]
 path = "font/shinonome12.bin.gz"
@@ -2499,3 +2511,8 @@ sha256 = "c6e68da57473ff184fe98cd437867e4bca7038e727387249170740292b008c3d"
 path = "font/shinonome16.bin.gz"
 count = 7037
 sha256 = "e92005dc7675271ab77a4b4513d51b2b3d70f85c6a0a3c2abc265c11d41462aa"
+
+[[outputs]]
+path = "font/bizud-gothic.outl.gz"
+count = 7421
+sha256 = "6243b4154828031a5e4882908f641d569922de2b0c916ec0524d611f7f676f09"

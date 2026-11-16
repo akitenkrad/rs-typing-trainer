@@ -35,6 +35,7 @@ pub struct PlayingLayout {
     pub bigtext: Option<BigTextSize>,
     pub keyboard_style: Option<KeyboardStyle>,
     pub prompt_rows: u16,
+    pub prompt_gap_rows: u16,
     pub show_timer: bool,
 }
 
@@ -95,9 +96,9 @@ pub fn render_with_footer(frame: &mut Frame, app: &App, footer: Option<Line<'sta
         constraints.push(Constraint::Length(1));
     }
     // Order chosen by the user: keyboard on top, then the item timer, the
-    // metrics, and the prompt in the lower area. The prompt starts on the row
-    // right below the metrics and takes every spare row, so its content is
-    // top-aligned there rather than vertically centred.
+    // metrics, a gap when space permits, and the prompt in the lower area.
+    // The prompt takes every remaining row, so its content stays top-aligned
+    // rather than vertically centred.
     if layout.keyboard_style.is_some() {
         constraints.push(Constraint::Length(keyboard_rows));
     }
@@ -105,6 +106,7 @@ pub fn render_with_footer(frame: &mut Frame, app: &App, footer: Option<Line<'sta
         constraints.push(Constraint::Length(1));
     }
     constraints.push(Constraint::Length(1)); // combo, errors, accuracy
+    constraints.push(Constraint::Length(layout.prompt_gap_rows));
     constraints.push(Constraint::Min(layout.prompt_rows));
     constraints.push(Constraint::Length(1)); // footer
     let chunks = Layout::default().direction(Direction::Vertical).constraints(constraints).split(inner);
@@ -132,6 +134,7 @@ pub fn render_with_footer(frame: &mut Frame, app: &App, footer: Option<Line<'sta
         render_sub_stats(frame, game, &theme, chunks[index], lang);
     }
     index += 1;
+    index += 1; // optional gap between metrics and prompt
     crate::ui::prompt::render(frame, app, &theme, chunks[index], layout.bigtext);
     index += 1;
     let footer_index = index;
@@ -182,13 +185,16 @@ pub fn resolve_playing_layout(app: &App, inner: Rect) -> PlayingLayout {
     }
     for (stage, bigtext, keyboard_style) in candidates {
         if fits(bigtext, keyboard_style) {
-            let used = base_rows + prompt_rows(app, bigtext, inner.width) + keyboard_height(keyboard_style);
+            let prompt_rows = prompt_rows(app, bigtext, inner.width);
+            let used = base_rows + prompt_rows + keyboard_height(keyboard_style);
+            let (show_timer, prompt_gap_rows) = resolve_optional_rows(app, inner.height, used);
             return PlayingLayout {
                 stage,
                 bigtext,
                 keyboard_style,
-                prompt_rows: prompt_rows(app, bigtext, inner.width),
-                show_timer: timer_requested(app) && used < inner.height,
+                prompt_rows,
+                prompt_gap_rows,
+                show_timer,
             };
         }
     }
@@ -205,13 +211,27 @@ pub fn resolve_playing_layout(app: &App, inner: Rect) -> PlayingLayout {
         })
         .flatten();
     let used = base_rows + normal_rows + keyboard_height(keyboard_style);
+    let (show_timer, prompt_gap_rows) = resolve_optional_rows(app, inner.height, used);
     PlayingLayout {
         stage: PromptLayoutStage::NormalKeyboard,
         bigtext: None,
         keyboard_style,
         prompt_rows: normal_rows.min(inner.height.saturating_sub(base_rows)),
-        show_timer: timer_requested(app) && used < inner.height,
+        prompt_gap_rows,
+        show_timer,
     }
+}
+
+fn resolve_optional_rows(app: &App, available: u16, required: u16) -> (bool, u16) {
+    let spare = available.saturating_sub(required);
+    let show_timer = timer_requested(app) && spare > 0;
+    let spare_after_timer = spare.saturating_sub(u16::from(show_timer));
+    let prompt_gap_rows = match spare_after_timer {
+        0 => 0,
+        1..=3 => 1,
+        _ => 2,
+    };
+    (show_timer, prompt_gap_rows)
 }
 
 fn timer_requested(app: &App) -> bool {

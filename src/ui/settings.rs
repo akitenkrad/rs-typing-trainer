@@ -1,15 +1,18 @@
 //! Interactive keyboard and language settings screen.
 
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::layout::{Constraint, Direction, Layout, Rect, Size};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui_image::Image;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::App;
 use crate::graphics::{GraphicsMode, GraphicsPreference};
 use crate::i18n::{Lang, Msg};
+use crate::ui::bigtext::{BigTextSize, StyledCharacter, font};
+use crate::ui::bigtext_image::{BigTileSpec, image_cell_height};
 use crate::ui::{left_inset, theme::Theme};
 
 pub fn render(frame: &mut Frame, app: &App) {
@@ -26,8 +29,8 @@ pub fn render(frame: &mut Frame, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(0),
-            Constraint::Length(10),
-            Constraint::Length(1),
+            Constraint::Length(11),
+            Constraint::Length(0),
             Constraint::Length(4),
             Constraint::Length(1),
             Constraint::Min(0),
@@ -56,6 +59,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             },
         ),
         (Msg::SettingFeedback, feedback_label(&app.config.display.feedback, lang)),
+        (Msg::SettingBigFont, app.config.display.big_font.as_str()),
     ];
     let label_width = rows.iter().map(|(label, _)| UnicodeWidthStr::width(label.text(lang))).max().unwrap_or(0) + 3;
     let lines = rows
@@ -74,7 +78,11 @@ pub fn render(frame: &mut Frame, app: &App) {
                     Style::default().fg(if selected { theme.accent } else { theme.fg }),
                 ),
                 Span::styled(
-                    format!("< {value} >"),
+                    if index == 10 {
+                        format!("‹ {value} ›")
+                    } else {
+                        format!("< {value} >")
+                    },
                     Style::default()
                         .fg(if selected { theme.warning } else { theme.muted })
                         .add_modifier(if selected { Modifier::BOLD } else { Modifier::empty() }),
@@ -89,6 +97,9 @@ pub fn render(frame: &mut Frame, app: &App) {
             .style(Style::default().fg(theme.muted)),
         left_inset(chunks[3]),
     );
+    if app.settings_selected == 10 {
+        render_font_sample(frame, app, &theme, left_inset(chunks[5]));
+    }
     frame.render_widget(
         Paragraph::new(graphics_status(app, lang)).style(Style::default().fg(theme.muted)),
         left_inset(chunks[4]),
@@ -167,6 +178,12 @@ fn setting_description(index: usize, lang: Lang) -> &'static str {
         (9, Lang::Ja) => {
             "練習後の気づき．summary は最も目立つ内容を 1 行，detailed は最大 3 行を示します．根拠が足りないときは表示しません．既定: summary．"
         }
+        (10, Lang::En) => {
+            "Large-text font. biz-ud-gothic: bundled outline font. shinonome: crisp integer-scaled bitmap. A configured TTF / OTF / TTC path is also listed. Sample: あア亜Aa. Without terminal images, Shinonome block text is used. Default: biz-ud-gothic."
+        }
+        (10, Lang::Ja) => {
+            "大きな文字の書体．biz-ud-gothic: 同梱の輪郭書体．shinonome: 整数倍のドット字形．設定ファイルに TTF / OTF / TTC のパスがあれば候補に加わります．見本: あア亜Aa．画像を描けない端末では東雲のブロック文字で描きます．既定: biz-ud-gothic．"
+        }
         _ => "",
     }
 }
@@ -186,13 +203,80 @@ fn graphics_status(app: &App, lang: Lang) -> String {
         Lang::En => "Image",
         Lang::Ja => "画像",
     };
-    match (app.graphics.mode, app.graphics.cell_pixels) {
+    let status = match (app.graphics.mode, app.graphics.cell_pixels) {
         (GraphicsMode::Off, _) => format!("{label}: off ({})", app.graphics.reason.text(lang)),
         (mode, Some(cell)) => match lang {
             Lang::En => format!("{label}: {mode} (1 cell {}x{} px)", cell.width, cell.height),
             Lang::Ja => format!("{label}: {mode}（1 セル {}×{} px）", cell.width, cell.height),
         },
         (mode, None) => format!("{label}: {mode}"),
+    };
+    let fallback = app
+        .bigtext_images
+        .borrow_mut()
+        .fallback_reason(&app.config.display.big_font, &app.home_dir)
+        .map(str::to_owned);
+    match fallback {
+        Some(reason) => format!("{status}; font: {reason}"),
+        None => status,
+    }
+}
+
+fn render_font_sample(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    let message = match app.config.general.lang {
+        Lang::En => "Sample: あア亜Aa — without terminal images, Shinonome block text is used.",
+        Lang::Ja => "見本: あア亜Aa — 画像を描けない端末では東雲のブロック文字で描きます．",
+    };
+    let Some(cell_pixels) = app.graphics.cell_pixels else {
+        frame.render_widget(Paragraph::new(message).style(Style::default().fg(theme.warning)), area);
+        return;
+    };
+    if app.graphics.mode == GraphicsMode::Off {
+        frame.render_widget(Paragraph::new(message).style(Style::default().fg(theme.warning)), area);
+        return;
+    }
+    let size = BigTextSize::Dot16;
+    let Ok(bitmap) = font(size) else {
+        frame.render_widget(Paragraph::new(message).style(Style::default().fg(theme.warning)), area);
+        return;
+    };
+    let rows = image_cell_height(size, cell_pixels).min(area.height);
+    let characters = "あア亜Aa"
+        .chars()
+        .map(|character| {
+            (
+                bitmap.character_width(character),
+                StyledCharacter::new(character, Style::default().fg(theme.accent).add_modifier(Modifier::BOLD)),
+            )
+        })
+        .collect::<Vec<_>>();
+    let total_width = characters.iter().map(|(width, _)| width).sum::<u16>();
+    let mut x = area.x + area.width.saturating_sub(total_width) / 2;
+    let y = area.y + area.height.saturating_sub(rows) / 2;
+    let mut images = app.bigtext_images.borrow_mut();
+    for (width, character) in &characters {
+        let spec = BigTileSpec {
+            size,
+            cells: Size::new(*width, rows),
+            character: *character,
+        };
+        if images.prepare(&app.config.display.big_font, &app.home_dir, &app.graphics, &spec).is_err() {
+            frame.render_widget(Paragraph::new(message).style(Style::default().fg(theme.warning)), area);
+            return;
+        }
+    }
+    for (width, character) in characters {
+        let spec = BigTileSpec {
+            size,
+            cells: Size::new(width, rows),
+            character,
+        };
+        let Some(protocol) = images.protocol(&app.config.display.big_font, &app.home_dir, &app.graphics, &spec) else {
+            frame.render_widget(Paragraph::new(message).style(Style::default().fg(theme.warning)), area);
+            return;
+        };
+        frame.render_widget(Image::new(protocol), Rect::new(x, y, width, rows));
+        x += width;
     }
 }
 

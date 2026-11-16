@@ -18,7 +18,7 @@ tools/gen-data/sources/fetch.sh /path/to/p4in
 
 The script waits two seconds after each download. Existing non-empty files are left in place. `sources/aozora_selection.tsv` records the selected Japanese works, and `sources/public_domain_books.tsv` records the number, title, and author of each selected public-domain English book.
 
-The same script downloads `shinonome-0.9.11p1.tar.bz2` over the upstream HTTP URL, verifies SHA-256 `95663c95c92ba5765f63ccbdf033eb93b707be01812a989c548db943479c838f`, and extracts it under `shinonome/`.
+The same script downloads `shinonome-0.9.11p1.tar.bz2` over the upstream HTTP URL, verifies SHA-256 `95663c95c92ba5765f63ccbdf033eb93b707be01812a989c548db943479c838f`, and extracts it under `shinonome/`. It also downloads BIZ UD Gothic v1.051 as `bizud/v1.051.zip`, verifies SHA-256 `73b7fc086ed39d00219437b68593e86aa535c8590d9975936f7f45e8b3f94bde`, and extracts `morisawa-biz-ud-gothic-1.051/` under `bizud/`.
 
 ## Generate
 
@@ -36,14 +36,17 @@ Generate the cached bitmap fonts and reconcile their notices and manifest entrie
 ```sh
 cargo run --release --manifest-path tools/gen-data/Cargo.toml -- \
   --font-source /path/to/p4in/shinonome/shinonome-0.9.11 \
+  --bizud-source /path/to/p4in/bizud/morisawa-biz-ud-gothic-1.051 \
   --out data/font --font-notice data/NOTICE --font-manifest data/manifest.toml
 ```
 
-The font command reads only the 12-dot and 16-dot JIS X 0208/JIS X 0201 BDF files. It emits Unicode-sorted fixed records in deterministic gzip streams, converts `LICENSE` and `AUTHORS` from EUC-JP to UTF-8, and updates its dedicated NOTICE and manifest blocks idempotently.
+The Shinonome part of the font command reads only the 12-dot and 16-dot JIS X 0208/JIS X 0201 BDF files. It emits Unicode-sorted fixed records in deterministic gzip streams and converts `LICENSE` and `AUTHORS` from EUC-JP to UTF-8. The BIZ UD part reads `BIZUDGothic-Regular.ttf` and retains the ASCII U+0020–U+007E and JIS X 0208 characters that the font maps. It records the requested, retained, and missing counts and copies the full `OFL.txt` into its NOTICE block. Both parts can be run together or separately; each reconciles its dedicated NOTICE and manifest blocks idempotently without removing the other.
 
-Run the font command after the data command: the data command rewrites `data/NOTICE` and `data/manifest.toml` from scratch and drops the font blocks, which the font command then restores. The manifest records the archive's SHA-256 and the SHA-256 of every file read from the extracted tree (the four BDF files, `LICENSE`, and `AUTHORS`). When `shinonome-0.9.11p1.tar.bz2` sits next to the extracted directory, as `fetch.sh` leaves it, the font command verifies its SHA-256 and stops on a mismatch.
+Run the font command after the data command: the data command rewrites `data/NOTICE` and `data/manifest.toml` from scratch and drops the font blocks, which the font command then restores. The manifest records both archives, every source file read, and every generated font. When an archive sits next to its extracted directory, as `fetch.sh` leaves it, the font command verifies its SHA-256 and stops on a mismatch.
 
 The font files start with the 8-byte magic `SHNFONT\0`, a format version byte (1), the dot height, the halfwidth and fullwidth dot widths, a little-endian `u32` glyph count, and four reserved bytes. Each glyph record is a little-endian `u32` Unicode scalar value, a width byte, and one little-endian `u16` per dot row with the leftmost dot in the most significant bit. Records are sorted by code point.
+
+`bizud-gothic.outl.gz` is a deterministic gzip stream whose uncompressed data starts with the 8-byte magic `BIZOUTL\0`, a little-endian `u16` format version (1), `units_per_em` as `u16`, ascender and descender as `i16`, and the glyph count as `u32`. Glyphs are sorted by Unicode scalar value. Each glyph stores a `u32` scalar, a `u16` horizontal advance, a `u32` command-byte length, and the command bytes. Opcodes 0–4 are `moveTo`, `lineTo`, `quadTo`, `curveTo`, and `close`; every point coordinate is rounded to an integer font unit and stored as a zigzag unsigned varint delta from the preceding point. Control points participate in that same point sequence. Hinting instructions and all other TTF tables are omitted. Gzip mtime is zero.
 
 `--extra-aozora` is optional and points directly to a directory containing `selection.tsv` and `zips/`. Missing archives in that supplemental selection are reported and skipped. The generator writes gzip-compressed TSV files to the selected output directory and review candidates to `tools/gen-data/review/`. Repeated writes are content-aware and replace changed files atomically. Gzip timestamps are fixed at zero; sampling uses a fixed seed and an in-tree FNV-1a implementation; maps and tie-breaking use sorted order.
 

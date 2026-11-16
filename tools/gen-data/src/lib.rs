@@ -8,8 +8,10 @@ mod font;
 mod generate;
 
 pub use font::{
-    BdfGlyph, FontGenerationOptions, FontGenerationReport, FontKind, SHINONOME_ARCHIVE, SHINONOME_ARCHIVE_SHA256, generate_fonts, jis_x0208_to_char,
-    parse_bdf, update_shinonome_manifest, update_shinonome_notice,
+    BIZUD_ARCHIVE, BIZUD_ARCHIVE_SHA256, BdfGlyph, BizUdGenerationOptions, BizUdGenerationReport, FontGenerationOptions, FontGenerationReport,
+    FontKind, OutlineCommand, OutlineFont, OutlineGlyph, SHINONOME_ARCHIVE, SHINONOME_ARCHIVE_SHA256, decode_outline_font, encode_outline_font,
+    generate_bizud_font, generate_fonts, gzip_deterministic, jis_x0208_to_char, parse_bdf, update_bizud_manifest, update_bizud_notice,
+    update_shinonome_manifest, update_shinonome_notice,
 };
 pub use generate::{GenerationOptions, GenerationReport, generate};
 

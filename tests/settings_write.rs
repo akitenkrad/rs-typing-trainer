@@ -295,6 +295,33 @@ fn graphics_setting_cycles_saves_and_cancels() {
 }
 
 #[test]
+fn big_font_setting_cycles_builtins_and_preserves_a_configured_path() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("config.toml");
+    fs::write(&path, "[display]\nbig_font = \"/tmp/my-font.ttc\" # keep\n").unwrap();
+    let config = Config::from_path(&path).unwrap();
+    let mut app = test_app(config);
+    app.config_path = Some(path.clone());
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
+    for _ in 0..10 {
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    }
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    assert_eq!(app.config.display.big_font, "biz-ud-gothic");
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    assert_eq!(app.config.display.big_font, "shinonome");
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    assert_eq!(app.config.display.big_font, "/tmp/my-font.ttc");
+    app.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+    assert_eq!(app.config.display.big_font, "shinonome");
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    let updated = fs::read_to_string(path).unwrap();
+    assert!(updated.contains("big_font = \"shinonome\" # keep"), "{updated}");
+}
+
+#[test]
 fn settings_screen_shows_the_detected_graphics_status() {
     let mut app = test_app(Config::default());
     app.set_graphics_detection(GraphicsDetection {

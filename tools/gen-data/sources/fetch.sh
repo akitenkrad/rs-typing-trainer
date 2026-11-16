@@ -4,7 +4,7 @@ set -eu
 destination=${1:-p4in}
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
-mkdir -p "$destination/aozora/zips" "$destination/gutenberg" "$destination/scowl" "$destination/tatoeba" "$destination/shinonome"
+mkdir -p "$destination/aozora/zips" "$destination/gutenberg" "$destination/scowl" "$destination/tatoeba" "$destination/shinonome" "$destination/bizud"
 cp "$script_dir/aozora_selection.tsv" "$destination/aozora/selection.tsv"
 
 fetch() {
@@ -47,4 +47,17 @@ if [ "$actual_sha256" != "$shinonome_sha256" ]; then
 fi
 if [ ! -d "$destination/shinonome/shinonome-0.9.11" ]; then
     tar -xjf "$shinonome_archive" -C "$destination/shinonome"
+fi
+
+bizud_archive="$destination/bizud/v1.051.zip"
+bizud_sha256=73b7fc086ed39d00219437b68593e86aa535c8590d9975936f7f45e8b3f94bde
+fetch "https://github.com/googlefonts/morisawa-biz-ud-gothic/archive/refs/tags/v1.051.zip" \
+    "$bizud_archive"
+actual_sha256=$(shasum -a 256 "$bizud_archive" | awk '{print $1}')
+if [ "$actual_sha256" != "$bizud_sha256" ]; then
+    echo "BIZ UD Gothic SHA-256 mismatch: expected $bizud_sha256, got $actual_sha256" >&2
+    exit 1
+fi
+if [ ! -d "$destination/bizud/morisawa-biz-ud-gothic-1.051" ]; then
+    unzip -q "$bizud_archive" -d "$destination/bizud"
 fi

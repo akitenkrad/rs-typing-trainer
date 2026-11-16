@@ -88,6 +88,8 @@ pub struct DisplayConfig {
     pub feedback: String,
     /// Terminal image protocol selection.
     pub graphics: GraphicsPreference,
+    /// Font used for image-rendered large prompt characters.
+    pub big_font: String,
 }
 
 /// `[display]` as written on disk. Older files use `prompt_size`
@@ -104,6 +106,8 @@ struct RawDisplayConfig {
     feedback: String,
     #[serde(default)]
     graphics: GraphicsPreference,
+    #[serde(default = "default_big_font")]
+    big_font: String,
 }
 
 impl From<RawDisplayConfig> for DisplayConfig {
@@ -117,6 +121,7 @@ impl From<RawDisplayConfig> for DisplayConfig {
             prompt_style,
             feedback: raw.feedback,
             graphics: raw.graphics,
+            big_font: raw.big_font,
         }
     }
 }
@@ -580,6 +585,7 @@ impl Default for DisplayConfig {
             prompt_style: default_prompt_style(),
             feedback: default_feedback(),
             graphics: GraphicsPreference::Auto,
+            big_font: default_big_font(),
         }
     }
 }
@@ -590,6 +596,10 @@ fn default_layout() -> String {
 
 fn default_prompt_style() -> String {
     "large".to_owned()
+}
+
+fn default_big_font() -> String {
+    "biz-ud-gothic".to_owned()
 }
 
 fn default_feedback() -> String {
@@ -982,6 +992,7 @@ pub fn save_settings(path: &Path, config: &Config) -> AppResult<()> {
     set_string_preserving_decor(&mut document["general"]["lang"], language);
     set_prompt_style(&mut document, &config.display.prompt_style);
     set_string_preserving_decor(&mut document["display"]["feedback"], &config.display.feedback);
+    set_string_preserving_decor(&mut document["display"]["big_font"], &config.display.big_font);
     set_string_preserving_decor(
         &mut document["display"]["graphics"],
         match config.display.graphics {

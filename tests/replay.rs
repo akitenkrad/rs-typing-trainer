@@ -172,6 +172,17 @@ fn replay_accepts_graphics_detection_and_updates_cell_pixels_on_resize() {
 }
 
 #[test]
+fn replay_accepts_the_viewers_big_font_and_home_directory() {
+    let mut replay = Replay::new(record(), PlaybackTiming::Recorded { speed: 1.0 }, false, false);
+    let home = PathBuf::from("/viewer/home");
+
+    replay.set_big_font("shinonome", &home);
+
+    assert_eq!(replay.app().config.display.big_font, "shinonome");
+    assert_eq!(replay.app().home_dir, home);
+}
+
+#[test]
 fn final_metrics_and_print_summary_come_from_the_record_log() {
     let record = record();
     let expected = rs_typing_trainer::analysis::analyze(&record.log);
