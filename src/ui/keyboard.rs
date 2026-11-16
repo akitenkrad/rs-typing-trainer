@@ -14,6 +14,7 @@ use crate::graphics::{GraphicsDetection, GraphicsMode};
 use crate::layout::geometry::{Finger, KeyRow, KeyboardGeometry, PhysicalKey};
 use crate::layout::{KeyStroke, KeyboardLayout};
 use crate::practice::keyboard_fade::KeyFade;
+use crate::ui::analysis_image::PixelPoint;
 use crate::ui::keyboard_image::{KeyTileSpec, KeyboardImageCache};
 
 const QUARTERS_PER_UNIT: u16 = 4;
@@ -228,11 +229,11 @@ fn render_inner(
     }
 }
 
-#[derive(Clone)]
-struct KeyTilePlacement {
-    x: u16,
-    y: u16,
-    spec: KeyTileSpec,
+#[derive(Clone, Debug, PartialEq)]
+pub struct KeyTilePlacement {
+    pub x: u16,
+    pub y: u16,
+    pub spec: KeyTileSpec,
 }
 
 pub fn prepare_keycap_images(
@@ -255,6 +256,36 @@ pub fn prepare_keycap_images(
     Ok(cache.creation_count() - before)
 }
 
+pub fn keycap_center_cells(geometry: &KeyboardGeometry, code: &str) -> Option<PixelPoint> {
+    const UNIT: u16 = 5;
+    for (row_index, row) in geometry.rows.iter().enumerate() {
+        let mut quarter = 0;
+        for key in row {
+            let left = scaled_boundary(quarter, UNIT);
+            quarter += key.width;
+            let right = scaled_boundary(quarter, UNIT);
+            if key.code == code {
+                return Some(PixelPoint {
+                    x: f64::from(left + right) / 2.0,
+                    y: row_index as f64 * 2.0 + 1.0,
+                });
+            }
+        }
+    }
+    None
+}
+
+pub(crate) fn keycap_image_area(area: Rect, finger_guide: bool) -> Rect {
+    let width = KeyboardStyle::Keycap.width();
+    let height = KeyboardStyle::Keycap.height(finger_guide);
+    Rect::new(
+        area.x + area.width.saturating_sub(width) / 2,
+        area.y + area.height.saturating_sub(height) / 2,
+        width.min(area.width),
+        height.min(area.height),
+    )
+}
+
 fn render_keycap_image(
     frame: &mut Frame,
     area: Rect,
@@ -272,10 +303,7 @@ fn render_keycap_image(
     if prepare_keycap_images(images.detection, &mut cache, geometry, layout, state, view, options.heatmap_only).is_err() {
         return false;
     }
-    let width = KeyboardStyle::Keycap.width();
-    let height = KeyboardStyle::Keycap.height(view.finger_guide);
-    let origin_x = area.x + area.width.saturating_sub(width) / 2;
-    let origin_y = area.y + area.height.saturating_sub(height) / 2;
+    let image_area = keycap_image_area(area, view.finger_guide);
     for placement in placements {
         let Some(protocol) = cache.protocol(images.detection, &placement.spec) else {
             return false;
@@ -283,8 +311,8 @@ fn render_keycap_image(
         frame.render_widget(
             Image::new(protocol),
             Rect::new(
-                origin_x + placement.x,
-                origin_y + placement.y,
+                image_area.x + placement.x,
+                image_area.y + placement.y,
                 placement.spec.cells.width,
                 placement.spec.cells.height,
             ),
@@ -293,7 +321,7 @@ fn render_keycap_image(
     true
 }
 
-fn keycap_tile_placements(
+pub fn keycap_tile_placements(
     geometry: &KeyboardGeometry,
     layout: &KeyboardLayout,
     state: &KeyboardState,
@@ -641,7 +669,7 @@ fn is_pressed(code: &str, state: &KeyboardState) -> bool {
     state.last.as_ref().is_some_and(|feedback| feedback.pressed_code == code)
 }
 
-fn heatmap_color(value: f64) -> Color {
+pub(crate) fn heatmap_color(value: f64) -> Color {
     let value = value.clamp(0.0, 1.0);
     Color::Rgb((40.0 + value * 180.0) as u8, (20.0 * (1.0 - value)) as u8, 20)
 }
@@ -665,7 +693,7 @@ fn render_plain_finger_guide(frame: &mut Frame, origin_x: u16, y: u16, geometry:
     }
 }
 
-fn finger_color(finger: Finger) -> Color {
+pub(crate) fn finger_color(finger: Finger) -> Color {
     match finger {
         Finger::LeftPinky => Color::LightRed,
         Finger::LeftRing => Color::LightMagenta,

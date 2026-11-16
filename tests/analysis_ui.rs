@@ -3,7 +3,12 @@ use std::time::Duration;
 use chrono::{TimeZone, Utc};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
+use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::style::Color;
+use rs_typing_trainer::analysis::errors::ConfusionMetric;
+use rs_typing_trainer::analysis::metrics::KeyMetric;
+use rs_typing_trainer::analysis::model::KeyMapMetric;
 use rs_typing_trainer::app::Screen;
 use rs_typing_trainer::config::{Config, ModeKind};
 use rs_typing_trainer::engine::item::Item;
@@ -43,11 +48,7 @@ fn render(app: &rs_typing_trainer::app::App) -> String {
 }
 
 fn render_size(app: &rs_typing_trainer::app::App, width: u16, height: u16) -> String {
-    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-    terminal.draw(|frame| ui::render(frame, app)).unwrap();
-    terminal
-        .backend()
-        .buffer()
+    render_buffer(app, width, height)
         .content()
         .iter()
         .map(|cell| cell.symbol())
@@ -55,8 +56,193 @@ fn render_size(app: &rs_typing_trainer::app::App, width: u16, height: u16) -> St
         .join("")
 }
 
+fn render_buffer(app: &rs_typing_trainer::app::App, width: u16, height: u16) -> Buffer {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    terminal.draw(|frame| ui::render(frame, app)).unwrap();
+    terminal.backend().buffer().clone()
+}
+
 fn compact(text: &str) -> String {
     text.chars().filter(|character| !character.is_whitespace()).collect()
+}
+
+fn keyboard_analysis_app(lang: Lang) -> common::TestApp {
+    let mut config = Config::default();
+    config.general.lang = lang;
+    let mut app = test_app(config);
+    app.handle_key(key(KeyCode::Char('a')));
+    app.analysis_tab = 2;
+    app.analysis_details.keys = vec![
+        KeyMetric {
+            key: "a".into(),
+            code: "KeyA".into(),
+            correct: 3,
+            total: 4,
+            accuracy: 0.75,
+            iki_n: 3,
+            iki_median_ms: 240.0,
+            iki_p90_ms: 260.0,
+        },
+        KeyMetric {
+            key: "s".into(),
+            code: "KeyS".into(),
+            correct: 9,
+            total: 10,
+            accuracy: 0.9,
+            iki_n: 9,
+            iki_median_ms: 120.0,
+            iki_p90_ms: 150.0,
+        },
+    ];
+    let report = app.analysis_coach.as_mut().expect("analysis coach report");
+    report.map.keys = vec![KeyMapMetric {
+        key: "a".into(),
+        relative_iki: 1.5,
+        effective_n: 8.0,
+    }];
+    report.diagnosis.errors.confusion = vec![ConfusionMetric {
+        expected: "a".into(),
+        typed: "s".into(),
+        n: 7,
+    }];
+    app
+}
+
+fn row_text(row: &[ratatui::buffer::Cell]) -> String {
+    row.iter().map(|cell| cell.symbol()).collect()
+}
+
+fn heatmap_band(row: &[ratatui::buffer::Cell]) -> Vec<&ratatui::buffer::Cell> {
+    row.iter()
+        .filter(|cell| {
+            matches!(
+                cell.bg,
+                Color::Rgb(red, green, 20) if (40..=220).contains(&red) && green <= 20
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn keyboard_heatmap_legends_show_real_values_in_english_and_japanese() {
+    for (lang, expected_key, no_data, times, fast, slow, personal_median) in [
+        (Lang::En, "expected key", "no data", "7 times", "fast", "slow", "personal median"),
+        (Lang::Ja, "期待したキー", "データなし", "7 回", "速い", "遅い", "本人の中央値"),
+    ] {
+        let mut app = keyboard_analysis_app(lang);
+        for (view, expected_values) in [
+            (0, vec!["0%", "25.0%"]),
+            (1, vec!["0 ms", "240 ms"]),
+            (2, vec!["0.0", "1.0", "2.0+"]),
+            (3, vec!["0", times]),
+        ] {
+            app.analysis_keyboard_view = view;
+            let buffer = render_buffer(&app, 120, 40);
+            let rows = buffer.content().chunks(120).collect::<Vec<_>>();
+            let legend = rows
+                .iter()
+                .find(|row| heatmap_band(row).len() >= 12 && row_text(row).contains(expected_values[0]))
+                .unwrap_or_else(|| panic!("view {view} has no legend"));
+            let text = row_text(legend);
+            let normalized = compact(&text);
+            for value in expected_values {
+                assert!(normalized.contains(&compact(value)), "view {view}, lang {lang:?}: {text}");
+            }
+            assert!(normalized.contains(&compact(no_data)), "view {view}, lang {lang:?}: {text}");
+            if view == 2 {
+                for label in [fast, slow, personal_median] {
+                    assert!(normalized.contains(&compact(label)), "view {view}, lang {lang:?}: {text}");
+                }
+                let note = match lang {
+                    Lang::En => "(1.0 = personal median)",
+                    Lang::Ja => "(1.0 = 本人の中央値)",
+                };
+                let note = compact(note);
+                let slow = compact(slow);
+                assert!(normalized.contains(&note), "view {view}, lang {lang:?}: {text}");
+                assert!(
+                    normalized.find(&slow).unwrap() < normalized.find(&note).unwrap(),
+                    "view {view}, lang {lang:?}: {text}"
+                );
+            }
+            if view == 3 {
+                assert!(normalized.contains(&compact(expected_key)), "view {view}, lang {lang:?}: {text}");
+                assert!(legend.iter().any(|cell| cell.bg == Color::Cyan), "view {view}, lang {lang:?}: {text}");
+            }
+        }
+    }
+}
+
+#[test]
+fn every_keyboard_heatmap_legend_uses_the_shared_colour_scale_endpoints() {
+    let mut app = keyboard_analysis_app(Lang::En);
+    for view in 0..4 {
+        app.analysis_keyboard_view = view;
+        let buffer = render_buffer(&app, 120, 40);
+        let legend = buffer
+            .content()
+            .chunks(120)
+            .find(|row| heatmap_band(row).len() >= 12)
+            .unwrap_or_else(|| panic!("view {view} has no colour band"));
+        let band = heatmap_band(legend);
+        assert_eq!(band.len(), 16, "view {view}: {}", row_text(legend));
+        assert_eq!(band.first().unwrap().bg, Color::Rgb(40, 20, 20), "view {view}");
+        assert_eq!(band.last().unwrap().bg, Color::Rgb(220, 0, 20), "view {view}");
+    }
+}
+
+#[test]
+fn narrow_keyboard_legend_drops_no_data_then_median_note_before_words_and_colour_band() {
+    let mut app = keyboard_analysis_app(Lang::En);
+    app.analysis_keyboard_view = 2;
+
+    let medium = render_buffer(&app, 55, 40);
+    let medium_row = medium
+        .content()
+        .chunks(55)
+        .find(|row| heatmap_band(row).len() >= 12)
+        .expect("medium-width legend");
+    let medium_text = row_text(medium_row);
+    assert!(!medium_text.contains("no data"), "{medium_text}");
+    assert!(medium_text.contains("fast"), "{medium_text}");
+    assert!(!medium_text.contains("personal median"), "{medium_text}");
+    assert_eq!(heatmap_band(medium_row).len(), 16, "{medium_text}");
+
+    let narrow = render_buffer(&app, 47, 40);
+    let narrow_row = narrow
+        .content()
+        .chunks(47)
+        .find(|row| heatmap_band(row).len() >= 12)
+        .expect("narrow legend");
+    let narrow_text = row_text(narrow_row);
+    assert!(!narrow_text.contains("no data"), "{narrow_text}");
+    assert!(narrow_text.contains("fast"), "{narrow_text}");
+    assert!(!narrow_text.contains("personal median"), "{narrow_text}");
+    assert_eq!(heatmap_band(narrow_row).len(), 16, "{narrow_text}");
+
+    app.analysis_keyboard_view = 1;
+    app.analysis_details.keys[0].iki_median_ms = 123_456_789_012_345_678_901_234_567_890.0;
+    let minimum = render_buffer(&app, 47, 40);
+    let minimum_row = minimum
+        .content()
+        .chunks(47)
+        .find(|row| heatmap_band(row).len() >= 12)
+        .expect("minimum-length colour band");
+    let minimum_text = row_text(minimum_row);
+    assert!(!minimum_text.contains("no data"), "{minimum_text}");
+    assert!(!minimum_text.contains("ms"), "{minimum_text}");
+    assert_eq!(heatmap_band(minimum_row).len(), 12, "{minimum_text}");
+}
+
+#[test]
+fn keyboard_legend_is_omitted_when_only_the_keyboard_height_fits() {
+    let mut app = keyboard_analysis_app(Lang::Ja);
+    app.analysis_keyboard_view = 0;
+    let buffer = render_buffer(&app, 120, 16);
+    assert!(
+        buffer.content().chunks(120).all(|row| heatmap_band(row).len() < 12),
+        "legend should not replace keyboard rows"
+    );
 }
 
 #[test]

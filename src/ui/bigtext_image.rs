@@ -366,7 +366,8 @@ pub(crate) fn draw_big_character(
 ) -> Result<bool, String> {
     let rendered = match &font.source {
         FontSource::Shinonome => draw_shinonome(pixmap, size, character, color, bold),
-        source => {
+        FontSource::BizUdGothic => draw_bundled_outline(pixmap, character, color, bold)?,
+        source @ FontSource::User { .. } => {
             if let Some(outline) = outline_for(source, character)? {
                 draw_outline(pixmap, &outline, color, bold);
                 true
@@ -411,7 +412,6 @@ fn effective_appearance(character: &StyledCharacter) -> ([u8; 3], bool) {
 
 fn outline_for(source: &FontSource, character: char) -> Result<Option<GlyphOutline>, String> {
     match source {
-        FontSource::BizUdGothic => bundled_glyph(character),
         FontSource::User { bytes, .. } => {
             let face = ttf_parser::Face::parse(bytes, 0).map_err(|error| format!("failed to parse user font: {error}"))?;
             let Some(glyph_id) = face.glyph_index(character) else {
@@ -430,7 +430,7 @@ fn outline_for(source: &FontSource, character: char) -> Result<Option<GlyphOutli
                 commands: builder.commands,
             }))
         }
-        FontSource::Shinonome => Ok(None),
+        FontSource::BizUdGothic | FontSource::Shinonome => Ok(None),
     }
 }
 
@@ -452,38 +452,60 @@ fn selected_source_has_glyph(source: &FontSource, size: BigTextSize, character: 
     }
 }
 
-fn bundled_glyph(character: char) -> Result<Option<GlyphOutline>, String> {
-    let font = bundled_outline_font().map_err(str::to_owned)?;
-    Ok(font.glyphs.get(&character).map(|glyph| GlyphOutline {
-        units_per_em: font.units_per_em,
-        ascender: font.ascender,
-        descender: font.descender,
-        advance: glyph.advance,
-        commands: glyph.commands.clone(),
-    }))
-}
-
 fn draw_bundled_outline(pixmap: &mut Pixmap, character: char, color: [u8; 3], bold: bool) -> Result<bool, String> {
-    let Some(outline) = bundled_glyph(character)? else {
+    let font = bundled_outline_font().map_err(str::to_owned)?;
+    let Some(glyph) = font.glyphs.get(&character) else {
         return Ok(false);
     };
-    draw_outline(pixmap, &outline, color, bold);
+    draw_outline_parts(
+        pixmap,
+        font.units_per_em,
+        font.ascender,
+        font.descender,
+        glyph.advance,
+        &glyph.commands,
+        color,
+        bold,
+    );
     Ok(true)
 }
 
 fn draw_outline(pixmap: &mut Pixmap, glyph: &GlyphOutline, color: [u8; 3], bold: bool) {
-    let vertical_units = i32::from(glyph.ascender) - i32::from(glyph.descender);
-    if vertical_units <= 0 || glyph.units_per_em == 0 {
+    draw_outline_parts(
+        pixmap,
+        glyph.units_per_em,
+        glyph.ascender,
+        glyph.descender,
+        glyph.advance,
+        &glyph.commands,
+        color,
+        bold,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_outline_parts(
+    pixmap: &mut Pixmap,
+    units_per_em: u16,
+    ascender: i16,
+    descender: i16,
+    advance_units: u16,
+    commands: &[OutlineCommand],
+    color: [u8; 3],
+    bold: bool,
+) {
+    let vertical_units = i32::from(ascender) - i32::from(descender);
+    if vertical_units <= 0 || units_per_em == 0 {
         return;
     }
-    let scale = pixmap.height() as f32 / f32::from(glyph.units_per_em);
-    let advance = f32::from(glyph.advance) * scale;
+    let scale = pixmap.height() as f32 / f32::from(units_per_em);
+    let advance = f32::from(advance_units) * scale;
     let origin_x = (pixmap.width() as f32 - advance) / 2.0;
     let vertical_height = vertical_units as f32 * scale;
-    let baseline = (pixmap.height() as f32 - vertical_height) / 2.0 + f32::from(glyph.ascender) * scale;
+    let baseline = (pixmap.height() as f32 - vertical_height) / 2.0 + f32::from(ascender) * scale;
     let map = |x: f32, y: f32| (origin_x + x * scale, baseline - y * scale);
     let mut builder = PathBuilder::new();
-    for command in &glyph.commands {
+    for command in commands {
         match *command {
             OutlineCommand::MoveTo(x, y) => {
                 let (x, y) = map(x, y);

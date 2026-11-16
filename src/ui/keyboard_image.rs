@@ -28,7 +28,7 @@ struct FaceBounds {
     bottom: f32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct KeyTileSpec {
     pub cells: Size,
     pub label: String,
