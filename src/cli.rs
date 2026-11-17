@@ -22,6 +22,14 @@ pub struct Cli {
     #[arg(long, global = true, value_enum)]
     pub graphics: Option<GraphicsPreference>,
 
+    /// Print today's practice menu from the stats command.
+    #[arg(long = "menu", global = true)]
+    pub stats_menu: bool,
+
+    /// Emit the practice menu as machine-readable JSON.
+    #[arg(long, global = true, requires = "stats_menu")]
+    pub json: bool,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -65,16 +73,16 @@ pub enum Command {
     /// Show typing statistics.
     Stats {
         /// Emit machine-readable CSV for one table.
-        #[arg(long, value_enum, conflicts_with_all = ["summary", "grades", "coach"])]
+        #[arg(long, value_enum, conflicts_with_all = ["summary", "grades", "coach", "stats_menu"])]
         csv: Option<StatsCsv>,
         /// Print the same rule-based summary shown in the first analysis tab.
-        #[arg(long, conflicts_with_all = ["grades", "coach"])]
+        #[arg(long, conflicts_with_all = ["grades", "coach", "stats_menu"])]
         summary: bool,
         /// Print absolute S-to-G skill grades.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "stats_menu")]
         grades: bool,
         /// Print the same personalized report shown in the Coach tab.
-        #[arg(long, conflicts_with_all = ["summary", "grades"])]
+        #[arg(long, conflicts_with_all = ["summary", "grades", "stats_menu"])]
         coach: bool,
         /// Include sessions on or after this date (YYYY-MM-DD).
         #[arg(long)]

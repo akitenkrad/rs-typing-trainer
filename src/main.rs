@@ -39,6 +39,14 @@ fn main() -> ExitCode {
         eprintln!("{}: invalid bundled grade thresholds: {error}", Msg::AppTitle.text(lang));
         return ExitCode::from(1);
     }
+    if let Err(error) = rs_typing_trainer::practice::menu::bundled_catalog() {
+        eprintln!("{}: invalid bundled practice menu: {error}", Msg::AppTitle.text(lang));
+        return ExitCode::from(1);
+    }
+    if (cli.stats_menu || cli.json) && !matches!(cli.command, Some(Command::Stats { .. })) {
+        eprintln!("{}: --menu and --json are available only with stats", Msg::AppTitle.text(lang));
+        return ExitCode::from(2);
+    }
     let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
 
     match cli.command.as_ref() {
@@ -74,7 +82,18 @@ fn main() -> ExitCode {
             coach,
             since,
             mode,
-        }) => match run_stats(&cli, &home, *csv, *summary, *grades, *coach, since.as_deref(), mode.as_deref()) {
+        }) => match run_stats(
+            &cli,
+            &home,
+            *csv,
+            *summary,
+            *grades,
+            *coach,
+            cli.stats_menu,
+            cli.json,
+            since.as_deref(),
+            mode.as_deref(),
+        ) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("{}: {error}", Msg::AppTitle.text(lang));
@@ -298,6 +317,8 @@ fn run_stats(
     summary: bool,
     grades: bool,
     coach: bool,
+    menu: bool,
+    json: bool,
     since: Option<&str>,
     mode: Option<&str>,
 ) -> Result<()> {
@@ -307,6 +328,18 @@ fn run_stats(
         .map(|value| chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d"))
         .transpose()
         .map_err(|_| color_eyre::eyre::eyre!("--since must use YYYY-MM-DD"))?;
+    if menu {
+        let output = rs_typing_trainer::practice::menu::render_from_storage(
+            &config.resolve_db_path(home),
+            home,
+            &config,
+            cli.effective_lang(config.general.lang),
+            json,
+            chrono::Local::now().date_naive(),
+        )?;
+        print!("{output}");
+        return Ok(());
+    }
     let output = rs_typing_trainer::analysis::stats::render(
         &config.resolve_db_path(home),
         home,

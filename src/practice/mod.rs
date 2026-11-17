@@ -5,6 +5,7 @@ pub mod deck;
 pub mod gate;
 pub mod ghost;
 pub mod keyboard_fade;
+pub mod menu;
 pub mod pacer;
 pub mod reading_report;
 pub mod recommendations;

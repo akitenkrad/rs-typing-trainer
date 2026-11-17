@@ -185,6 +185,12 @@ pub struct OverallGrade {
     pub easiest_component: Option<Component>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ComponentOpportunity {
+    pub component: Component,
+    pub overall_gain: f64,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LanguageGrade {
     pub language: String,
@@ -400,7 +406,19 @@ pub fn evaluate_language(
 
 fn overall_grade(components: &[ComponentGrade]) -> OverallGrade {
     let score = harmonic_score(components.iter().map(|row| (row.score, row.weight)));
-    let easiest_component = components
+    let easiest_component = ranked_components(components).first().map(|row| row.component);
+    OverallGrade {
+        grade: Level::from_score(score),
+        score,
+        easiest_component,
+    }
+}
+
+/// Rank measurable, non-S components by the overall-grade gain from raising
+/// that component's continuous score by one point.
+pub fn ranked_components(components: &[ComponentGrade]) -> Vec<ComponentOpportunity> {
+    let score = harmonic_score(components.iter().map(|row| (row.score, row.weight)));
+    let mut ranked = components
         .iter()
         .filter(|row| row.grade != Level::S)
         .map(|candidate| {
@@ -412,15 +430,19 @@ fn overall_grade(components: &[ComponentGrade]) -> OverallGrade {
                 };
                 (value, row.weight)
             }));
-            (candidate.component, improved - score)
+            ComponentOpportunity {
+                component: candidate.component,
+                overall_gain: improved - score,
+            }
         })
-        .max_by(|left, right| left.1.total_cmp(&right.1).then_with(|| right.0.cmp(&left.0)))
-        .map(|row| row.0);
-    OverallGrade {
-        grade: Level::from_score(score),
-        score,
-        easiest_component,
-    }
+        .collect::<Vec<_>>();
+    ranked.sort_by(|left, right| {
+        right
+            .overall_gain
+            .total_cmp(&left.overall_gain)
+            .then_with(|| left.component.cmp(&right.component))
+    });
+    ranked
 }
 
 fn harmonic_score(values: impl Iterator<Item = (f64, f64)>) -> f64 {

@@ -1,0 +1,371 @@
+version = "menu-v1"
+
+[[fixed_step]]
+role = "warmup"
+id = "fixed.warmup"
+title = { en = "Warm-up", ja = "ウォームアップ" }
+mode = "words"
+minutes = 2
+settings = { "pacer.enabled" = false, "gate.min_accuracy" = 0.0 }
+focus = { en = "Start with familiar words and favor clean keystrokes over speed.", ja = "よく打つ単語で，速さより正確な打鍵を優先する" }
+
+[[fixed_step]]
+role = "check"
+id = "fixed.check"
+title = { en = "Unassisted check", ja = "補助なしの確認" }
+mode = "sentence"
+minutes = 3
+settings = { "session.preview_items" = 1, "pacer.enabled" = false }
+focus = { en = "Keep the same technique without training aids.", ja = "補助がなくても同じ打ち方を保つ" }
+
+[[fixed_step]]
+role = "finish"
+id = "fixed.finish"
+title = { en = "Finish with three bursts", ja = "バースト 3 本で仕上げ" }
+mode = "burst"
+minutes = 1
+settings = { "pacer.enabled" = false }
+focus = { en = "Stay relaxed through three short bursts.", ja = "力を抜いたまま短いバーストを 3 本打つ" }
+
+[[prescription]]
+id = "accuracy.gate"
+component = "accuracy"
+title = { en = "Accuracy gate", ja = "正確さの関門" }
+evidence = "medium"
+evidence_note = { en = "Prioritizes accuracy before adding speed.", ja = "速さを積む前に正確さを優先する" }
+alternate = "accuracy.anticipation"
+
+[[prescription.level]]
+mode = "words"
+minutes = 4
+settings = { "session.error_mode" = "stop", "gate.min_accuracy" = 0.97, "pacer.enabled" = false }
+focus = { en = "Give up speed and make every keystroke certain; pause briefly after an error.", ja = "速さを捨て，1 打ずつ確実に．誤打したら 1 拍置く" }
+advance = { metric = "accuracy-gate-passed", rule = "gate-passed", sessions = 3, source = "step", note = { en = "Pass the accuracy gate three sessions in a row.", ja = "関門を 3 回続けて通る" } }
+
+[[prescription.level]]
+mode = "words"
+minutes = 4
+settings = { "session.error_mode" = "stop", "gate.min_accuracy" = 0.96, "pacer.enabled" = false }
+focus = { en = "Give up speed and make every keystroke certain; pause briefly after an error.", ja = "速さを捨て，1 打ずつ確実に．誤打したら 1 拍置く" }
+advance = { metric = "accuracy-gate-passed", rule = "gate-passed", sessions = 3, source = "step", note = { en = "Pass the accuracy gate three sessions in a row.", ja = "関門を 3 回続けて通る" } }
+
+[[prescription.level]]
+mode = "sentence"
+minutes = 4
+settings = { "session.error_mode" = "stop", "gate.min_accuracy" = 0.96, "pacer.enabled" = false }
+focus = { en = "Carry the same careful keystrokes into sentences.", ja = "短文でも 1 打ずつ確実に打つ" }
+advance = { metric = "accuracy-gate-passed", rule = "gate-passed", sessions = 3, source = "step", note = { en = "Pass the accuracy gate three sessions in a row.", ja = "関門を 3 回続けて通る" } }
+
+[[prescription]]
+id = "accuracy.anticipation"
+component = "accuracy"
+title = { en = "Control anticipation errors", ja = "先走りを抑える" }
+evidence = "weak"
+evidence_note = { en = "Slower pacing may reduce anticipation errors; training transfer is unverified.", ja = "遅めのペーサーで先走りを減らす実践的な処方" }
+alternate = "accuracy.gate"
+
+[[prescription.level]]
+mode = "words"
+minutes = 4
+settings = { "pacer.enabled" = true, "pacer.ratio" = 0.90 }
+focus = { en = "Confirm the next character before pressing it.", ja = "次の文字を確かめてから押す" }
+advance = { metric = "anticipation-rate", rule = "le-own-median", sessions = 3, source = "check", note = { en = "Keep anticipation errors below your median for three sessions.", ja = "先走りの割合が自分の中央値を下回る回を 3 回続ける" } }
+
+[[prescription.level]]
+mode = "words"
+minutes = 4
+settings = { "pacer.enabled" = true, "pacer.ratio" = 0.95 }
+focus = { en = "Confirm the next character before pressing it.", ja = "次の文字を確かめてから押す" }
+advance = { metric = "anticipation-rate", rule = "le-own-median", sessions = 3, source = "check", note = { en = "Keep anticipation errors below your median for three sessions.", ja = "先走りの割合が自分の中央値を下回る回を 3 回続ける" } }
+
+[[prescription]]
+id = "transition.adaptive"
+component = "transition"
+title = { en = "Adaptive transitions", ja = "弱い遷移の反復" }
+evidence = "medium"
+evidence_note = { en = "R3 compares the target with controls in the same player.", ja = "R3 が本人の対象遷移と対照を比較する" }
+alternate = "transition.ngram"
+
+[[prescription.level]]
+mode = "adaptive"
+minutes = 5
+settings = { "adaptive.drill_ratio" = 0.30 }
+focus = { en = "Prepare the next finger before typing; move quickly when one finger repeats.", ja = "打つ前に次の指を準備する．同じ指が続くときは素早く移す" }
+advance = { metric = "prescription-r3", rule = "r3-effective", sessions = 1, source = "step", note = { en = "R3 judges the prescription effective.", ja = "既存の R3 で «効いた» と判定される" } }
+
+[[prescription.level]]
+mode = "adaptive"
+minutes = 5
+settings = { "adaptive.drill_ratio" = 0.20 }
+focus = { en = "Prepare the next finger before typing; move quickly when one finger repeats.", ja = "打つ前に次の指を準備する．同じ指が続くときは素早く移す" }
+advance = { metric = "prescription-r3", rule = "r3-effective", sessions = 1, source = "step", note = { en = "R3 judges the prescription effective.", ja = "既存の R3 で «効いた» と判定される" } }
+
+[[prescription.level]]
+mode = "words"
+minutes = 4
+settings = { "mode.key_filter" = "include" }
+focus = { en = "Use the target transition inside real words.", ja = "対象遷移を実在語の中でも滑らかに打つ" }
+advance = { metric = "prescription-r3", rule = "r3-effective", sessions = 1, source = "step", note = { en = "R3 judges the prescription effective.", ja = "既存の R3 で «効いた» と判定される" } }
+
+[[prescription]]
+id = "transition.ngram"
+component = "transition"
+title = { en = "N-gram transition drill", ja = "n-gram 遷移練習" }
+evidence = "weak"
+evidence_note = { en = "Isolates a transition, then returns it to words.", ja = "遷移を切り出してから単語へ戻す実践的な処方" }
+alternate = "transition.adaptive"
+
+[[prescription.level]]
+mode = "ngram"
+minutes = 4
+settings = { "mode.ngram.source" = "pairs" }
+focus = { en = "Learn the isolated transition shape, then use it immediately in words.", ja = "遷移だけを切り出して形を覚え，すぐ単語に戻す" }
+advance = { metric = "prescription-r3", rule = "r3-effective", sessions = 1, source = "step", note = { en = "R3 judges the prescription effective.", ja = "既存の R3 で «効いた» と判定される" } }
+
+[[prescription]]
+id = "preview.wide"
+component = "preview"
+title = { en = "Widen preview", ja = "先読みを広げる" }
+evidence = "phenomenon"
+evidence_note = { en = "Salthouse 1986 found slower typing when preview was restricted; training transfer is unverified.", ja = "Salthouse 1986: 先を見せないと速度が落ちる．先読みを増やす訓練の効果は未検証" }
+alternate = "preview.phrase"
+
+[[prescription.level]]
+mode = "sentence"
+minutes = 4
+settings = { "session.preview_items" = 3, "mode.sentence.hide_typed" = true }
+focus = { en = "Look at the next word, not the character being typed.", ja = "打っている文字ではなく，次の単語を見る" }
+advance = { metric = "word-onset-ratio", rule = "le-own-median", sessions = 3, source = "check", note = { en = "Keep word-onset delay at or below your median for three sessions.", ja = "語頭の遅れが自分の中央値以下の回を 3 回続ける" } }
+
+[[prescription.level]]
+mode = "sentence"
+minutes = 4
+settings = { "session.preview_items" = 2, "mode.sentence.hide_typed" = true }
+focus = { en = "Keep looking ahead while typing continuously.", ja = "先を見たまま打ち続ける" }
+advance = { metric = "word-onset-ratio", rule = "le-own-median", sessions = 3, source = "check", note = { en = "Keep word-onset delay at or below your median for three sessions.", ja = "語頭の遅れが自分の中央値以下の回を 3 回続ける" } }
+
+[[prescription.level]]
+mode = "sentence"
+minutes = 4
+settings = { "session.preview_items" = 1, "mode.sentence.hide_typed" = false }
+focus = { en = "Check that word starts stay smooth with less assistance.", ja = "補助を減らしても語頭で止まらないか確かめる" }
+advance = { metric = "word-onset-ratio", rule = "le-own-median", sessions = 3, source = "check", note = { en = "Keep word-onset delay at or below your median for three sessions.", ja = "語頭の遅れが自分の中央値以下の回を 3 回続ける" } }
+
+[[prescription]]
+id = "preview.phrase"
+component = "preview"
+title = { en = "Read through phrases", ja = "句を先読みする" }
+evidence = "weak"
+evidence_note = { en = "Phrase practice is a practical alternative; transfer is unverified.", ja = "句で先読みを練習する実践的な替え" }
+alternate = "preview.wide"
+
+[[prescription.level]]
+mode = "phrase"
+minutes = 4
+settings = { "mode.phrase.course" = "long", "session.preview_items" = 2 }
+focus = { en = "Begin reading the next phrase without stopping at the boundary.", ja = "句の切れ目で止まらず次の句を読み始める" }
+advance = { metric = "word-onset-ratio", rule = "le-own-median", sessions = 3, source = "check", note = { en = "Keep word-onset delay at or below your median for three sessions.", ja = "語頭の遅れが自分の中央値以下の回を 3 回続ける" } }
+
+[[prescription.level]]
+mode = "phrase"
+minutes = 4
+settings = { "mode.phrase.course" = "mixed", "session.preview_items" = 1 }
+focus = { en = "Begin reading the next phrase without stopping at the boundary.", ja = "句の切れ目で止まらず次の句を読み始める" }
+advance = { metric = "word-onset-ratio", rule = "le-own-median", sessions = 3, source = "check", note = { en = "Keep word-onset delay at or below your median for three sessions.", ja = "語頭の遅れが自分の中央値以下の回を 3 回続ける" } }
+
+[[prescription]]
+id = "rhythm.metronome"
+component = "rhythm"
+title = { en = "Even rhythm", ja = "間隔をそろえる" }
+evidence = "hypothesis"
+evidence_note = { en = "Metronome practice is a hypothesis introduced by this app.", ja = "メトロノーム練習は本アプリで試す仮説" }
+alternate = "rhythm.metronome"
+
+[[prescription.level]]
+mode = "rhythm"
+minutes = 4
+settings = { "pacer.ratio" = 0.90 }
+focus = { en = "Keep intervals even instead of typing faster.", ja = "速く打つより，間隔をそろえる" }
+advance = { metric = "within-word-iki-cv", rule = "le-own-median", sessions = 3, source = "check", note = { en = "Keep within-word IKI CV at or below your median for three sessions.", ja = "語中 IKI の CV が自分の中央値以下の回を 3 回続ける" } }
+
+[[prescription.level]]
+mode = "rhythm"
+minutes = 4
+settings = { "pacer.ratio" = 0.95 }
+focus = { en = "Keep intervals even instead of typing faster.", ja = "速く打つより，間隔をそろえる" }
+advance = { metric = "within-word-iki-cv", rule = "le-own-median", sessions = 3, source = "check", note = { en = "Keep within-word IKI CV at or below your median for three sessions.", ja = "語中 IKI の CV が自分の中央値以下の回を 3 回続ける" } }
+
+[[prescription.level]]
+mode = "words"
+minutes = 4
+settings = { "pacer.enabled" = false }
+focus = { en = "Keep the same even rhythm without the beat.", ja = "拍がなくても間隔をそろえる" }
+advance = { metric = "within-word-iki-cv", rule = "le-own-median", sessions = 3, source = "check", note = { en = "Keep within-word IKI CV at or below your median for three sessions.", ja = "語中 IKI の CV が自分の中央値以下の回を 3 回続ける" } }
+
+[[prescription]]
+id = "recovery.retry"
+component = "recovery"
+title = { en = "Recover after errors", ja = "誤打から立ち直る" }
+evidence = "hypothesis"
+evidence_note = { en = "Immediate retry is a training hypothesis introduced by this app.", ja = "その場のやり直しは本アプリで試す仮説" }
+alternate = "recovery.retry"
+
+[[prescription.level]]
+mode = "sentence"
+minutes = 4
+settings = { "session.error_mode" = "advance", "session.retry_on_error" = true }
+focus = { en = "Correct the error and return to your prior pace without stopping.", ja = "誤打しても止まらず，直してすぐ元の速さに戻る" }
+advance = { metric = "post-error-excess-ms", rule = "le-own-median", sessions = 3, source = "check", note = { en = "Keep excess time after errors at or below your median for three sessions.", ja = "誤り後の余分な時間が自分の中央値以下の回を 3 回続ける" } }
+
+[[prescription.level]]
+mode = "sentence"
+minutes = 4
+settings = { "session.error_mode" = "advance", "session.retry_on_error" = false }
+focus = { en = "Correct the error and return to your prior pace without stopping.", ja = "誤打しても止まらず，直してすぐ元の速さに戻る" }
+advance = { metric = "post-error-excess-ms", rule = "le-own-median", sessions = 3, source = "check", note = { en = "Keep excess time after errors at or below your median for three sessions.", ja = "誤り後の余分な時間が自分の中央値以下の回を 3 回続ける" } }
+
+[[prescription]]
+id = "overlap.burst"
+component = "overlap"
+title = { en = "Relaxed rollover", ja = "力を抜いた重なり" }
+evidence = "correlational"
+evidence_note = { en = "Faster typists show more rollover; this is correlation, not intervention evidence.", ja = "速い人ほど重なりが多いという相関だけがある" }
+alternate = "overlap.burst"
+
+[[prescription.level]]
+mode = "burst"
+minutes = 4
+settings = { "pacer.enabled" = false }
+focus = { en = "Allow the next press before releasing the prior key; stay relaxed.", ja = "次のキーを前のキーを離す前に押してよい．力を抜く" }
+advance = { metric = "rollover-rate", rule = "ge-own-median", sessions = 3, source = "check", note = { en = "Keep rollover rate at or above your median for three sessions.", ja = "ロールオーバー率が自分の中央値以上の回を 3 回続ける" } }
+
+[[prescription.level]]
+mode = "phrase"
+minutes = 4
+settings = { "mode.phrase.course" = "short", "pacer.enabled" = true, "pacer.ratio" = 1.05 }
+focus = { en = "Allow the next press before releasing the prior key; stay relaxed.", ja = "次のキーを前のキーを離す前に押してよい．力を抜く" }
+advance = { metric = "rollover-rate", rule = "ge-own-median", sessions = 3, source = "check", note = { en = "Keep rollover rate at or above your median for three sessions.", ja = "ロールオーバー率が自分の中央値以上の回を 3 回続ける" } }
+
+[[prescription]]
+id = "speed.pacer"
+component = "speed"
+title = { en = "Follow a faster pacer", ja = "少し速いペーサーを追う" }
+evidence = "medium"
+evidence_note = { en = "Uses a small progressive overload while retaining an accuracy floor.", ja = "正確さを保った小さな漸進的負荷" }
+alternate = "speed.pacer"
+
+[[prescription.level]]
+mode = "phrase"
+minutes = 4
+settings = { "pacer.enabled" = true, "pacer.ratio" = 1.05 }
+focus = { en = "Follow the slightly faster pace, but do not chase it after accuracy breaks down.", ja = "少しだけ上の速さに付いていく．崩れたら追わない" }
+advance = { metric = "pacer-target-reached", rule = "target-with-accuracy", sessions = 3, source = "step", note = { en = "Reach the pacer target at 95% accuracy or better for three sessions.", ja = "正確さ 95% 以上でペーサー目標へ 3 回続けて届く" } }
+
+[[prescription.level]]
+mode = "phrase"
+minutes = 4
+settings = { "pacer.enabled" = true, "pacer.ratio" = 1.10 }
+focus = { en = "Follow the slightly faster pace, but do not chase it after accuracy breaks down.", ja = "少しだけ上の速さに付いていく．崩れたら追わない" }
+advance = { metric = "pacer-target-reached", rule = "target-with-accuracy", sessions = 3, source = "step", note = { en = "Reach the pacer target at 95% accuracy or better for three sessions.", ja = "正確さ 95% 以上でペーサー目標へ 3 回続けて届く" } }
+
+[[prescription]]
+id = "reach.unlock"
+component = "reach"
+title = { en = "Unlock remote rows", ja = "遠い段を解放する" }
+evidence = "weak"
+evidence_note = { en = "Gradual key unlocking is established practice in existing products.", ja = "遠い段の段階的な解放は既存製品の慣行" }
+alternate = "reach.unlock"
+
+[[prescription.level]]
+mode = "words"
+minutes = 4
+settings = { "mode.key_filter" = "only", "mode.base_keys" = "home" }
+focus = { en = "Return to the home row after reaching.", ja = "指を伸ばしたらホームへ戻す" }
+advance = { metric = "far-home-iki-ratio", rule = "le-own-median", sessions = 3, source = "check", note = { en = "Keep remote-row/home-row IKI ratio at or below your median for three sessions.", ja = "遠い段とホーム段の IKI 比が自分の中央値以下の回を 3 回続ける" } }
+
+[[prescription.level]]
+mode = "words"
+minutes = 4
+settings = { "mode.key_filter" = "include", "mode.base_keys" = "home" }
+focus = { en = "Return to the home row after reaching.", ja = "指を伸ばしたらホームへ戻す" }
+advance = { metric = "far-home-iki-ratio", rule = "le-own-median", sessions = 3, source = "check", note = { en = "Keep remote-row/home-row IKI ratio at or below your median for three sessions.", ja = "遠い段とホーム段の IKI 比が自分の中央値以下の回を 3 回続ける" } }
+
+[[prescription]]
+id = "japanese.spelling"
+component = "japanese"
+title = { en = "Use the suggested romaji spelling", ja = "勧められたローマ字綴りを使う" }
+evidence = "weak"
+evidence_note = { en = "Standardizing a suggested spelling is practical guidance; transfer is unverified.", ja = "勧められた綴りへの統一は実践的な処方" }
+alternate = "japanese.spelling"
+
+[[prescription.level]]
+mode = "romaji"
+minutes = 4
+settings = { "mode.key_filter" = "include" }
+focus = { en = "Use the suggested spelling consistently.", ja = "勧められた綴りに統一する" }
+advance = { metric = "spelling-usage-rate", rule = "ge-threshold", threshold = 0.80, sessions = 3, source = "check", note = { en = "Use the suggested spelling at least 80% of the time for three sessions.", ja = "その綴りの使用率が 80% 以上の回を 3 回続ける" } }
+
+[[prescription.level]]
+mode = "sentence"
+minutes = 4
+settings = { "mode.sentence.lang" = "ja" }
+focus = { en = "Keep the suggested spelling in Japanese sentences.", ja = "日本語の短文でも勧められた綴りに統一する" }
+advance = { metric = "spelling-usage-rate", rule = "ge-threshold", threshold = 0.80, sessions = 3, source = "check", note = { en = "Use the suggested spelling at least 80% of the time for three sessions.", ja = "その綴りの使用率が 80% 以上の回を 3 回続ける" } }
+
+[[prescription]]
+id = "endurance.split"
+component = "endurance"
+title = { en = "Hold form through the second half", ja = "後半まで打ち方を保つ" }
+evidence = "hypothesis"
+evidence_note = { en = "Gradually extending endurance practice is a hypothesis introduced by this app.", ja = "持久時間の延長は本アプリで試す仮説" }
+alternate = "endurance.split"
+
+[[prescription.level]]
+mode = "endurance"
+minutes = 3
+settings = { "endurance.minutes" = 3 }
+focus = { en = "Keep the same technique in the second half as in the first.", ja = "後半も前半と同じ打ち方を保つ" }
+advance = { metric = "endurance-second-half-slowdown", rule = "lt-threshold", threshold = 0.15, sessions = 3, source = "step", note = { en = "Keep second-half slowdown below 15% for three sessions.", ja = "後半の遅れを 15% 未満に 3 回続けて保つ" } }
+
+[[prescription.level]]
+mode = "endurance"
+minutes = 4
+settings = { "endurance.minutes" = 4 }
+focus = { en = "Keep the same technique in the second half as in the first.", ja = "後半も前半と同じ打ち方を保つ" }
+advance = { metric = "endurance-second-half-slowdown", rule = "lt-threshold", threshold = 0.15, sessions = 3, source = "step", note = { en = "Keep second-half slowdown below 15% for three sessions.", ja = "後半の遅れを 15% 未満に 3 回続けて保つ" } }
+
+[[prescription.level]]
+mode = "endurance"
+minutes = 5
+settings = { "endurance.minutes" = 5 }
+focus = { en = "Keep the same technique in the second half as in the first.", ja = "後半も前半と同じ打ち方を保つ" }
+advance = { metric = "endurance-second-half-slowdown", rule = "lt-threshold", threshold = 0.15, sessions = 3, source = "step", note = { en = "Keep second-half slowdown below 15% for three sessions.", ja = "後半の遅れを 15% 未満に 3 回続けて保つ" } }
+
+[[prescription]]
+id = "blind.fade"
+component = "blind"
+title = { en = "Fade keyboard assistance", ja = "キーボード表示を外す" }
+evidence = "correlational"
+evidence_note = { en = "Feit et al. 2016 reports an association between not looking and faster typing.", ja = "Feit et al. 2016: キーボードを見ないことと速さには相関がある" }
+alternate = "blind.fade"
+
+[[prescription.level]]
+mode = "words"
+minutes = 4
+settings = { "keyboard.show" = "auto" }
+focus = { en = "Do not look at the keyboard display.", ja = "キーボード表示を見ない" }
+advance = { metric = "blind-assistance-removable", rule = "removable", sessions = 1, source = "check", note = { en = "H5 marks keyboard assistance as removable.", ja = "H5 で «外してよい» 印が付く" } }
+
+[[prescription.level]]
+mode = "words"
+minutes = 4
+settings = { "keyboard.show" = "hidden" }
+focus = { en = "Do not look at the keyboard display.", ja = "キーボード表示を見ない" }
+advance = { metric = "blind-assistance-removable", rule = "removable", sessions = 1, source = "check", note = { en = "H5 marks keyboard assistance as removable.", ja = "H5 で «外してよい» 印が付く" } }
+
+[[prescription.level]]
+mode = "words"
+minutes = 4
+settings = { "session.blind" = true }
+focus = { en = "Type without visual keyboard assistance.", ja = "視覚的な補助なしで打つ" }
+advance = { metric = "blind-assistance-removable", rule = "removable", sessions = 1, source = "check", note = { en = "H5 marks keyboard assistance as removable.", ja = "H5 で «外してよい» 印が付く" } }

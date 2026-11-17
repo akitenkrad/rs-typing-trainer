@@ -53,6 +53,10 @@ pub struct Config {
     pub burst: BurstConfig,
     #[serde(default)]
     pub endurance: EnduranceConfig,
+    /// Daily practice-menu length. Kept out of serialized defaults until the
+    /// M7 documentation update, but accepted from `[menu]` now.
+    #[serde(default, skip_serializing)]
+    pub menu: MenuConfig,
     /// Legacy v1 section retained as a compatibility view.
     #[serde(default)]
     pub game: GameConfig,
@@ -387,6 +391,12 @@ pub struct EnduranceConfig {
     pub minutes: u64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MenuConfig {
+    #[serde(default = "default_menu_minutes")]
+    pub minutes: u8,
+}
+
 impl Default for AnalysisConfig {
     fn default() -> Self {
         Self {
@@ -422,6 +432,14 @@ impl Default for EnduranceConfig {
     fn default() -> Self {
         Self {
             minutes: default_endurance_minutes(),
+        }
+    }
+}
+
+impl Default for MenuConfig {
+    fn default() -> Self {
+        Self {
+            minutes: default_menu_minutes(),
         }
     }
 }
@@ -728,6 +746,10 @@ fn default_endurance_minutes() -> u64 {
     4
 }
 
+fn default_menu_minutes() -> u8 {
+    15
+}
+
 fn default_pacer_ratio() -> f64 {
     1.07
 }
@@ -811,6 +833,7 @@ impl Default for Config {
             rhythm: RhythmConfig::default(),
             burst: BurstConfig::default(),
             endurance: EnduranceConfig::default(),
+            menu: MenuConfig::default(),
             game: GameConfig::default(),
             characters: CharactersConfig::default(),
             ui: UiConfig::default(),
@@ -995,6 +1018,12 @@ impl Config {
             return Err(ConfigError::UnknownKeyboardSetting {
                 field: "training",
                 value: "ratio, target_wpm, or min_accuracy".to_owned(),
+            });
+        }
+        if !matches!(self.menu.minutes, 10 | 15 | 20) {
+            return Err(ConfigError::UnknownKeyboardSetting {
+                field: "menu.minutes",
+                value: self.menu.minutes.to_string(),
             });
         }
         Ok(())
