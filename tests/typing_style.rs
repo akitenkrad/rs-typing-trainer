@@ -288,3 +288,52 @@ fn rhythm_is_split_between_within_word_and_inside_item_word_boundaries() {
     // Space-to-first-letter intervals are 350 ms and 550 ms: mean 450, population SD 100.
     assert!((rhythm.between_word_cv.unwrap() - 100.0 / 450.0).abs() < 1e-9, "{rhythm:?}");
 }
+
+#[test]
+fn within_word_intervals_skip_a_correction_between_correct_keys() {
+    let mut sample = record(
+        vec![(
+            "asdf",
+            vec![('a', 100_000, None), ('s', 220_000, None), ('d', 900_000, None), ('f', 1_020_000, None)],
+        )],
+        false,
+    );
+    // Mistype 'x' and erase it between 's' and 'd'; the 680 ms from 's' to 'd' is a
+    // correction, not an inter-key interval.
+    let mistype = KeystrokeLog {
+        t_us: 300_000,
+        pos: 2,
+        typed: Some("x".into()),
+        expected: Some("d".into()),
+        correct: false,
+        ..sample.log.keystrokes[2].clone()
+    };
+    let backspace = KeystrokeLog {
+        t_us: 500_000,
+        pos: 2,
+        kind: KeystrokeKind::Backspace,
+        typed: None,
+        expected: None,
+        correct: false,
+        code: None,
+        ..sample.log.keystrokes[2].clone()
+    };
+    sample.log.keystrokes.splice(2..2, [mistype, backspace]);
+    for (seq, key) in sample.log.keystrokes.iter_mut().enumerate() {
+        key.seq = seq as u32;
+    }
+    let layout = builtin_layout("qwerty").unwrap();
+    let keyboard = geometry("ansi").unwrap();
+    let model = build_player_model(
+        std::slice::from_ref(&sample),
+        &layout,
+        &keyboard,
+        AnalysisSettings::default(),
+        ModelView::AllTime,
+        Utc.with_ymd_and_hms(2026, 11, 15, 12, 0, 0).unwrap(),
+    );
+    let rhythm = diagnose_style(&[sample], &model).rhythm;
+
+    assert_eq!(rhythm.within_word_n, 2, "{rhythm:?}");
+    assert!(rhythm.within_word_cv.unwrap().abs() < 1e-9, "{rhythm:?}");
+}

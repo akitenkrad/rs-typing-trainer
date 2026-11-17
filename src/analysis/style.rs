@@ -72,7 +72,15 @@ pub fn diagnose_style(records: &[SessionRecord], model: &PlayerModel) -> TypingS
             // divided by (the grade scale puts S at a ratio of 1.0).
             let mut last_nonspace = None::<TimedChar<'_>>;
             let mut space_after_word = None::<TimedChar<'_>>;
+            let mut previous_seq = None::<u32>;
             for key in &keys {
+                // An interval that spans a mistype or Backspace includes the correction,
+                // not an inter-key interval, so start over after any gap in `seq`.
+                if previous_seq.is_some_and(|seq| key.key.seq != seq + 1) {
+                    last_nonspace = None;
+                    space_after_word = None;
+                }
+                previous_seq = Some(key.key.seq);
                 if key.character.is_whitespace() {
                     if last_nonspace.is_some() {
                         space_after_word = Some(*key);
