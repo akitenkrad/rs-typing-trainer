@@ -178,6 +178,8 @@ pub struct BenchVersion {
 pub struct BenchComparison {
     pub previous_wpm_delta: Option<f64>,
     pub previous_accuracy_delta: Option<f64>,
+    pub best_wpm_delta: Option<f64>,
+    pub best_accuracy_delta: Option<f64>,
     pub recent_three_wpm_delta: Option<f64>,
     pub recent_three_accuracy_delta: Option<f64>,
 }
@@ -229,6 +231,20 @@ pub fn preferred_bench_series<'a>(ids: impl Iterator<Item = &'a str>, part: Benc
         }
     }
     has_v1.then_some(BENCH_SERIES_V1)
+}
+
+/// Returns whether a record belongs to the comparison series selected for a part.
+///
+/// Parts B and D have identical prompts in bench-v1 and bench-v2, so both
+/// versions form one continuous series. Parts A and C changed in v2 and keep
+/// the newest available version as a separate series.
+pub fn is_preferred_bench_series(candidate: &str, part: BenchPart, preferred: Option<&str>) -> bool {
+    preferred.is_some()
+        && if matches!(part, BenchPart::B | BenchPart::D) {
+            matches!(candidate, BENCH_SERIES_V1 | BENCH_SERIES_V2)
+        } else {
+            Some(candidate) == preferred
+        }
 }
 
 pub fn generate_parallel_versions(part: BenchPart, data: &DataCatalog, layout: &KeyboardLayout, geometry: &KeyboardGeometry) -> Vec<BenchVersion> {

@@ -16,8 +16,8 @@ use crate::analysis::prescription::{
     evaluate_stored_prescription, prescription_trends, real_word_records_since, record_prescription_session, select_controls,
 };
 use crate::bench::{
-    BenchPart, BenchResultSummary, BenchResume, BenchSettings, generate_parallel_versions_for_series, next_parallel_index, parse_bench_id,
-    preferred_bench_series,
+    BenchPart, BenchResultSummary, BenchResume, BenchSettings, generate_parallel_versions_for_series, is_preferred_bench_series, next_parallel_index,
+    parse_bench_id, preferred_bench_series,
 };
 use crate::config::{Config, KeyFilter, KeyboardConfig, ModeConfig, ModeKind, SessionConfig};
 use crate::data::{DataCatalog, DataKind, TrainingDataSource};
@@ -257,6 +257,10 @@ pub struct App {
     pub active_bench_id: Option<String>,
     pub bench_comparison: Option<crate::bench::BenchComparison>,
     pub bench_results: Vec<BenchResultSummary>,
+    pub bench_summary_records: Vec<SessionRecord>,
+    pub bench_summary_current: Vec<SessionRecord>,
+    pub bench_summary_analysis: crate::analysis::bench_summary::BenchmarkRunAnalysis,
+    pub bench_summary_grades: crate::analysis::grades::GradesAnalysis,
     pub bench_resume: Option<BenchResume>,
     pub analysis_tab: usize,
     pub analysis_period: AnalysisPeriod,
@@ -423,6 +427,10 @@ impl App {
             active_bench_id: None,
             bench_comparison: None,
             bench_results: Vec::new(),
+            bench_summary_records: Vec::new(),
+            bench_summary_current: Vec::new(),
+            bench_summary_analysis: crate::analysis::bench_summary::BenchmarkRunAnalysis::default(),
+            bench_summary_grades: crate::analysis::grades::GradesAnalysis::default(),
             bench_resume: None,
             analysis_tab: 0,
             analysis_period: AnalysisPeriod::All,
@@ -718,7 +726,9 @@ impl App {
                     .bench_id
                     .as_deref()
                     .and_then(parse_bench_id)
-                    .is_some_and(|(candidate_series, part, _)| Some(candidate_series) == series && part == BenchPart::A)
+                    .is_some_and(|(candidate_series, part, _)| {
+                        part == BenchPart::A && is_preferred_bench_series(candidate_series, BenchPart::A, series)
+                    })
             })
             .collect::<Vec<_>>();
         let reaction_scores = bench_a
@@ -1223,6 +1233,10 @@ impl App {
             original_mode: self.config.mode.clone(),
         };
         self.bench_results.clear();
+        self.bench_summary_records.clear();
+        self.bench_summary_current.clear();
+        self.bench_summary_analysis = crate::analysis::bench_summary::BenchmarkRunAnalysis::default();
+        self.bench_summary_grades = crate::analysis::grades::GradesAnalysis::default();
         self.bench_resume = None;
         self.bench_run = Some(run);
         self.configure_bench_part();
@@ -1272,9 +1286,57 @@ impl App {
             {
                 self.bench_results = results;
             }
+            self.refresh_bench_summary(parallel_index);
             self.leave_benchmark(Screen::BenchSummary);
             self.begin_result_input_delay(now);
         }
+    }
+
+    fn refresh_bench_summary(&mut self, parallel_index: u8) {
+        let records = db::load_records_filtered(&self.db_path(), None, Some("bench")).unwrap_or_default();
+        let mut selected = BTreeMap::new();
+        for record in &records {
+            let Some((series, part, index)) = record.header.bench_id.as_deref().and_then(parse_bench_id) else {
+                continue;
+            };
+            let on_summary_day = chrono::DateTime::parse_from_rfc3339(&record.header.finished_at)
+                .is_ok_and(|finished| finished.with_timezone(&chrono::Local).date_naive() == self.analysis_as_of);
+            if series == crate::bench::BENCH_SERIES && index == parallel_index && on_summary_day {
+                selected.insert(part, record.clone());
+            }
+        }
+        let current = selected.into_values().collect::<Vec<_>>();
+        let settings = AnalysisSettings {
+            pause_ms: self.config.analysis.pause_ms,
+            shrinkage_k: self.config.analysis.shrinkage_k,
+            half_life_days: self.config.analysis.half_life_days,
+        };
+        let geometry = crate::layout::geometry::geometry(&self.config.keyboard.geometry)
+            .or_else(|| crate::layout::geometry::geometry("ansi"))
+            .expect("bundled keyboard geometry");
+        let prescriptions = db::load_prescriptions(&self.db_path()).unwrap_or_default();
+        self.bench_summary_analysis = crate::analysis::bench_summary::analyze_benchmark_run(
+            &current,
+            &records,
+            self.practice_layout(),
+            &geometry,
+            settings,
+            self.config.analysis.min_transition_n,
+            &prescriptions,
+        );
+        if let Ok(report) = crate::analysis::coach::build(
+            &records,
+            &self.config,
+            &self.home_dir,
+            &prescriptions,
+            None,
+            self.analysis_as_of,
+            self.config.general.lang,
+        ) {
+            self.bench_summary_grades = report.grades;
+        }
+        self.bench_summary_records = records;
+        self.bench_summary_current = current;
     }
 
     fn abort_benchmark(&mut self) {
@@ -2016,8 +2078,8 @@ impl App {
             .iter()
             .filter(|summary| match self.history_kind_filter {
                 HistoryKindFilter::All => true,
-                HistoryKindFilter::Practice => summary.bench_id.is_none(),
-                HistoryKindFilter::Bench => summary.bench_id.is_some(),
+                HistoryKindFilter::Practice => bench_identity(summary).is_none(),
+                HistoryKindFilter::Bench => bench_identity(summary).is_some(),
             })
             .filter(|summary| summary_matches(summary, filter))
             .map(history_effective_mode)
@@ -2800,12 +2862,8 @@ impl App {
         {
             self.result_insights.push(insight);
         }
-        if record.header.mode == "bench" {
-            let language = if record.header.bench_id.as_deref().is_some_and(|id| id.contains("/C/")) {
-                "ja"
-            } else {
-                "en"
-            };
+        if let Some((_, part, _)) = record.header.bench_id.as_deref().and_then(parse_bench_id) {
+            let language = if part == BenchPart::C { "ja" } else { "en" };
             self.result_grade_line = crate::analysis::coach::benchmark_grade_line(&report.grades, language, self.config.general.lang);
         }
     }
@@ -3170,14 +3228,10 @@ pub fn history_language(summary: &SessionSummary) -> Option<&'static str> {
 }
 
 fn bench_identity(summary: &SessionSummary) -> Option<(String, String, String)> {
-    let mut fields = summary.bench_id.as_deref()?.split('/');
-    let series = fields.next()?;
-    let part = fields.next()?;
-    let form = fields.next()?;
-    if fields.next().is_some() || series.is_empty() || part.is_empty() || form.is_empty() {
-        return None;
-    }
-    Some((series.to_owned(), form.to_owned(), part.to_owned()))
+    let (series, part, form) = parse_bench_id(summary.bench_id.as_deref()?)?;
+    let form_label = summary.bench_id.as_deref()?.rsplit('/').next()?.to_owned();
+    debug_assert_eq!(form_label.parse::<u8>().ok(), Some(form));
+    Some((series.to_owned(), form_label, part.as_str().to_owned()))
 }
 
 pub fn build_result_comparison(records: &[SessionRecord], current: &SessionRecord) -> ResultComparison {
@@ -3236,11 +3290,8 @@ fn same_record_condition(left: &SessionRecord, right: &SessionRecord) -> bool {
 }
 
 fn bench_record_identity(record: &SessionRecord) -> Option<(&str, &str)> {
-    let mut fields = record.header.bench_id.as_deref()?.split('/');
-    let series = fields.next()?;
-    let part = fields.next()?;
-    let _form = fields.next()?;
-    (fields.next().is_none() && !series.is_empty() && !part.is_empty()).then_some((series, part))
+    let (series, part, _) = parse_bench_id(record.header.bench_id.as_deref()?)?;
+    Some((series, part.as_str()))
 }
 
 fn same_record_identity(left: &SessionRecord, right: &SessionRecord) -> bool {
@@ -3305,7 +3356,7 @@ fn build_history_rows(
         rows.extend(
             sessions
                 .iter()
-                .filter(|summary| summary.bench_id.is_none())
+                .filter(|summary| bench_identity(summary).is_none())
                 .filter(|summary| summary_matches(summary, filter))
                 .cloned()
                 .map(HistoryEntry::Session),
@@ -3315,14 +3366,19 @@ fn build_history_rows(
         return rows;
     }
 
-    let mut by_form: BTreeMap<(String, String), Vec<SessionSummary>> = BTreeMap::new();
-    for summary in sessions.iter().filter(|summary| summary.bench_id.is_some()) {
+    let mut by_form: BTreeMap<(String, u8), Vec<SessionSummary>> = BTreeMap::new();
+    for summary in sessions.iter().filter(|summary| bench_identity(summary).is_some()) {
         if let Some((series, form, _)) = bench_identity(summary) {
-            by_form.entry((series, form)).or_default().push(summary.clone());
+            let form_number = form.parse::<u8>().expect("parse_bench_id already validated the form");
+            by_form.entry((series, form_number)).or_default().push(summary.clone());
         }
     }
-    for ((series, form), mut candidates) in by_form {
+    for ((series, _), mut candidates) in by_form {
         candidates.sort_by(|left, right| left.started_at.cmp(&right.started_at).then(left.id.cmp(&right.id)));
+        let form = candidates
+            .first()
+            .and_then(bench_identity)
+            .map_or_else(|| "0".to_owned(), |(_, form, _)| form);
         let mut run = Vec::new();
         for candidate in candidates {
             let starts_new = run.last().is_some_and(|previous: &SessionSummary| {

@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, NaiveDate};
 
 use crate::analysis::metrics::{AnalysisSettings, DetailedMetrics, analyze_records};
-use crate::bench::{BenchPart, parse_bench_id, preferred_bench_series};
+use crate::bench::{BenchPart, is_preferred_bench_series, parse_bench_id, preferred_bench_series};
 use crate::config::Config;
 use crate::i18n::Lang;
 use crate::layout::geometry::geometry;
@@ -149,8 +149,9 @@ pub fn skill_axis_values(records: &[SessionRecord], layout: &KeyboardLayout, con
             let matching = records
                 .iter()
                 .filter(|record| {
-                    bench_identity(record)
-                        .is_some_and(|(candidate_series, candidate_part)| Some(candidate_series) == series && candidate_part == part)
+                    bench_identity(record).is_some_and(|(candidate_series, candidate_part)| {
+                        candidate_part == part && is_preferred_bench_series(candidate_series, part, series)
+                    })
                 })
                 .collect::<Vec<_>>();
             let raw = matching.last().and_then(|record| axis_value(axis, record, layout, config));
@@ -179,7 +180,7 @@ pub fn percentile_position(value: f64, history: &[f64], higher_is_better: bool) 
 fn current_ability(lines: &mut Vec<String>, recent: &[&SessionRecord], all: &[SessionRecord], lang: Lang) {
     lines.push(heading("Current ability", "今の実力", lang));
     let mut modes = BTreeMap::<&str, Vec<&SessionRecord>>::new();
-    for record in recent.iter().copied().filter(|record| record.header.bench_id.is_none()) {
+    for record in recent.iter().copied().filter(|record| bench_identity(record).is_none()) {
         modes.entry(&record.header.mode).or_default().push(record);
     }
     let mut modes = modes.into_iter().collect::<Vec<_>>();
@@ -207,7 +208,7 @@ fn current_ability(lines: &mut Vec<String>, recent: &[&SessionRecord], all: &[Se
             });
         }
     }
-    if let Some(latest) = all.iter().rev().find(|record| record.header.bench_id.is_some()) {
+    if let Some(latest) = all.iter().rev().find(|record| bench_identity(record).is_some()) {
         let part = bench_part(latest).unwrap_or("?");
         let identity = bench_identity(latest);
         let latest_index = all.iter().rposition(|record| std::ptr::eq(record, latest)).unwrap_or(all.len());
@@ -253,9 +254,9 @@ fn trend(lines: &mut Vec<String>, records: &[SessionRecord], as_of: NaiveDate, l
         .iter()
         .filter(|record| {
             if let Some(part) = trend_part {
-                bench_identity(record).is_some_and(|(series, candidate)| Some(series) == trend_series && candidate == part)
+                bench_identity(record).is_some_and(|(series, candidate)| candidate == part && is_preferred_bench_series(series, part, trend_series))
             } else {
-                record.header.bench_id.is_none()
+                bench_identity(record).is_none()
             }
         })
         .filter_map(|record| Some((record_date(record)?, record.header.net_wpm)))
@@ -500,7 +501,7 @@ fn data_status(lines: &mut Vec<String>, records: &[SessionRecord], details: &Det
         Lang::En => format!("- Sessions with keystroke logs: {logged}."),
         Lang::Ja => format!("- 打鍵ログのあるセッション数: {logged}．"),
     });
-    if let Some(last_bench) = records.iter().rev().find(|record| record.header.bench_id.is_some()).and_then(record_date) {
+    if let Some(last_bench) = records.iter().rev().find(|record| bench_identity(record).is_some()).and_then(record_date) {
         let days = (as_of - last_bench).num_days().max(0);
         let reminder = if days >= 7 {
             match lang {

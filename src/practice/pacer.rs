@@ -2,14 +2,19 @@
 
 use std::time::Duration;
 
+use crate::bench::{BenchPart, parse_bench_id};
 use crate::record::SessionRecord;
 
 pub fn target_wpm(records: &[SessionRecord], ratio: f64, min_wpm: f64) -> f64 {
     let latest_pacer = records.iter().enumerate().rev().find(|(_, record)| pacer_target(record).is_some());
-    let latest_bench =
-        records.iter().enumerate().rev().find(|(_, record)| {
-            record.header.mode == "bench" && record.header.bench_id.as_deref().is_some_and(|id| id.split('/').nth(1) == Some("A"))
-        });
+    let latest_bench = records.iter().enumerate().rev().find(|(_, record)| {
+        record
+            .header
+            .bench_id
+            .as_deref()
+            .and_then(parse_bench_id)
+            .is_some_and(|(_, part, _)| part == BenchPart::A)
+    });
     if let Some((pacer_index, record)) = latest_pacer
         && latest_bench.is_none_or(|(bench_index, _)| pacer_index > bench_index)
         && let Some(target) = pacer_target(record)

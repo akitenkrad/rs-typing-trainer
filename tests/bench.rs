@@ -5,16 +5,21 @@ use chrono::{TimeZone, Utc};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use rs_typing_trainer::analysis::bench_summary::{
+    BenchChange, BenchMetric, BenchmarkRunAnalysis, PracticeSuggestion, SlowTransition, WeakFinger, WeakFingerReason,
+};
+use rs_typing_trainer::analysis::grades::{Component, ComponentGrade, GradeSource, GradeStatus, GradesAnalysis, LanguageGrade, Level, OverallGrade};
 use rs_typing_trainer::analysis::metrics::TransitionClass;
 use rs_typing_trainer::app::Screen;
 use rs_typing_trainer::bench::{
-    BENCH_SERIES_V2, BenchPart, BenchSettings, V2_SELECTION_RULE, generate_parallel_versions, generate_parallel_versions_for_series,
-    next_parallel_index,
+    BENCH_SERIES_V2, BenchComparison, BenchPart, BenchResultSummary, BenchSettings, V2_SELECTION_RULE, generate_parallel_versions,
+    generate_parallel_versions_for_series, next_parallel_index,
 };
 use rs_typing_trainer::config::{Config, DataConfig, ErrorMode, ModeKind};
 use rs_typing_trainer::data::DataCatalog;
 use rs_typing_trainer::engine::item::Item;
 use rs_typing_trainer::engine::session::Session;
+use rs_typing_trainer::graphics::{CellPixels, GraphicsDetection, GraphicsMode, GraphicsReason};
 use rs_typing_trainer::i18n::Lang;
 use rs_typing_trainer::layout::builtin_layout;
 use rs_typing_trainer::layout::geometry::geometry;
@@ -95,7 +100,11 @@ fn key(code: KeyCode) -> KeyEvent {
 }
 
 fn render(app: &rs_typing_trainer::app::App) -> String {
-    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    render_size(app, 100, 24)
+}
+
+fn render_size(app: &rs_typing_trainer::app::App, width: u16, height: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     terminal.draw(|frame| ui::render(frame, app)).unwrap();
     terminal
         .backend()
@@ -107,18 +116,134 @@ fn render(app: &rs_typing_trainer::app::App) -> String {
         .join("")
 }
 
+fn summary_app(lang: Lang, graphics: GraphicsMode) -> common::TestApp {
+    let mut config = Config::default();
+    config.general.lang = lang;
+    let mut app = test_app(config);
+    app.screen = Screen::BenchSummary;
+    app.bench_results = [BenchPart::A, BenchPart::B, BenchPart::C]
+        .into_iter()
+        .enumerate()
+        .map(|(index, part)| BenchResultSummary {
+            id: format!("bench-v2/{}/{:02}", part.as_str(), index + 1),
+            part,
+            wpm: 50.0 + index as f64 * 5.0,
+            accuracy: 0.94 + index as f64 * 0.01,
+            comparison: BenchComparison {
+                previous_wpm_delta: Some(if part == BenchPart::B { -2.0 } else { 3.0 }),
+                previous_accuracy_delta: Some(0.01),
+                best_wpm_delta: Some(if part == BenchPart::B { -4.0 } else { 1.0 }),
+                best_accuracy_delta: Some(-0.005),
+                recent_three_wpm_delta: None,
+                recent_three_accuracy_delta: None,
+            },
+        })
+        .collect();
+    app.bench_summary_analysis = BenchmarkRunAnalysis {
+        slow_transitions: vec![SlowTransition {
+            from: "t".into(),
+            to: "h".into(),
+            milliseconds: 312.0,
+            n: 8,
+        }],
+        transition_counts_insufficient: false,
+        weak_fingers: vec![WeakFinger {
+            name: "left-index".into(),
+            reason: WeakFingerReason::Iki,
+            error_rate: 0.02,
+            iki_median_ms: 220.0,
+        }],
+        changes: vec![BenchChange {
+            part: BenchPart::B,
+            metric: BenchMetric::Wpm,
+            delta: 5.0,
+        }],
+        practice: vec![PracticeSuggestion::Transition {
+            from: "t".into(),
+            to: "h".into(),
+        }],
+        mistyped_keys: BTreeMap::from([("f".into(), 3)]),
+    };
+    app.set_graphics_detection(GraphicsDetection {
+        mode: graphics,
+        cell_pixels: (graphics != GraphicsMode::Off).then(|| CellPixels::new(9, 20)),
+        reason: if graphics == GraphicsMode::Off {
+            GraphicsReason::Disabled
+        } else {
+            GraphicsReason::Explicit(graphics)
+        },
+    });
+    app
+}
+
 fn save_bench_record(path: &std::path::Path, bench_id: &str, wpm: f64, accuracy: f64, day: u32) {
+    save_bench_record_with_mode(path, bench_id, "bench", wpm, accuracy, day);
+}
+
+fn save_bench_record_on_local_date(path: &std::path::Path, bench_id: &str, wpm: f64, accuracy: f64, date: chrono::NaiveDate) {
+    let mut config = Config::default();
+    config.mode.kind = ModeKind::Words;
+    let mut session = Session::new(Duration::from_secs(1), Duration::ZERO, Item::exact("as"));
+    session.activate(Duration::ZERO);
+    session.tick(Duration::from_secs(1));
+    let finished = date
+        .and_hms_opt(0, 0, 1)
+        .unwrap()
+        .and_local_timezone(chrono::Local)
+        .earliest()
+        .unwrap()
+        .with_timezone(&Utc);
+    let mut record = SessionRecord::from_log(&config, session.into_log(), finished);
+    record.header.mode = "bench".into();
+    record.header.bench_id = Some(bench_id.into());
+    record.header.net_wpm = wpm;
+    record.header.accuracy = accuracy;
+    db::save(path, &record).unwrap();
+}
+
+fn save_bench_record_with_mode(path: &std::path::Path, bench_id: &str, mode: &str, wpm: f64, accuracy: f64, day: u32) {
     let mut config = Config::default();
     config.mode.kind = ModeKind::Words;
     let mut session = Session::new(Duration::from_secs(1), Duration::ZERO, Item::exact("as"));
     session.activate(Duration::ZERO);
     session.tick(Duration::from_secs(1));
     let mut record = SessionRecord::from_log(&config, session.into_log(), Utc.with_ymd_and_hms(2026, 11, day, 0, 0, 0).unwrap());
-    record.header.mode = "bench".into();
+    record.header.mode = mode.into();
     record.header.bench_id = Some(bench_id.into());
     record.header.net_wpm = wpm;
     record.header.accuracy = accuracy;
     db::save(path, &record).unwrap();
+}
+
+fn language_grade(language: &str, level: Level) -> LanguageGrade {
+    LanguageGrade {
+        language: language.into(),
+        source: GradeSource::Bench,
+        status: GradeStatus::Interim,
+        n_sessions: 1,
+        components: Vec::new(),
+        overall: Some(OverallGrade {
+            grade: level,
+            score: 1.0,
+            easiest_component: None,
+        }),
+        missing: Vec::new(),
+        version: "test".into(),
+    }
+}
+
+fn component_grade(component: Component, level: Level) -> ComponentGrade {
+    ComponentGrade {
+        component,
+        value: 1.0,
+        unit: String::new(),
+        grade: level,
+        score: 1.0,
+        next_grade: None,
+        next_threshold: None,
+        gap: None,
+        weight: 1.0,
+    }
 }
 
 fn compact_render(app: &rs_typing_trainer::app::App) -> String {
@@ -494,6 +619,83 @@ fn benchmark_result_names_part_version_comparisons_and_next_part() {
 }
 
 #[test]
+fn benchmark_comparison_crosses_versions_only_for_unchanged_parts() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("sessions.db");
+    for part in ['A', 'B', 'C', 'D'] {
+        save_bench_record(&path, &format!("bench-v1/{part}/01"), 40.0, 0.90, 1);
+    }
+
+    for part in ['B', 'D'] {
+        let comparison = db::bench_comparison(&path, &format!("bench-v2/{part}/01"), 52.0, 0.94).unwrap();
+        assert_eq!(comparison.previous_wpm_delta, Some(12.0), "part {part}");
+        assert!((comparison.previous_accuracy_delta.unwrap() - 0.04).abs() < 1e-12, "part {part}");
+        assert_eq!(comparison.best_wpm_delta, Some(12.0), "part {part}");
+        assert!((comparison.best_accuracy_delta.unwrap() - 0.04).abs() < 1e-12, "part {part}");
+    }
+    for part in ['A', 'C'] {
+        let comparison = db::bench_comparison(&path, &format!("bench-v2/{part}/01"), 52.0, 0.94).unwrap();
+        assert_eq!(comparison.previous_wpm_delta, None, "part {part}");
+        assert_eq!(comparison.previous_accuracy_delta, None, "part {part}");
+        assert_eq!(comparison.best_wpm_delta, None, "part {part}");
+        assert_eq!(comparison.best_accuracy_delta, None, "part {part}");
+    }
+}
+
+#[test]
+fn unpadded_v1_b_with_sentence_mode_is_used_for_comparison_and_trend_history() {
+    assert_eq!(
+        rs_typing_trainer::bench::parse_bench_id("bench-v1/B/1"),
+        Some((rs_typing_trainer::bench::BENCH_SERIES_V1, BenchPart::B, 1))
+    );
+
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("sessions.db");
+    save_bench_record_with_mode(&path, "bench-v1/B/1", "sentence", 41.0, 0.91, 1);
+    save_bench_record(&path, "bench-v2/B/01", 53.0, 0.95, 2);
+
+    let rows = db::bench_results_for_day_form(&path, BENCH_SERIES_V2, chrono::NaiveDate::from_ymd_opt(2026, 11, 2).unwrap(), 1).unwrap();
+    let b = rows.iter().find(|row| row.part == BenchPart::B).unwrap();
+    assert_eq!(b.comparison.previous_wpm_delta, Some(12.0));
+    assert!((b.comparison.previous_accuracy_delta.unwrap() - 0.04).abs() < 1e-12);
+
+    let records = db::load_records_filtered(&path, None, Some("bench")).unwrap();
+    assert_eq!(records.len(), 2, "legacy v1 record was not classified by bench_id");
+    let mut app = summary_app(Lang::En, GraphicsMode::Kitty);
+    app.bench_results.retain(|result| result.part == BenchPart::B);
+    app.bench_summary_current = vec![records[1].clone()];
+    app.bench_summary_records = records;
+    let output = render_size(&app, 160, 50);
+    assert!(!output.contains("B  Initial"), "v1 point is missing from the trend:\n{output}");
+}
+
+#[test]
+fn latest_benchmark_form_ignores_unparseable_bench_ids() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("sessions.db");
+    save_bench_record_with_mode(&path, "bench-v2/A/1", "words", 41.0, 0.91, 1);
+    save_bench_record_with_mode(&path, "bench-v2/X/8", "bench", 53.0, 0.95, 2);
+
+    assert_eq!(db::latest_bench_parallel(&path, BENCH_SERIES_V2).unwrap(), Some(1));
+}
+
+#[test]
+fn benchmark_summary_comparison_uses_v1_for_previous_b_but_not_a() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("sessions.db");
+    save_bench_record(&path, "bench-v1/A/01", 40.0, 0.90, 1);
+    save_bench_record(&path, "bench-v1/B/01", 41.0, 0.91, 1);
+    save_bench_record(&path, "bench-v2/A/01", 52.0, 0.94, 2);
+    save_bench_record(&path, "bench-v2/B/01", 53.0, 0.95, 2);
+
+    let rows = db::bench_results_for_day_form(&path, BENCH_SERIES_V2, chrono::NaiveDate::from_ymd_opt(2026, 11, 2).unwrap(), 1).unwrap();
+    let a = rows.iter().find(|row| row.part == BenchPart::A).unwrap();
+    let b = rows.iter().find(|row| row.part == BenchPart::B).unwrap();
+    assert_eq!(a.comparison.previous_wpm_delta, None);
+    assert_eq!(b.comparison.previous_wpm_delta, Some(12.0));
+}
+
+#[test]
 fn completing_last_required_part_opens_benchmark_summary() {
     let mut config = Config::default();
     config.general.lang = Lang::Ja;
@@ -520,6 +722,206 @@ fn completing_last_required_part_opens_benchmark_summary() {
     assert!(compact.contains("パートC"), "{output}");
     assert!(compact.contains("前回比"), "{output}");
     assert!(compact.contains("[ENTER]タイトルへ"), "{output}");
+}
+
+#[test]
+fn benchmark_summary_renders_without_overlap_in_both_languages_and_sizes() {
+    for lang in [Lang::En, Lang::Ja] {
+        for graphics in [GraphicsMode::Kitty, GraphicsMode::Off] {
+            for (width, height) in [(150, 40), (80, 24)] {
+                let output = render_size(&summary_app(lang, graphics), width, height);
+                let compact = output.chars().filter(|character| !character.is_whitespace()).collect::<String>();
+                let part_label = if graphics != GraphicsMode::Off && width == 150 {
+                    "A"
+                } else {
+                    match lang {
+                        Lang::En => "PartA",
+                        Lang::Ja => "パートA",
+                    }
+                };
+                let expected = match lang {
+                    Lang::En => [
+                        "BENCHMARKSUMMARY",
+                        part_label,
+                        "previous",
+                        "Slowtransitions",
+                        "Practicenext",
+                        "[ENTER]Backtotitle",
+                    ],
+                    Lang::Ja => [
+                        "ベンチマークまとめ",
+                        part_label,
+                        "前回",
+                        "遅いキーのつなぎ",
+                        "次に練習すること",
+                        "[ENTER]タイトルへ",
+                    ],
+                };
+                for label in expected {
+                    assert!(
+                        compact.contains(label),
+                        "{lang:?} {graphics:?} {width}x{height}: missing {label:?}\n{output}"
+                    );
+                }
+                let hint = match lang {
+                    Lang::En => "[ENTER]Backtotitle",
+                    Lang::Ja => "[ENTER]タイトルへ",
+                };
+                assert_eq!(compact.matches(hint).count(), 1, "{lang:?} {graphics:?} {width}x{height}:\n{output}");
+            }
+        }
+    }
+}
+
+#[test]
+fn benchmark_summary_lists_english_and_japanese_grades_and_missing_reason() {
+    let mut app = summary_app(Lang::Ja, GraphicsMode::Off);
+    app.bench_summary_grades = GradesAnalysis {
+        languages: vec![language_grade("en", Level::G), language_grade("ja", Level::F)],
+        ..GradesAnalysis::default()
+    };
+    let output = render_size(&app, 100, 24);
+    let compact = output.chars().filter(|character| !character.is_whitespace()).collect::<String>();
+    assert!(compact.contains("英語G"), "{output}");
+    assert!(compact.contains("日本語F"), "{output}");
+
+    app.bench_summary_grades.languages.retain(|grade| grade.language == "en");
+    let output = render_size(&app, 100, 24);
+    let compact = output.chars().filter(|character| !character.is_whitespace()).collect::<String>();
+    assert!(compact.contains("日本語:ベンチCの記録が足りません"), "{output}");
+}
+
+#[test]
+fn rich_benchmark_summary_shows_every_available_grade_component() {
+    let mut app = summary_app(Lang::Ja, GraphicsMode::Kitty);
+    app.bench_summary_grades = GradesAnalysis {
+        languages: ["en", "ja"]
+            .into_iter()
+            .map(|language| {
+                let mut grade = language_grade(language, Level::G);
+                grade.components = Component::all()
+                    .iter()
+                    .copied()
+                    .map(|component| component_grade(component, Level::G))
+                    .collect();
+                grade
+            })
+            .collect(),
+        ..GradesAnalysis::default()
+    };
+    let output = render_size(&app, 160, 50);
+    let compact = output.chars().filter(|character| !character.is_whitespace()).collect::<String>();
+    for expected in [
+        "英語G",
+        "日本語G",
+        "速さG",
+        "正確さG",
+        "リズムG",
+        "つなぎG",
+        "先読みG",
+        "立ち直りG",
+        "重なりG",
+    ] {
+        assert!(compact.contains(expected), "missing {expected:?}:\n{output}");
+    }
+    for expected in ["速さG", "正確さG", "リズムG", "つなぎG", "先読みG", "立ち直りG", "重なりG"] {
+        assert_eq!(compact.matches(expected).count(), 2, "both languages must show {expected:?}:\n{output}");
+    }
+}
+
+#[test]
+fn benchmark_summary_names_each_weak_finger_metric_in_both_languages() {
+    for (lang, expected) in [
+        (Lang::Ja, ["左中指誤打率99.8%", "右中指打鍵間隔119ms"]),
+        (Lang::En, ["leftmiddleerrorrate99.8%", "rightmiddleinterval119ms"]),
+    ] {
+        let mut app = summary_app(lang, GraphicsMode::Off);
+        app.bench_summary_analysis.weak_fingers = vec![
+            WeakFinger {
+                name: "left-middle".into(),
+                reason: WeakFingerReason::ErrorRate,
+                error_rate: 0.998,
+                iki_median_ms: 100.0,
+            },
+            WeakFinger {
+                name: "right-middle".into(),
+                reason: WeakFingerReason::Iki,
+                error_rate: 0.01,
+                iki_median_ms: 119.0,
+            },
+        ];
+        let output = render_size(&app, 100, 30);
+        let compact = output.chars().filter(|character| !character.is_whitespace()).collect::<String>();
+        for label in expected {
+            assert!(compact.contains(label), "{lang:?}: missing {label:?}\n{output}");
+        }
+    }
+}
+
+#[test]
+fn benchmark_summary_explains_sparse_transitions_and_styles_analysis_text() {
+    let mut app = summary_app(Lang::En, GraphicsMode::Off);
+    app.bench_summary_analysis.slow_transitions.clear();
+    app.bench_summary_analysis.transition_counts_insufficient = true;
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|frame| ui::render(frame, &app)).unwrap();
+    let rows = terminal
+        .backend()
+        .buffer()
+        .content()
+        .chunks(100)
+        .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+        .collect::<Vec<_>>();
+    let sparse_row = rows
+        .iter()
+        .position(|row| row.contains("Transitions: not enough observations"))
+        .expect("sparse-transition reason");
+    let heading_row = rows.iter().position(|row| row.contains("This run's analysis")).expect("analysis heading");
+    let body_x = rows[sparse_row].find("Transitions: not enough observations").unwrap() as u16;
+    let body_cell = terminal.backend().buffer().cell((body_x, sparse_row as u16)).unwrap();
+    let heading_x = rows[heading_row].find("This run's analysis").unwrap() as u16;
+    let heading_cell = terminal.backend().buffer().cell((heading_x, heading_row as u16)).unwrap();
+    assert_eq!(body_cell.fg, ratatui::style::Color::White);
+    assert_eq!(heading_cell.fg, ratatui::style::Color::LightCyan);
+    assert!(heading_cell.modifier.contains(ratatui::style::Modifier::BOLD));
+}
+
+#[test]
+fn rich_benchmark_summary_places_keyboard_at_top_and_reports_hidden_keys() {
+    let mut app = summary_app(Lang::Ja, GraphicsMode::Kitty);
+    app.bench_summary_analysis.mistyped_keys = BTreeMap::from([("a".into(), 5), ("s".into(), 4), ("d".into(), 3), ("f".into(), 2), ("j".into(), 1)]);
+    let output = render_size(&app, 160, 50);
+    let compact = output.chars().filter(|character| !character.is_whitespace()).collect::<String>();
+    assert!(compact.contains("ほか2件"), "{output}");
+}
+
+#[test]
+fn rich_benchmark_summary_uses_vertical_space_for_trends_without_starving_analysis() {
+    for (width, height, minimum_trend_height) in [(160, 50, 16_usize), (150, 40, 14_usize)] {
+        let app = summary_app(Lang::En, GraphicsMode::Kitty);
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| ui::render(frame, &app)).unwrap();
+        let rows = terminal
+            .backend()
+            .buffer()
+            .content()
+            .chunks(usize::from(width))
+            .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+            .collect::<Vec<_>>();
+        let trend_row = rows.iter().position(|row| row.contains("Past trends")).expect("trend heading");
+        let analysis_row = rows.iter().position(|row| row.contains("This run's analysis")).expect("analysis heading");
+        let hint_row = rows.iter().position(|row| row.contains("[ENTER] Back to title")).expect("summary hint");
+        assert!(
+            analysis_row - trend_row >= minimum_trend_height,
+            "{width}x{height}: trend section has only {} rows",
+            analysis_row - trend_row
+        );
+        assert!(
+            hint_row - analysis_row >= 10,
+            "{width}x{height}: analysis section has only {} rows",
+            hint_row - analysis_row
+        );
+    }
 }
 
 #[test]
@@ -659,10 +1061,11 @@ fn benchmark_selection_does_not_offer_resume_for_complete_or_old_forms() {
 fn resumed_benchmark_summary_includes_parts_completed_earlier_today() {
     let directory = TempDir::new().unwrap();
     let path = directory.path().join("sessions.db");
-    save_bench_record(&path, "bench-v2/A/03", 40.0, 0.90, 16);
+    // Parts B and C are saved with the wall clock, so part A must be on the same local day.
+    let today = chrono::Local::now().date_naive();
+    save_bench_record_on_local_date(&path, "bench-v2/A/03", 40.0, 0.90, today);
     let mut config = Config::default();
     config.storage.db_path = Some(path);
-    let today = chrono::NaiveDate::from_ymd_opt(2026, 11, 16).unwrap();
     let mut app = test_app_at(config, today);
     let started = Instant::now();
     app.handle_key_at(key(KeyCode::Char('b')), started);
@@ -672,7 +1075,8 @@ fn resumed_benchmark_summary_includes_parts_completed_earlier_today() {
     for offset in 0..2 {
         let base = started + Duration::from_secs(offset * 70);
         app.on_tick_at_date(Duration::from_secs(3), base, today).unwrap();
-        app.on_tick_at(Duration::from_secs(60), base + Duration::from_secs(60)).unwrap();
+        app.on_tick_at_date(Duration::from_secs(60), base + Duration::from_secs(60), today)
+            .unwrap();
         app.handle_key_at(key(KeyCode::Enter), base + Duration::from_secs(62));
     }
     assert_eq!(app.screen, Screen::BenchSummary);

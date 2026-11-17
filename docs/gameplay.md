@@ -112,6 +112,10 @@ The lower row maps expected mistyped characters to the configured keyboard layou
 
 If terminal images are disabled or unavailable, the result uses text for the same information. A narrow or short terminal also falls back to text for visuals that do not fit. Text mistype bars use separated `▆` rows, and the reaction distribution remains visible even when a session observation exists. Benchmark-part results keep their dedicated comparison screen; adaptive details and history conditions remain part of their respective result views.
 
+After the final benchmark part, the summary fills the available height with three sections. The top shows the run grade and component grades beside one card per completed part. Each card contains WPM, accuracy, the change from the preceding run, the change from the previous personal best, and the short form ID. The middle shows up to 20 attempts per part with separate WPM and accuracy lines; the current run is enlarged. For A/C, a labelled v2 divider breaks the line between versions. The lower section combines expected mistyped keys across every part in this run and lists up to five sufficiently observed slow transitions, one or two weak fingers, improvements and regressions from the preceding matching part, and one to three concrete practice suggestions. Existing active transition prescriptions take priority.
+
+The summary degrades visuals in this order as space becomes scarce: trends, mistype keyboard, grade badge, then part cards. Its text form still includes the grade line, every part's WPM/accuracy/preceding/personal-best values, and the analysis prose. An 80×24 terminal therefore remains usable without overlapping the return hint.
+
 ## Session history
 
 Every completed session is stored in a local SQLite database. By default the file is `~/.local/share/rs-typing-trainer/sessions.db`; set `storage.db_path` in the configuration to use another location. The old `metrics.db_path` name remains accepted, with `storage.db_path` taking precedence when both are present.

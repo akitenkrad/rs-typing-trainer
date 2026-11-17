@@ -49,6 +49,13 @@ fn bench_a_is_preferred_for_target_speed() {
 }
 
 #[test]
+fn legacy_bench_a_is_identified_by_bench_id_instead_of_mode() {
+    let mut bench = record(50.0, Some("bench-v1/A/03"), 2);
+    bench.header.mode = "words".into();
+    assert!((target_wpm(&[record(40.0, None, 1), bench], 1.07, 20.0) - 53.5).abs() < 1e-9);
+}
+
+#[test]
 fn recent_five_session_median_is_the_fallback() {
     let records = (1..=6).map(|value| record(value as f64 * 10.0, None, value)).collect::<Vec<_>>();
     assert!((target_wpm(&records, 1.07, 20.0) - 42.8).abs() < 1e-9);

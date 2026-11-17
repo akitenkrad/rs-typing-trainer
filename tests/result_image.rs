@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use chrono::NaiveDate;
 use ratatui::layout::Size;
 use ratatui::style::Color;
 use rs_typing_trainer::graphics::CellPixels;
@@ -8,8 +9,9 @@ use rs_typing_trainer::ui::bigtext_image::resolve_big_font;
 use rs_typing_trainer::ui::keyboard::KeyTilePlacement;
 use rs_typing_trainer::ui::keyboard_image::KeyTileSpec;
 use rs_typing_trainer::ui::result_image::{
-    ItemSpeedPoint, MetricCardSpec, MetricDeltaKind, MistypeKeyboardSpec, ReactionHistogramSpec, ResultImageColors, SpeedChartSpec,
-    format_metric_delta, render_metric_card, render_mistype_keyboard, render_reaction_histogram, render_speed_chart,
+    BenchPartCardSpec, BenchTrendPoint, BenchTrendSpec, ItemSpeedPoint, MetricCardSpec, MetricDeltaKind, MistypeKeyboardSpec, ReactionHistogramSpec,
+    ResultImageColors, SpeedChartSpec, format_metric_delta, render_bench_part_card, render_bench_trend, render_metric_card, render_mistype_keyboard,
+    render_reaction_histogram, render_speed_chart,
 };
 
 fn colors() -> ResultImageColors {
@@ -95,6 +97,292 @@ fn metric_card_has_exact_size_and_both_delta_direction_colors() {
     assert_eq!((image.width(), image.height()), (360, 160));
     assert!(has_rgb(&image, rgba(spec.colors.correct)), "up delta has no correct-color pixels");
     assert!(has_rgb(&image, rgba(spec.colors.mistype)), "down delta has no mistype-color pixels");
+}
+
+#[test]
+fn benchmark_part_card_uses_direction_colors_for_wpm_and_accuracy_deltas() {
+    let font = resolve_big_font("biz-ud-gothic", Path::new("/unused"));
+    let spec = BenchPartCardSpec {
+        label: "Part B Coverage".into(),
+        wpm: 72.4,
+        accuracy: 0.965,
+        previous_wpm_delta: Some(3.2),
+        best_wpm_delta: Some(-1.6),
+        previous_accuracy_delta: Some(-0.01),
+        best_accuracy_delta: Some(0.005),
+        version: "v2/B/03".into(),
+        lang: Lang::En,
+        cells: Size::new(34, 9),
+        colors: colors(),
+    };
+    let image = render_bench_part_card(&font, CellPixels::new(9, 20), &spec).unwrap();
+
+    assert_eq!((image.width(), image.height()), (306, 180));
+    assert!(has_rgb(&image, rgba(spec.colors.correct)), "positive delta has no correct-color pixels");
+    assert!(has_rgb(&image, rgba(spec.colors.mistype)), "negative delta has no mistype-color pixels");
+}
+
+#[test]
+fn benchmark_part_card_keeps_title_inside_and_draws_readable_metric_rows() {
+    let font = resolve_big_font("biz-ud-gothic", Path::new("/unused"));
+    let cell_pixels = CellPixels::new(9, 20);
+    let spec = BenchPartCardSpec {
+        label: "Part A English words".into(),
+        wpm: 72.4,
+        accuracy: 0.944,
+        previous_wpm_delta: None,
+        best_wpm_delta: None,
+        previous_accuracy_delta: None,
+        best_accuracy_delta: None,
+        version: "v2/A/03".into(),
+        lang: Lang::En,
+        cells: Size::new(38, 7),
+        colors: colors(),
+    };
+    let image = render_bench_part_card(&font, cell_pixels, &spec).unwrap();
+    let foreground = rgba(spec.colors.foreground);
+    let title = color_bounds(&image, foreground, [4, 8, image.width() - 4, 36]).expect("title pixels");
+    assert!(title[1] >= 10, "title touches the top edge: {title:?}");
+    let wpm_label = color_bounds(&image, foreground, [image.width() / 2, 34, image.width() - 6, 74]).expect("readable WPM label");
+    assert!(wpm_label[3] - wpm_label[1] + 1 >= 11, "WPM label is too small: {wpm_label:?}");
+    assert!(
+        color_bounds(&image, foreground, [8, 70, image.width() - 8, 102]).is_some(),
+        "accuracy row is missing"
+    );
+    assert!(
+        color_bounds(&image, foreground, [8, 100, image.width() - 8, image.height() - 6]).is_some(),
+        "initial/delta row is missing"
+    );
+}
+
+#[test]
+fn benchmark_part_card_supporting_text_matches_accuracy_size_and_hugs_wpm_value() {
+    let font = resolve_big_font("biz-ud-gothic", Path::new("/unused"));
+    let cell_pixels = CellPixels::new(9, 20);
+    let mut shared_colors = colors();
+    shared_colors.correct = Color::White;
+    shared_colors.mistype = Color::White;
+    let spec = BenchPartCardSpec {
+        label: "Part A English words".into(),
+        wpm: 12.3,
+        accuracy: 0.994,
+        previous_wpm_delta: Some(-72.5),
+        best_wpm_delta: Some(-72.5),
+        previous_accuracy_delta: Some(-0.993),
+        best_accuracy_delta: Some(-0.993),
+        version: "v2/A/03".into(),
+        lang: Lang::En,
+        cells: Size::new(40, 9),
+        colors: shared_colors,
+    };
+    let image = render_bench_part_card(&font, cell_pixels, &spec).unwrap();
+    let foreground = rgba(Color::White);
+    let accent = rgba(spec.colors.accent);
+    let accuracy = color_bounds(&image, foreground, [8, 74, image.width() - 8, 100]).expect("accuracy row");
+    let accuracy_height = accuracy[3] - accuracy[1] + 1;
+    let wpm = color_bounds(&image, foreground, [image.width() * 2 / 5, 34, image.width() - 8, 76]).expect("WPM label");
+    let previous = color_bounds(&image, foreground, [30, 96, image.width() * 2 / 3, 117]).expect("previous delta text");
+    let best = color_bounds(&image, foreground, [30, 117, image.width() * 2 / 3, 143]).expect("best delta text");
+    for (name, bounds) in [("WPM", wpm), ("previous", previous), ("best", best)] {
+        let height = bounds[3] - bounds[1] + 1;
+        assert!(
+            height * 5 >= accuracy_height * 4,
+            "{name} text is too small: height={height}, accuracy_height={accuracy_height}, bounds={bounds:?}"
+        );
+    }
+
+    let value = color_bounds(&image, accent, [0, 28, image.width() * 3 / 5, 80]).expect("large WPM value");
+    assert!(
+        wpm[0].saturating_sub(value[2]) <= 12,
+        "WPM label is too far from the value: value={value:?}, label={wpm:?}"
+    );
+    assert!(
+        wpm[3].abs_diff(value[3]) <= 4,
+        "WPM label is not bottom-aligned: value={value:?}, label={wpm:?}"
+    );
+}
+
+#[test]
+fn benchmark_part_card_initial_text_matches_accuracy_size() {
+    let font = resolve_big_font("biz-ud-gothic", Path::new("/unused"));
+    let cell_pixels = CellPixels::new(9, 20);
+    let spec = BenchPartCardSpec {
+        label: "Part A English words".into(),
+        wpm: 72.4,
+        accuracy: 0.944,
+        previous_wpm_delta: None,
+        best_wpm_delta: None,
+        previous_accuracy_delta: None,
+        best_accuracy_delta: None,
+        version: "v2/A/03".into(),
+        lang: Lang::En,
+        cells: Size::new(40, 9),
+        colors: colors(),
+    };
+    let image = render_bench_part_card(&font, cell_pixels, &spec).unwrap();
+    let foreground = rgba(spec.colors.foreground);
+    let accuracy = color_bounds(&image, foreground, [8, 74, image.width() - 8, 100]).expect("accuracy row");
+    let initial = color_bounds(&image, foreground, [8, 96, image.width() / 2, 120]).expect("initial row");
+    let accuracy_height = accuracy[3] - accuracy[1] + 1;
+    let initial_height = initial[3] - initial[1] + 1;
+    assert!(
+        initial_height * 5 >= accuracy_height * 4,
+        "initial text is too small: height={initial_height}, accuracy_height={accuracy_height}, bounds={initial:?}"
+    );
+}
+
+#[test]
+fn benchmark_trend_draws_version_break_without_joining_lines_and_emphasizes_current_point() {
+    let font = resolve_big_font("biz-ud-gothic", Path::new("/unused"));
+    let spec = BenchTrendSpec {
+        points: vec![
+            BenchTrendPoint {
+                date: NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
+                wpm: 50.0,
+                accuracy: 0.94,
+                starts_new_series: false,
+                current: false,
+            },
+            BenchTrendPoint {
+                date: NaiveDate::from_ymd_opt(2026, 10, 8).unwrap(),
+                wpm: 50.0,
+                accuracy: 0.95,
+                starts_new_series: false,
+                current: false,
+            },
+            BenchTrendPoint {
+                date: NaiveDate::from_ymd_opt(2026, 10, 15).unwrap(),
+                wpm: 50.0,
+                accuracy: 0.96,
+                starts_new_series: true,
+                current: false,
+            },
+            BenchTrendPoint {
+                date: NaiveDate::from_ymd_opt(2026, 10, 22).unwrap(),
+                wpm: 60.0,
+                accuracy: 0.97,
+                starts_new_series: false,
+                current: true,
+            },
+        ],
+        cells: Size::new(36, 9),
+        colors: colors(),
+    };
+    let cell_pixels = CellPixels::new(9, 20);
+    let image = render_bench_trend(&font, cell_pixels, &spec).unwrap();
+    let break_x = spec.point_x(image.width(), 2).round() as u32;
+    let warning = rgba(spec.colors.warning);
+    let warning_count = (0..image.height()).filter(|y| image.get_pixel(break_x, *y).0 == warning).count();
+    assert!(warning_count >= 4, "version break is missing at x={break_x}");
+
+    let accent = rgba(spec.colors.accent);
+    let left_x = spec.point_x(image.width(), 1);
+    let right_x = spec.point_x(image.width(), 2);
+    let y = spec.wpm_y(image.height(), 50.0).round() as u32;
+    let middle_x = ((left_x + right_x) / 2.0).round() as u32;
+    assert_ne!(image.get_pixel(middle_x, y).0, accent, "WPM line crossed the v2 break");
+
+    let colored_near = |index: usize| {
+        let x = spec.point_x(image.width(), index).round() as u32;
+        let y = spec.wpm_y(image.height(), spec.points[index].wpm).round() as u32;
+        (x.saturating_sub(7)..=(x + 7).min(image.width() - 1))
+            .flat_map(|x| (y.saturating_sub(7)..=(y + 7).min(image.height() - 1)).map(move |y| (x, y)))
+            .filter(|(x, y)| image.get_pixel(*x, *y).0 == accent)
+            .count()
+    };
+    assert!(colored_near(3) > colored_near(0), "current point is not emphasized");
+}
+
+#[test]
+fn benchmark_trend_draws_wpm_ticks_and_first_and_last_dates_at_result_chart_size() {
+    let font = resolve_big_font("biz-ud-gothic", Path::new("/unused"));
+    let cell_pixels = CellPixels::new(9, 20);
+    let spec = BenchTrendSpec {
+        points: vec![
+            BenchTrendPoint {
+                date: NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(),
+                wpm: 40.0,
+                accuracy: 0.92,
+                starts_new_series: false,
+                current: false,
+            },
+            BenchTrendPoint {
+                date: NaiveDate::from_ymd_opt(2026, 11, 16).unwrap(),
+                wpm: 60.0,
+                accuracy: 0.97,
+                starts_new_series: false,
+                current: true,
+            },
+        ],
+        cells: Size::new(40, 9),
+        colors: colors(),
+    };
+    let image = render_bench_trend(&font, cell_pixels, &spec).unwrap();
+    let muted = rgba(spec.colors.muted);
+    let plot = spec.plot_bounds(image.width(), image.height(), cell_pixels);
+    let middle_tick = color_bounds(
+        &image,
+        muted,
+        [0, (plot.top + plot.bottom) / 2 - 18, plot.left, (plot.top + plot.bottom) / 2 + 18],
+    )
+    .expect("middle WPM tick");
+    let dates = color_bounds(&image, muted, [0, plot.bottom + 3, image.width(), image.height()]).expect("date labels");
+    assert!(middle_tick[3] - middle_tick[1] + 1 >= 11, "WPM tick is too small: {middle_tick:?}");
+    assert!(dates[3] - dates[1] + 1 >= 11, "date labels are too small: {dates:?}");
+    assert!(dates[0] <= plot.left + 4, "first date is missing: {dates:?}");
+    assert!(dates[2] >= plot.right.saturating_sub(4), "last date is missing: {dates:?}");
+
+    let last_date = color_bounds(
+        &image,
+        muted,
+        [plot.right.saturating_sub(24), plot.bottom + 3, image.width(), image.height()],
+    )
+    .expect("last date label");
+    assert!(last_date[2] <= image.width() - 4, "last date is clipped at the right edge: {last_date:?}");
+    assert!(
+        color_bounds(
+            &image,
+            muted,
+            [0, plot.bottom.saturating_sub(8), plot.left.saturating_sub(2), plot.bottom + 4],
+        )
+        .is_none(),
+        "minimum WPM tick overlaps the first date"
+    );
+}
+
+#[test]
+fn benchmark_trend_keeps_version_label_left_of_a_right_edge_break() {
+    let font = resolve_big_font("biz-ud-gothic", Path::new("/unused"));
+    let cell_pixels = CellPixels::new(9, 20);
+    let spec = BenchTrendSpec {
+        points: vec![
+            BenchTrendPoint {
+                date: NaiveDate::from_ymd_opt(2026, 10, 10).unwrap(),
+                wpm: 40.0,
+                accuracy: 0.92,
+                starts_new_series: false,
+                current: false,
+            },
+            BenchTrendPoint {
+                date: NaiveDate::from_ymd_opt(2026, 11, 17).unwrap(),
+                wpm: 60.0,
+                accuracy: 0.97,
+                starts_new_series: true,
+                current: true,
+            },
+        ],
+        cells: Size::new(40, 9),
+        colors: colors(),
+    };
+    let image = render_bench_trend(&font, cell_pixels, &spec).unwrap();
+    let plot = spec.plot_bounds(image.width(), image.height(), cell_pixels);
+    let break_x = spec.point_x(image.width(), 1).round() as u32;
+    let label = color_bounds(&image, rgba(spec.colors.warning), [0, 0, image.width(), plot.top]).expect("v2 label");
+    assert!(
+        label[2] < break_x,
+        "v2 label must be placed left of its break: label={label:?}, break_x={break_x}"
+    );
+    assert!(label[2] - label[0] + 1 >= 6, "v2 label is clipped: {label:?}");
 }
 
 #[test]

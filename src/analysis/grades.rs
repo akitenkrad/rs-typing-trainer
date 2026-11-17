@@ -11,7 +11,7 @@ use crate::analysis::metrics::AnalysisSettings;
 use crate::analysis::model::{ModelView, PlayerModel, build_player_model, session_language};
 use crate::analysis::progress::SessionForm;
 use crate::analysis::style::diagnose_style;
-use crate::bench::{BenchPart, parse_bench_id, preferred_bench_series};
+use crate::bench::{BenchPart, is_preferred_bench_series, parse_bench_id, preferred_bench_series};
 use crate::data::JapaneseText;
 use crate::engine::romaji::RomajiJudge;
 use crate::layout::KeyboardLayout;
@@ -502,7 +502,9 @@ fn benchmark_records<'a>(records: &'a [SessionRecord], language: &str, at: Optio
                 .bench_id
                 .as_deref()
                 .and_then(parse_bench_id)
-                .is_some_and(|(candidate_series, candidate_part, _)| Some(candidate_series) == series && candidate_part == part)
+                .is_some_and(|(candidate_series, candidate_part, _)| {
+                    candidate_part == part && is_preferred_bench_series(candidate_series, part, series)
+                })
         })
         .filter(|record| at.is_none_or(|at| parse_time(&record.header.started_at).is_some_and(|started| started <= at)))
         .collect::<Vec<_>>();
@@ -563,7 +565,7 @@ fn provisional_grade(
     let recent_forms = language_forms.iter().rev().take(3).copied().collect::<Vec<_>>();
     let mut practice = records
         .iter()
-        .filter(|record| record.header.metrics_version > 0 && record.header.bench_id.is_none())
+        .filter(|record| record.header.metrics_version > 0 && record.header.bench_id.as_deref().and_then(parse_bench_id).is_none())
         .filter(|record| session_language(record) == language)
         .filter(|record| parse_time(&record.header.started_at).is_some_and(|started| started <= as_of))
         .collect::<Vec<_>>();

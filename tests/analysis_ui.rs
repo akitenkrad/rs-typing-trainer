@@ -294,6 +294,23 @@ fn every_analysis_tab_renders_and_bench_shows_previous_delta() {
 }
 
 #[test]
+fn analysis_bench_tab_combines_v1_and_v2_for_part_b() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("sessions.db");
+    save_record(&path, ModeKind::Ngram, Some("bench-v1/B/01"), 40.0, 1);
+    save_record(&path, ModeKind::Ngram, Some("bench-v2/B/01"), 52.0, 2);
+    let mut config = Config::default();
+    config.storage.db_path = Some(path);
+    let mut app = test_app(config);
+    app.handle_key(key(KeyCode::Char('a')));
+    app.analysis_tab = 5;
+
+    let output = render(&app);
+    let compact = output.chars().filter(|character| !character.is_whitespace()).collect::<String>();
+    assert!(compact.contains("+12.0WPM"), "{output}");
+}
+
+#[test]
 fn selected_transition_creates_an_ngram_practice_configuration() {
     let directory = TempDir::new().unwrap();
     let path = directory.path().join("sessions.db");

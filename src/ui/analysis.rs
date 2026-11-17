@@ -11,7 +11,7 @@ use ratatui_image::Image;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::{AnalysisPeriod, App};
-use crate::bench::{BenchPart, parse_bench_id, preferred_bench_series};
+use crate::bench::{BenchPart, is_preferred_bench_series, parse_bench_id, preferred_bench_series};
 use crate::graphics::GraphicsMode;
 use crate::i18n::{Lang, Msg};
 use crate::layout::geometry::geometry;
@@ -1638,7 +1638,9 @@ fn bench_values<T>(app: &App, part: &str, value: impl Fn(&crate::record::Session
                 .bench_id
                 .as_deref()
                 .and_then(parse_bench_id)
-                .is_some_and(|(candidate_series, candidate_part, _)| Some(candidate_series) == series && candidate_part == part)
+                .is_some_and(|(candidate_series, candidate_part, _)| {
+                    candidate_part == part && is_preferred_bench_series(candidate_series, part, series)
+                })
         })
         .map(value)
         .collect()

@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+use crate::bench::parse_bench_id;
 use crate::engine::session::KeystrokeKind;
 use crate::record::SessionRecord;
 
@@ -49,10 +50,9 @@ pub fn select_ghost(records: &[SessionRecord], condition: &GhostCondition) -> Op
             (record, Some((item.idx, item.shown_us)))
         }
         GhostCondition::Bench { bench_id } => {
-            let record = records
-                .iter()
-                .rev()
-                .find(|record| record.header.mode == "bench" && record.header.bench_id.as_deref() == Some(bench_id))?;
+            let record = records.iter().rev().find(|record| {
+                record.header.bench_id.as_deref() == Some(bench_id) && record.header.bench_id.as_deref().and_then(parse_bench_id).is_some()
+            })?;
             (record, None)
         }
     };

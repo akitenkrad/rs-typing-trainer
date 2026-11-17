@@ -485,6 +485,15 @@ impl AnalysisImageCache {
         self.cache.protocol(detection, &chart_key(spec, Some(x_range)))
     }
 
+    pub(crate) fn badge_protocol<'a>(
+        &'a mut self,
+        detection: &GraphicsDetection,
+        font: &ResolvedBigFont,
+        spec: &GradeBadgeSpec,
+    ) -> Option<&'a Protocol> {
+        self.cache.protocol(detection, &badge_key(font, spec))
+    }
+
     pub(crate) fn ladder_protocol<'a>(
         &'a mut self,
         detection: &GraphicsDetection,

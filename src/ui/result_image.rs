@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use chrono::NaiveDate;
 use image::RgbaImage;
 use ratatui::layout::Size;
 use ratatui::style::Color;
@@ -37,6 +38,37 @@ pub struct MetricCardSpec {
     pub recent: Vec<f64>,
     pub lang: Lang,
     pub delta_suffix: String,
+    pub cells: Size,
+    pub colors: ResultImageColors,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BenchPartCardSpec {
+    pub label: String,
+    pub wpm: f64,
+    pub accuracy: f64,
+    pub previous_wpm_delta: Option<f64>,
+    pub best_wpm_delta: Option<f64>,
+    pub previous_accuracy_delta: Option<f64>,
+    pub best_accuracy_delta: Option<f64>,
+    pub version: String,
+    pub lang: Lang,
+    pub cells: Size,
+    pub colors: ResultImageColors,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BenchTrendPoint {
+    pub date: NaiveDate,
+    pub wpm: f64,
+    pub accuracy: f64,
+    pub starts_new_series: bool,
+    pub current: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BenchTrendSpec {
+    pub points: Vec<BenchTrendPoint>,
     pub cells: Size,
     pub colors: ResultImageColors,
 }
@@ -122,6 +154,26 @@ struct PlacementKey {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum ResultImageKey {
+    BenchPartCard {
+        font: FontIdentity,
+        label: String,
+        wpm: u64,
+        accuracy: u64,
+        previous_wpm_delta: Option<u64>,
+        best_wpm_delta: Option<u64>,
+        previous_accuracy_delta: Option<u64>,
+        best_accuracy_delta: Option<u64>,
+        version: String,
+        japanese: bool,
+        cells: Size,
+        colors: [[u8; 3]; 7],
+    },
+    BenchTrend {
+        font: FontIdentity,
+        points: Vec<(NaiveDate, u64, u64, bool, bool)>,
+        cells: Size,
+        colors: [[u8; 3]; 7],
+    },
     MetricCard {
         font: FontIdentity,
         label: String,
@@ -186,6 +238,18 @@ impl ResultImageCache {
         })
     }
 
+    pub fn prepare_bench_part_card(&mut self, detection: &GraphicsDetection, font: &ResolvedBigFont, spec: &BenchPartCardSpec) -> Result<(), String> {
+        self.cache.prepare(detection, bench_part_card_key(font, spec), spec.cells, |cell_pixels| {
+            render_bench_part_card(font, cell_pixels, spec)
+        })
+    }
+
+    pub fn prepare_bench_trend(&mut self, detection: &GraphicsDetection, font: &ResolvedBigFont, spec: &BenchTrendSpec) -> Result<(), String> {
+        self.cache.prepare(detection, bench_trend_key(font, spec), spec.cells, |cell_pixels| {
+            render_bench_trend(font, cell_pixels, spec)
+        })
+    }
+
     pub fn prepare_speed_chart(&mut self, detection: &GraphicsDetection, font: &ResolvedBigFont, spec: &SpeedChartSpec) -> Result<(), String> {
         self.cache.prepare(detection, speed_chart_key(font, spec), spec.cells, |cell_pixels| {
             render_speed_chart(font, cell_pixels, spec)
@@ -217,6 +281,24 @@ impl ResultImageCache {
         spec: &MetricCardSpec,
     ) -> Option<&'a Protocol> {
         self.cache.protocol(detection, &metric_card_key(font, spec))
+    }
+
+    pub(crate) fn bench_part_card_protocol<'a>(
+        &'a mut self,
+        detection: &GraphicsDetection,
+        font: &ResolvedBigFont,
+        spec: &BenchPartCardSpec,
+    ) -> Option<&'a Protocol> {
+        self.cache.protocol(detection, &bench_part_card_key(font, spec))
+    }
+
+    pub(crate) fn bench_trend_protocol<'a>(
+        &'a mut self,
+        detection: &GraphicsDetection,
+        font: &ResolvedBigFont,
+        spec: &BenchTrendSpec,
+    ) -> Option<&'a Protocol> {
+        self.cache.protocol(detection, &bench_trend_key(font, spec))
     }
 
     pub(crate) fn speed_chart_protocol<'a>(
@@ -309,6 +391,39 @@ impl MetricCardSpec {
     }
 }
 
+impl BenchTrendSpec {
+    pub fn plot_bounds(&self, width: u32, height: u32, cell_pixels: CellPixels) -> PlotBounds {
+        let label_height = (u32::from(cell_pixels.height) * 4 / 5).max(9);
+        PlotBounds {
+            left: (u32::from(cell_pixels.width) * 4).min(width / 3),
+            top: label_height.saturating_add(2).min(height / 3),
+            right: width.saturating_sub(8),
+            bottom: height.saturating_sub(label_height.saturating_add(7)),
+        }
+    }
+
+    pub fn point_x(&self, width: u32, index: usize) -> f32 {
+        let cell_width = (width / u32::from(self.cells.width.max(1))).max(1) as u16;
+        let plot = self.plot_bounds(width, 100, CellPixels::new(cell_width, 20));
+        if self.points.len() < 2 {
+            return (plot.left + plot.right) as f32 / 2.0;
+        }
+        plot.left as f32 + index as f32 / (self.points.len() - 1) as f32 * plot.right.saturating_sub(plot.left) as f32
+    }
+
+    pub fn wpm_y(&self, height: u32, value: f64) -> f32 {
+        let cell_height = (height / u32::from(self.cells.height.max(1))).max(1) as u16;
+        let plot = self.plot_bounds(100, height, CellPixels::new(9, cell_height));
+        scaled_y(self.points.iter().map(|point| point.wpm), value, plot.top as f32, plot.bottom as f32)
+    }
+
+    fn accuracy_y(&self, height: u32, value: f64) -> f32 {
+        let cell_height = (height / u32::from(self.cells.height.max(1))).max(1) as u16;
+        let plot = self.plot_bounds(100, height, CellPixels::new(9, cell_height));
+        scaled_y(self.points.iter().map(|point| point.accuracy), value, plot.top as f32, plot.bottom as f32)
+    }
+}
+
 impl SpeedChartSpec {
     pub fn average_wpm(&self) -> f64 {
         let (sum, count) = self
@@ -371,6 +486,44 @@ fn metric_card_key(font: &ResolvedBigFont, spec: &MetricCardSpec) -> ResultImage
         recent: spec.recent.iter().map(|value| value.to_bits()).collect(),
         japanese: spec.lang == Lang::Ja,
         delta_suffix: spec.delta_suffix.clone(),
+        cells: spec.cells,
+        colors: colors_key(spec.colors),
+    }
+}
+
+fn bench_part_card_key(font: &ResolvedBigFont, spec: &BenchPartCardSpec) -> ResultImageKey {
+    ResultImageKey::BenchPartCard {
+        font: font.identity(),
+        label: spec.label.clone(),
+        wpm: spec.wpm.to_bits(),
+        accuracy: spec.accuracy.to_bits(),
+        previous_wpm_delta: spec.previous_wpm_delta.map(f64::to_bits),
+        best_wpm_delta: spec.best_wpm_delta.map(f64::to_bits),
+        previous_accuracy_delta: spec.previous_accuracy_delta.map(f64::to_bits),
+        best_accuracy_delta: spec.best_accuracy_delta.map(f64::to_bits),
+        version: spec.version.clone(),
+        japanese: spec.lang == Lang::Ja,
+        cells: spec.cells,
+        colors: colors_key(spec.colors),
+    }
+}
+
+fn bench_trend_key(font: &ResolvedBigFont, spec: &BenchTrendSpec) -> ResultImageKey {
+    ResultImageKey::BenchTrend {
+        font: font.identity(),
+        points: spec
+            .points
+            .iter()
+            .map(|point| {
+                (
+                    point.date,
+                    point.wpm.to_bits(),
+                    point.accuracy.to_bits(),
+                    point.starts_new_series,
+                    point.current,
+                )
+            })
+            .collect(),
         cells: spec.cells,
         colors: colors_key(spec.colors),
     }
@@ -496,6 +649,327 @@ pub fn render_metric_card(font: &ResolvedBigFont, cell_pixels: CellPixels, spec:
             spec.colors,
             &mut glyphs,
         )?;
+    }
+    rgba_image(pixmap)
+}
+
+pub fn render_bench_part_card(font: &ResolvedBigFont, cell_pixels: CellPixels, spec: &BenchPartCardSpec) -> Result<RgbaImage, String> {
+    let (width, height) = pixel_size(spec.cells, cell_pixels);
+    let mut pixmap = new_pixmap(width, height, "benchmark part card")?;
+    let panel = color_rgb(spec.colors.panel, [16, 20, 28]);
+    let muted = color_rgb(spec.colors.muted, [130, 140, 155]);
+    let accent = color_rgb(spec.colors.accent, [41, 184, 219]);
+    let foreground = color_rgb(spec.colors.foreground, [255, 255, 255]);
+    fill_round_rect(&mut pixmap, [1.0, 1.0, width as f32 - 1.0, height as f32 - 1.0], 8.0, panel, 245);
+    stroke_round_rect(&mut pixmap, [1.5, 1.5, width as f32 - 1.5, height as f32 - 1.5], 8.0, muted, 180, 1.5);
+    let mut glyphs = HashMap::new();
+    let unit = f32::from(cell_pixels.height);
+    let small = (u32::from(cell_pixels.height) * 4 / 5).max(9);
+    draw_text(
+        &mut pixmap,
+        font,
+        &spec.label,
+        9.0,
+        unit * 0.5,
+        small,
+        foreground,
+        true,
+        TextAlign::Left,
+        cell_pixels,
+        &mut glyphs,
+    )?;
+    draw_text(
+        &mut pixmap,
+        font,
+        &spec.version,
+        width as f32 - 9.0,
+        unit * 0.5,
+        small,
+        muted,
+        false,
+        TextAlign::Right,
+        cell_pixels,
+        &mut glyphs,
+    )?;
+
+    let value_height = (u32::from(cell_pixels.height) * 2).max(28);
+    let value = format!("{:.1}", spec.wpm);
+    let value_center = width as f32 * 0.34;
+    draw_text(
+        &mut pixmap,
+        font,
+        &value,
+        value_center,
+        unit * 1.6,
+        value_height,
+        accent,
+        true,
+        TextAlign::Center,
+        cell_pixels,
+        &mut glyphs,
+    )?;
+    let value_cell_width = (u32::from(cell_pixels.width) * value_height / u32::from(cell_pixels.height).max(1)).max(1);
+    let value_width = value
+        .chars()
+        .map(|character| value_cell_width * UnicodeWidthChar::width(character).unwrap_or(1).max(1) as u32)
+        .sum::<u32>();
+    draw_text(
+        &mut pixmap,
+        font,
+        "WPM",
+        value_center + value_width as f32 / 2.0 + 4.0,
+        unit * 1.6 + value_height as f32 - small as f32,
+        small,
+        foreground,
+        true,
+        TextAlign::Left,
+        cell_pixels,
+        &mut glyphs,
+    )?;
+    draw_text(
+        &mut pixmap,
+        font,
+        &match spec.lang {
+            Lang::En => format!("Accuracy {:.1}%", spec.accuracy * 100.0),
+            Lang::Ja => format!("正確さ {:.1}%", spec.accuracy * 100.0),
+        },
+        9.0,
+        unit * 3.8,
+        small,
+        foreground,
+        false,
+        TextAlign::Left,
+        cell_pixels,
+        &mut glyphs,
+    )?;
+
+    let delta_size = small;
+    let rows = [
+        (spec.previous_wpm_delta, MetricDeltaKind::Previous, unit * 5.1),
+        (spec.best_wpm_delta, MetricDeltaKind::Best, unit * 6.35),
+    ];
+    for (delta, kind, y) in rows {
+        if let Some(delta) = delta.filter(|value| value.is_finite()) {
+            draw_delta(
+                &mut pixmap,
+                font,
+                spec.lang,
+                kind,
+                delta,
+                " WPM",
+                9.0,
+                y,
+                delta_size,
+                cell_pixels,
+                spec.colors,
+                &mut glyphs,
+            )?;
+            let accuracy_delta = match kind {
+                MetricDeltaKind::Previous => spec.previous_accuracy_delta,
+                MetricDeltaKind::Best => spec.best_accuracy_delta,
+            };
+            if let Some(accuracy_delta) = accuracy_delta.filter(|value| value.is_finite()) {
+                let color = if accuracy_delta > 0.0 {
+                    color_rgb(spec.colors.correct, [144, 238, 144])
+                } else if accuracy_delta < 0.0 {
+                    color_rgb(spec.colors.mistype, [241, 76, 76])
+                } else {
+                    muted
+                };
+                let text = if accuracy_delta == 0.0 {
+                    "±0pt".to_owned()
+                } else {
+                    format!("{:+.1}pt", accuracy_delta * 100.0)
+                };
+                draw_text(
+                    &mut pixmap,
+                    font,
+                    &text,
+                    width as f32 * 0.69,
+                    y - 2.0,
+                    delta_size,
+                    color,
+                    false,
+                    TextAlign::Left,
+                    cell_pixels,
+                    &mut glyphs,
+                )?;
+            }
+        } else if kind == MetricDeltaKind::Previous {
+            let initial = match spec.lang {
+                Lang::En => "Initial",
+                Lang::Ja => "初回",
+            };
+            draw_text(
+                &mut pixmap,
+                font,
+                initial,
+                9.0,
+                y - 2.0,
+                delta_size,
+                foreground,
+                true,
+                TextAlign::Left,
+                cell_pixels,
+                &mut glyphs,
+            )?;
+        }
+    }
+    rgba_image(pixmap)
+}
+
+fn trend_wpm_range(spec: &BenchTrendSpec) -> Option<(f64, f64)> {
+    let minimum = spec
+        .points
+        .iter()
+        .map(|point| point.wpm)
+        .filter(|value| value.is_finite())
+        .min_by(f64::total_cmp)?;
+    let maximum = spec
+        .points
+        .iter()
+        .map(|point| point.wpm)
+        .filter(|value| value.is_finite())
+        .max_by(f64::total_cmp)?;
+    if (maximum - minimum).abs() < f64::EPSILON {
+        Some((minimum - 1.0, maximum + 1.0))
+    } else {
+        Some((minimum, maximum))
+    }
+}
+
+fn short_date(date: chrono::NaiveDate) -> String {
+    use chrono::Datelike;
+
+    format!("{}/{}", date.month(), date.day())
+}
+
+pub fn render_bench_trend(font: &ResolvedBigFont, cell_pixels: CellPixels, spec: &BenchTrendSpec) -> Result<RgbaImage, String> {
+    let (width, height) = pixel_size(spec.cells, cell_pixels);
+    let mut pixmap = new_pixmap(width, height, "benchmark trend")?;
+    if spec.points.is_empty() {
+        return rgba_image(pixmap);
+    }
+    let plot = spec.plot_bounds(width, height, cell_pixels);
+    let left = plot.left as f32;
+    let top = plot.top as f32;
+    let right = plot.right as f32;
+    let bottom = plot.bottom as f32;
+    let grid = color_rgb(spec.colors.muted, [130, 140, 155]);
+    let wpm = color_rgb(spec.colors.accent, [41, 184, 219]);
+    let accuracy = color_rgb(spec.colors.correct, [144, 238, 144]);
+    let warning = color_rgb(spec.colors.warning, [245, 245, 67]);
+    let label_height = (u32::from(cell_pixels.height) * 4 / 5).max(9);
+    let mut glyphs = HashMap::new();
+    if let Some((minimum, maximum)) = trend_wpm_range(spec) {
+        for step in 0..2 {
+            let fraction = f64::from(step) / 2.0;
+            let value = maximum - fraction * (maximum - minimum);
+            let y = top + (bottom - top) * step as f32 / 2.0;
+            stroke_line(&mut pixmap, left, y, right, y, grid, 55, 1.0);
+            draw_text(
+                &mut pixmap,
+                font,
+                &format!("{value:.0}"),
+                left - 6.0,
+                (y - label_height as f32 / 2.0).clamp(0.0, height.saturating_sub(label_height) as f32),
+                label_height,
+                grid,
+                false,
+                TextAlign::Right,
+                cell_pixels,
+                &mut glyphs,
+            )?;
+        }
+    }
+    let first = spec.points.first().expect("non-empty trend");
+    let last = spec.points.last().expect("non-empty trend");
+    draw_text(
+        &mut pixmap,
+        font,
+        &short_date(first.date),
+        left,
+        bottom + 5.0,
+        label_height,
+        grid,
+        false,
+        TextAlign::Left,
+        cell_pixels,
+        &mut glyphs,
+    )?;
+    if last.date != first.date {
+        draw_text(
+            &mut pixmap,
+            font,
+            &short_date(last.date),
+            right,
+            bottom + 5.0,
+            label_height,
+            grid,
+            false,
+            TextAlign::Right,
+            cell_pixels,
+            &mut glyphs,
+        )?;
+    }
+    for (index, _) in spec.points.iter().enumerate().filter(|(_, point)| point.starts_new_series) {
+        let x = spec.point_x(width, index).round();
+        let mut y = top;
+        while y < bottom {
+            stroke_line(&mut pixmap, x, y, x, (y + 5.0).min(bottom), warning, 255, 3.0);
+            y += 9.0;
+        }
+        draw_text(
+            &mut pixmap,
+            font,
+            "v2",
+            x - 3.0,
+            1.0,
+            label_height,
+            warning,
+            true,
+            TextAlign::Right,
+            cell_pixels,
+            &mut glyphs,
+        )?;
+    }
+    for index in 1..spec.points.len() {
+        if spec.points[index].starts_new_series {
+            continue;
+        }
+        let previous = spec.points[index - 1];
+        let current = spec.points[index];
+        stroke_line(
+            &mut pixmap,
+            spec.point_x(width, index - 1),
+            spec.wpm_y(height, previous.wpm),
+            spec.point_x(width, index),
+            spec.wpm_y(height, current.wpm),
+            wpm,
+            255,
+            2.5,
+        );
+        stroke_line(
+            &mut pixmap,
+            spec.point_x(width, index - 1),
+            spec.accuracy_y(height, previous.accuracy),
+            spec.point_x(width, index),
+            spec.accuracy_y(height, current.accuracy),
+            accuracy,
+            185,
+            2.0,
+        );
+    }
+    for (index, point) in spec.points.iter().enumerate() {
+        let radius = if point.current { 8.0 } else { 3.0 };
+        fill_circle(&mut pixmap, spec.point_x(width, index), spec.wpm_y(height, point.wpm), radius, wpm);
+        fill_circle(
+            &mut pixmap,
+            spec.point_x(width, index),
+            spec.accuracy_y(height, point.accuracy),
+            if point.current { 6.5 } else { 2.5 },
+            accuracy,
+        );
     }
     rgba_image(pixmap)
 }
@@ -859,6 +1333,16 @@ fn normalized_sparkline_points(values: &[f64], bounds: [f32; 4]) -> Vec<(f32, f3
             (x, y)
         })
         .collect()
+}
+
+fn scaled_y(values: impl Iterator<Item = f64>, value: f64, top: f32, bottom: f32) -> f32 {
+    let finite = values.filter(|value| value.is_finite()).collect::<Vec<_>>();
+    let minimum = finite.iter().copied().fold(f64::INFINITY, f64::min);
+    let maximum = finite.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    if !minimum.is_finite() || !maximum.is_finite() || (maximum - minimum).abs() < f64::EPSILON {
+        return (top + bottom) / 2.0;
+    }
+    bottom - ((value - minimum) / (maximum - minimum)).clamp(0.0, 1.0) as f32 * (bottom - top)
 }
 
 fn draw_sparkline(pixmap: &mut Pixmap, values: &[f64], bounds: [f32; 4], color: [u8; 3]) {

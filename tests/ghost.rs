@@ -63,6 +63,20 @@ fn benchmark_ghost_requires_the_same_version_and_uses_the_previous_run() {
 }
 
 #[test]
+fn benchmark_ghost_identifies_legacy_record_by_bench_id() {
+    let mut legacy = record("rust", &[100, 300, 500, 700], 50.0, Some("bench-v1/A/03"), 1);
+    legacy.header.mode = "words".into();
+    let ghost = select_ghost(
+        &[legacy],
+        &GhostCondition::Bench {
+            bench_id: "bench-v1/A/03".into(),
+        },
+    )
+    .expect("legacy benchmark ghost");
+    assert_eq!(ghost.position_at(Duration::from_millis(450)), 2);
+}
+
+#[test]
 fn sentence_ghost_ignores_ineligible_bests_and_does_not_apply_to_other_text() {
     let eligible = record("rust", &[100, 200, 300, 400], 50.0, None, 1);
     let mut ineligible = record("rust", &[100, 150, 200, 250], 90.0, None, 2);

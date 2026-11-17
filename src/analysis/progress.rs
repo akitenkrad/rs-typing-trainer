@@ -11,7 +11,7 @@ use crate::analysis::model::{
     append_sufficient_statistics, build_player_model, build_player_model_from_statistics, build_player_model_from_statistics_with_layout,
     build_sufficient_statistics, expected_performance, session_language,
 };
-use crate::bench::{BenchPart, parse_bench_id, preferred_bench_series};
+use crate::bench::{BenchPart, is_preferred_bench_series, parse_bench_id, preferred_bench_series};
 use crate::engine::romaji::RomajiJudge;
 use crate::engine::session::KeystrokeKind;
 use crate::layout::KeyboardLayout;
@@ -464,7 +464,7 @@ fn daily_trend(target: &str, records: &[SessionRecord], forms: &[SessionForm], a
                     .bench_id
                     .as_deref()
                     .and_then(parse_bench_id)
-                    .is_some_and(|(series, part, _)| Some(series) == bench_series && part == bench_part)
+                    .is_some_and(|(series, part, _)| part == bench_part && is_preferred_bench_series(series, bench_part, bench_series))
             })
             .copied()
             .collect::<Vec<_>>();
