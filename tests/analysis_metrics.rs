@@ -174,3 +174,24 @@ fn japanese_spelling_choices_are_reported_as_ratios() {
     assert_eq!(si.ratio, 0.5);
     assert_eq!(shi.ratio, 0.5);
 }
+
+#[test]
+fn rollover_rate_excludes_item_boundaries() {
+    let sample = record(
+        2,
+        vec![
+            key(0, 100_000, 0, "a", true),
+            key(1, 125_000, 0, "s", true),
+            key(2, 1_000_000, 1, "g", true),
+            key(3, 1_025_000, 1, "h", true),
+        ],
+    );
+    let metrics = analyze_records(
+        &[sample],
+        &builtin_layout("qwerty").unwrap(),
+        &geometry("ansi").unwrap(),
+        AnalysisSettings::default(),
+    );
+
+    assert_eq!(metrics.rollover_rate, Some(1.0));
+}

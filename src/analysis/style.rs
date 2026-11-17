@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::analysis::model::PlayerModel;
 use crate::engine::session::{KeystrokeKind, KeystrokeLog};
-use crate::record::{SessionModeParams, SessionRecord};
+use crate::record::SessionRecord;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WordStartMetric {
@@ -64,38 +64,32 @@ pub fn diagnose_style(records: &[SessionRecord], model: &PlayerModel) -> TypingS
     let mut internal = Vec::new();
     let mut word_samples = BTreeMap::<String, Vec<(f64, f64)>>::new();
     for record in records.iter().filter(|record| record.header.metrics_version > 0) {
-        let mut previous_item_last = None::<TimedChar<'_>>;
         for item in &record.log.items {
             let keys = correct_chars(record, item.idx);
-            let nonspace = keys.iter().copied().filter(|key| !key.character.is_whitespace()).collect::<Vec<_>>();
-            if let (Some(previous), Some(first)) = (previous_item_last, nonspace.first().copied()) {
-                let interval = first.key.t_us.saturating_sub(previous.key.t_us) as f64 / 1_000.0;
-                between_words.push(interval);
-                if item_boundary_was_visible(record) {
-                    starts.push(interval);
-                }
-            }
 
+            // The word-start interval runs from the space to the next word's first
+            // letter, so it is one keystroke interval like the within-word IKI it is
+            // divided by (the grade scale puts S at a ratio of 1.0).
             let mut last_nonspace = None::<TimedChar<'_>>;
-            let mut crossed_space = false;
+            let mut space_after_word = None::<TimedChar<'_>>;
             for key in &keys {
                 if key.character.is_whitespace() {
-                    crossed_space = last_nonspace.is_some();
+                    if last_nonspace.is_some() {
+                        space_after_word = Some(*key);
+                    }
                     continue;
                 }
-                if let Some(previous) = last_nonspace {
+                if let Some(space) = space_after_word {
+                    let interval = key.key.t_us.saturating_sub(space.key.t_us) as f64 / 1_000.0;
+                    starts.push(interval);
+                    between_words.push(interval);
+                } else if let Some(previous) = last_nonspace {
                     let interval = key.key.t_us.saturating_sub(previous.key.t_us) as f64 / 1_000.0;
-                    if crossed_space {
-                        starts.push(interval);
-                        between_words.push(interval);
-                    } else {
-                        internal.push(interval);
-                    }
+                    internal.push(interval);
                 }
                 last_nonspace = Some(*key);
-                crossed_space = false;
+                space_after_word = None;
             }
-            previous_item_last = nonspace.last().copied().or(previous_item_last);
 
             if !item.text.chars().any(char::is_whitespace)
                 && keys.len() >= 2
@@ -160,13 +154,6 @@ pub fn diagnose_style(records: &[SessionRecord], model: &PlayerModel) -> TypingS
             between_word_n: between_words.len() as u64,
         },
     }
-}
-
-fn item_boundary_was_visible(record: &SessionRecord) -> bool {
-    serde_json::from_str::<SessionModeParams>(&record.header.mode_params)
-        .ok()
-        .and_then(|params| params.preview_items)
-        .is_some_and(|count| count > 0)
 }
 
 fn correct_chars(record: &SessionRecord, item_idx: u32) -> Vec<TimedChar<'_>> {

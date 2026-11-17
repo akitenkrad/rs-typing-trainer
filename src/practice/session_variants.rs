@@ -60,7 +60,7 @@ pub fn compare_endurance_log(log: &crate::engine::session::SessionLog) -> Endura
         .collect::<Vec<_>>();
     let mut first_iki = Vec::new();
     let mut second_iki = Vec::new();
-    for pair in keys.windows(2) {
+    for pair in keys.windows(2).filter(|pair| pair[0].item_idx == pair[1].item_idx) {
         let value = pair[1].t_us.saturating_sub(pair[0].t_us) as f64 / 1_000.0;
         if pair[1].t_us < midpoint {
             first_iki.push(value);

@@ -15,9 +15,10 @@ pub fn recovery_metrics(log: &SessionLog) -> RecoveryMetrics {
     }
     let mut intervals = keys
         .windows(2)
+        .filter(|pair| pair[0].item_idx == pair[1].item_idx)
         .map(|pair| pair[1].t_us.saturating_sub(pair[0].t_us) as f64)
         .collect::<Vec<_>>();
-    let median_us = median(&mut intervals);
+    let median_us = (!intervals.is_empty()).then(|| median(&mut intervals));
     let mut recoveries = Vec::new();
     let mut following_errors = 0_u64;
     let mut following_total = 0_u64;
@@ -26,9 +27,14 @@ pub fn recovery_metrics(log: &SessionLog) -> RecoveryMetrics {
             following_total += 1;
             following_errors += u64::from(!next.correct);
         }
-        let recovered = (index + 1..keys.len()).find_map(|next| {
-            let interval = keys[next].t_us.saturating_sub(keys[next - 1].t_us) as f64;
-            (keys[next].correct && interval <= median_us).then_some((next - index) as f64)
+        let recovered = median_us.and_then(|median_us| {
+            (index + 1..keys.len()).find_map(|next| {
+                if keys[next - 1].item_idx != keys[next].item_idx {
+                    return None;
+                }
+                let interval = keys[next].t_us.saturating_sub(keys[next - 1].t_us) as f64;
+                (keys[next].correct && interval <= median_us).then_some((next - index) as f64)
+            })
         });
         if let Some(count) = recovered {
             recoveries.push(count);

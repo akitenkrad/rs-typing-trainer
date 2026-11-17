@@ -9,11 +9,15 @@ mod common;
 use common::test_app;
 
 fn key(seq: u32, ms: u64, correct: bool) -> KeystrokeLog {
+    key_for_item(seq, ms, correct, 0)
+}
+
+fn key_for_item(seq: u32, ms: u64, correct: bool, item_idx: u32) -> KeystrokeLog {
     KeystrokeLog {
         seq,
         t_us: ms * 1_000,
         release_us: None,
-        item_idx: 0,
+        item_idx,
         pos: seq,
         kind: KeystrokeKind::Char,
         typed: Some("a".into()),
@@ -47,6 +51,35 @@ fn recovery_counts_keys_to_session_median_speed_and_next_three_error_rate() {
 #[test]
 fn empty_log_has_no_recovery_sample() {
     assert_eq!(recovery_metrics(&SessionLog::default()).median_keys_to_recover, None);
+}
+
+#[test]
+fn recovery_speed_excludes_item_boundaries() {
+    let log = SessionLog {
+        duration_us: 2_000_000,
+        error_mode: ErrorMode::Advance,
+        items: vec![],
+        keystrokes: vec![
+            key_for_item(0, 0, true, 0),
+            key_for_item(1, 100, false, 0),
+            key_for_item(2, 600, true, 1),
+            key_for_item(3, 1_000, true, 1),
+        ],
+    };
+
+    assert_eq!(recovery_metrics(&log).median_keys_to_recover, None);
+}
+
+#[test]
+fn recovery_with_only_item_boundaries_has_no_timing_sample() {
+    let log = SessionLog {
+        duration_us: 1_000_000,
+        error_mode: ErrorMode::Advance,
+        items: vec![],
+        keystrokes: vec![key_for_item(0, 100, false, 0), key_for_item(1, 600, true, 1)],
+    };
+
+    assert_eq!(recovery_metrics(&log).median_keys_to_recover, None);
 }
 
 #[test]

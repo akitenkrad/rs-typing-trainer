@@ -94,7 +94,7 @@ fn model_record(interval_ms: u64, repetitions: usize) -> SessionRecord {
 }
 
 #[test]
-fn word_start_delay_excludes_reaction_and_includes_item_and_space_boundaries() {
+fn word_start_delay_and_rhythm_use_only_spaces_inside_items() {
     let sample = record_with_preview(
         vec![
             ("as", vec![('a', 100_000, None), ('s', 200_000, None)]),
@@ -126,32 +126,42 @@ fn word_start_delay_excludes_reaction_and_includes_item_and_space_boundaries() {
     let result = diagnose_style(&[sample], &model);
 
     let word_start = result.word_start.unwrap();
-    assert_eq!(word_start.n, 3);
-    assert!((word_start.start_median_ms - 200.0).abs() < 1e-9, "{word_start:?}");
+    assert_eq!(word_start.n, 1);
+    // Space (850 ms) to the next word's first letter (1,000 ms): one interval, not two.
+    assert!((word_start.start_median_ms - 150.0).abs() < 1e-9, "{word_start:?}");
     assert!((word_start.internal_median_ms - 100.0).abs() < 1e-9);
-    assert!((word_start.ratio - 2.0).abs() < 1e-9);
+    assert!((word_start.ratio - 1.5).abs() < 1e-9);
+    assert_eq!(result.rhythm.between_word_n, 1);
+    assert_eq!(result.rhythm.between_word_cv, None);
 }
 
 #[test]
-fn word_start_uses_only_boundaries_that_were_visible_before_typing() {
-    let items = || {
-        vec![
-            ("as", vec![('a', 100_000, None), ('s', 200_000, None)]),
-            ("df", vec![('d', 500_000, None), ('f', 600_000, None)]),
-        ]
+fn item_boundaries_are_excluded_regardless_of_preview_but_inside_item_spaces_are_included() {
+    let boundary_record = |preview_items| {
+        let mut sample = record_with_preview(
+            vec![
+                ("as", vec![('a', 100_000, None), ('s', 220_000, None)]),
+                ("df", vec![('d', 1_100_000, None), ('f', 1_220_000, None)]),
+            ],
+            false,
+            preview_items,
+        );
+        let previous_done_us = sample.log.items[0].done_us.unwrap();
+        sample.log.items[1].shown_us = previous_done_us + 400_000;
+        sample
     };
-    let visible = record_with_preview(items(), false, Some(1));
-    let hidden = record_with_preview(items(), false, Some(0));
-    let legacy = record_with_preview(items(), false, None);
+    let visible = boundary_record(Some(1));
+    let hidden = boundary_record(Some(0));
+    let legacy = boundary_record(None);
     let inside_item = record_with_preview(
         vec![(
             "as df",
             vec![
                 ('a', 100_000, None),
-                ('s', 200_000, None),
-                (' ', 250_000, None),
-                ('d', 500_000, None),
-                ('f', 600_000, None),
+                ('s', 220_000, None),
+                (' ', 300_000, None),
+                ('d', 700_000, None),
+                ('f', 820_000, None),
             ],
         )],
         false,
@@ -168,15 +178,21 @@ fn word_start_uses_only_boundaries_that_were_visible_before_typing() {
         Utc.with_ymd_and_hms(2026, 11, 15, 12, 0, 0).unwrap(),
     );
 
-    let visible_start = diagnose_style(&[visible], &model).word_start.unwrap();
-    assert_eq!(visible_start.n, 1);
-    assert!((visible_start.start_median_ms - 300.0).abs() < 1e-9);
-    assert!(diagnose_style(&[hidden], &model).word_start.is_none());
-    assert!(diagnose_style(&[legacy], &model).word_start.is_none());
+    for sample in [visible, hidden, legacy] {
+        let result = diagnose_style(&[sample], &model);
+        assert_eq!(result.word_start, None);
+        assert_eq!(result.rhythm.within_word_n, 2);
+        assert_eq!(result.rhythm.between_word_n, 0);
+        assert_eq!(result.rhythm.between_word_cv, None);
+    }
 
-    let inside_start = diagnose_style(&[inside_item], &model).word_start.unwrap();
+    let inside_result = diagnose_style(&[inside_item], &model);
+    let inside_start = inside_result.word_start.unwrap();
     assert_eq!(inside_start.n, 1);
-    assert!((inside_start.start_median_ms - 300.0).abs() < 1e-9);
+    assert!((inside_start.start_median_ms - 400.0).abs() < 1e-9);
+    assert!((inside_start.internal_median_ms - 120.0).abs() < 1e-9);
+    assert!((inside_start.ratio - 400.0 / 120.0).abs() < 1e-9);
+    assert_eq!(inside_result.rhythm.between_word_n, 1);
 }
 
 #[test]
@@ -237,13 +253,21 @@ fn rollover_uses_only_sessions_with_release_events_and_reports_overlap_distribut
 }
 
 #[test]
-fn rhythm_is_split_between_inside_words_and_word_boundaries() {
+fn rhythm_is_split_between_within_word_and_inside_item_word_boundaries() {
     let sample = record(
-        vec![
-            ("as", vec![('a', 100_000, None), ('s', 200_000, None)]),
-            ("df", vec![('d', 500_000, None), ('f', 700_000, None)]),
-            ("jk", vec![('j', 1_200_000, None), ('k', 1_500_000, None)]),
-        ],
+        vec![(
+            "as df jk",
+            vec![
+                ('a', 100_000, None),
+                ('s', 200_000, None),
+                (' ', 250_000, None),
+                ('d', 600_000, None),
+                ('f', 800_000, None),
+                (' ', 850_000, None),
+                ('j', 1_400_000, None),
+                ('k', 1_700_000, None),
+            ],
+        )],
         false,
     );
     let layout = builtin_layout("qwerty").unwrap();
@@ -261,5 +285,6 @@ fn rhythm_is_split_between_inside_words_and_word_boundaries() {
     assert_eq!(rhythm.within_word_n, 3);
     assert_eq!(rhythm.between_word_n, 2);
     assert!((rhythm.within_word_cv.unwrap() - (2.0_f64 / 3.0).sqrt() / 2.0).abs() < 1e-9, "{rhythm:?}");
-    assert!((rhythm.between_word_cv.unwrap() - 0.25).abs() < 1e-9, "{rhythm:?}");
+    // Space-to-first-letter intervals are 350 ms and 550 ms: mean 450, population SD 100.
+    assert!((rhythm.between_word_cv.unwrap() - 100.0 / 450.0).abs() < 1e-9, "{rhythm:?}");
 }

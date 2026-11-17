@@ -258,7 +258,7 @@ pub fn analyze_records_view(
             }
         }
         if record.header.release_events {
-            for pair in char_keys.windows(2) {
+            for pair in char_keys.windows(2).filter(|pair| pair[0].item_idx == pair[1].item_idx) {
                 if let Some(release_us) = pair[0].release_us {
                     overlap_pairs += 1;
                     overlap_count += u64::from(pair[1].t_us < release_us);
