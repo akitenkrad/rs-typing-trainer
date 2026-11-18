@@ -171,6 +171,9 @@ mod mod_support {
         let home = TempDir::new().unwrap();
         let mut config = Config::default();
         config.storage.db_path = Some(home.path().join("sessions.db"));
-        run(App::new(config, home.path().to_path_buf()));
+        let mut app = App::new(config, home.path().to_path_buf());
+        // Start on «Individual training»; see `common::test_app`.
+        app.title_selected = 1;
+        run(app);
     }
 }

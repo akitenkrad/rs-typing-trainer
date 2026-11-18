@@ -41,7 +41,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             Constraint::Length(logo_height),
             Constraint::Length(1),
             Constraint::Length(1),
-            Constraint::Length(6),
+            Constraint::Length(7),
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Min(7),
@@ -64,7 +64,8 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     let labels = match lang {
         crate::i18n::Lang::En => [
-            "Start  [Space]",
+            "Today's training  [M]",
+            "Individual training  [Space]",
             "Benchmark  [B]",
             "Analysis  [A]",
             "History  [H]",
@@ -72,7 +73,8 @@ pub fn render(frame: &mut Frame, app: &App) {
             "Quit  [Q/Esc]",
         ],
         crate::i18n::Lang::Ja => [
-            "開始  [Space]",
+            "今日の訓練  [M]",
+            "個別に訓練  [Space]",
             "ベンチマーク  [B]",
             "分析  [A]",
             "履歴  [H]",
@@ -156,22 +158,6 @@ pub fn render(frame: &mut Frame, app: &App) {
             Style::default().fg(theme.warning),
         )));
     }
-    let introductory = app.daily_menu.as_ref().is_some_and(|menu| menu.introductory);
-    // §4.2 (MYTASK-3619): the menu's actual total once it is built.
-    let minutes = app.daily_menu.as_ref().map_or_else(
-        || match lang {
-            crate::i18n::Lang::En => format!("{} min", cfg.menu.minutes),
-            crate::i18n::Lang::Ja => format!("{} 分", cfg.menu.minutes),
-        },
-        |menu| crate::practice::menu::minutes_label(menu, lang),
-    );
-    let menu_line = match (lang, introductory) {
-        (crate::i18n::Lang::En, true) => format!("Today's menu ({minutes}) — M to open (introductory: more data needed)"),
-        (crate::i18n::Lang::En, false) => format!("Today's menu ({minutes}) — M to open"),
-        (crate::i18n::Lang::Ja, true) => format!("今日のメニュー（{minutes}）— M で開く（データ不足のため入門メニュー）"),
-        (crate::i18n::Lang::Ja, false) => format!("今日のメニュー（{minutes}）— M で開く"),
-    };
-    info_lines.push(Line::from(Span::styled(menu_line, Style::default().fg(theme.warning))));
     let info = Paragraph::new(info_lines)
         .wrap(Wrap { trim: false })
         .style(Style::default().fg(theme.muted));

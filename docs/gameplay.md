@@ -21,8 +21,8 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | Screen | Keys | Action |
 |---|---|---|
 | Title | `↑` / `↓` (`k` / `j`) | Move the menu selection |
-| Title | `Enter` | Run the selected menu item |
-| Title | `Space` | Open mode selection directly |
+| Title | `Enter` | Run the selected item: Today's training (the practice menu, selected first), Individual training (mode selection), Benchmark, Analysis, History, Settings or Quit |
+| Title | `Space` | Open mode selection directly (Individual training) |
 | Title | `H` | Open history |
 | Title | `B` | Open `bench-v2` selection |
 | Title | `A` | Open analysis |
@@ -128,7 +128,7 @@ The summary degrades visuals in this order as space becomes scarce: trends, mist
 
 ## Practice menu
 
-Press `M` on the title screen to open today's practice menu. How the steps are chosen, their levels and graduation conditions are described in [Training tools](training.md#practice-menu); this section covers playing them.
+Choose Today's training (the first title item, or `M`) to open today's practice menu. How the steps are chosen, their levels and graduation conditions are described in [Training tools](training.md#practice-menu); this section covers playing them.
 
 ### Playing the steps
 

@@ -30,10 +30,12 @@ pub fn test_app(mut config: Config) -> TestApp {
     if config.storage.db_path.is_none() {
         config.storage.db_path = Some(home.path().join("data").join("sessions.db"));
     }
-    TestApp {
-        app: App::new(config, home.path().to_path_buf()),
-        _home: home,
-    }
+    let mut app = App::new(config, home.path().to_path_buf());
+    // The title cursor starts on «Today's training». Most tests begin
+    // individual training from the title with Enter, so they start one row
+    // lower; `title_ui` checks the real starting row with `App::new` directly.
+    app.title_selected = 1;
+    TestApp { app, _home: home }
 }
 
 pub fn test_app_at(mut config: Config, date: chrono::NaiveDate) -> TestApp {
@@ -41,8 +43,10 @@ pub fn test_app_at(mut config: Config, date: chrono::NaiveDate) -> TestApp {
     if config.storage.db_path.is_none() {
         config.storage.db_path = Some(home.path().join("data").join("sessions.db"));
     }
-    TestApp {
-        app: App::new_at(config, home.path().to_path_buf(), date),
-        _home: home,
-    }
+    let mut app = App::new_at(config, home.path().to_path_buf(), date);
+    // The title cursor starts on «Today's training». Most tests begin
+    // individual training from the title with Enter, so they start one row
+    // lower; `title_ui` checks the real starting row with `App::new` directly.
+    app.title_selected = 1;
+    TestApp { app, _home: home }
 }

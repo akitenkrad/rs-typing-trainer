@@ -217,24 +217,25 @@ fn title_replaces_the_old_recommendations_with_one_introductory_menu_line_at_80_
         .join("");
 
     assert!(rendered.to_lowercase().contains("copied"), "{rendered}");
-    assert!(rendered.contains("Today's menu (15 min)"), "{rendered}");
-    assert!(rendered.contains("M to open"), "{rendered}");
-    assert!(rendered.contains("introductory"), "{rendered}");
+    assert!(rendered.contains("Today's training  [M]"), "{rendered}");
+    // The yellow «Today's menu — M to open» line under the settings is gone.
+    assert!(!rendered.contains("M to open"), "{rendered}");
     assert!(!rendered.contains("preview items"), "{rendered}");
     assert!(!rendered.contains("Rhythm practice"), "{rendered}");
 }
 
 #[test]
-fn title_menu_line_uses_configured_minutes_and_localizes_japanese() {
+fn title_lists_todays_training_first_and_individual_training_second_in_japanese() {
     let mut config = Config::default();
     config.general.lang = Lang::Ja;
-    config.menu.minutes = 20;
     let rendered = render_title_with_config(config);
     let compact = without_whitespace(&rendered);
 
-    assert!(compact.contains(&without_whitespace("今日のメニュー（20 分）")), "{rendered}");
-    assert!(compact.contains(&without_whitespace("M で開く")), "{rendered}");
-    assert!(compact.contains(&without_whitespace("入門メニュー")), "{rendered}");
+    let today = compact.find("今日の訓練[M]").expect(&rendered);
+    let individual = compact.find("個別に訓練[Space]").expect(&rendered);
+    assert!(today < individual, "{rendered}");
+    assert!(!compact.contains("Mで開く"), "{rendered}");
+    assert!(!compact.contains("今日のメニュー"), "{rendered}");
 }
 
 #[test]
@@ -288,11 +289,19 @@ fn title_menu_is_left_aligned_and_only_the_selection_has_an_arrow_in_both_langua
         assert_eq!(symbol_column(&terminal, "▶"), 3);
 
         let columns = match lang {
-            Lang::En => ["Start", "Benchmark", "Analysis", "History", "Settings", "Quit"]
-                .iter()
-                .map(|phrase| phrase_column(&terminal, phrase))
-                .collect::<Vec<_>>(),
-            Lang::Ja => ["開", "ベ", "分", "履", "設", "終"]
+            Lang::En => [
+                "Today's training",
+                "Individual training",
+                "Benchmark",
+                "Analysis",
+                "History",
+                "Settings",
+                "Quit",
+            ]
+            .iter()
+            .map(|phrase| phrase_column(&terminal, phrase))
+            .collect::<Vec<_>>(),
+            Lang::Ja => ["今", "個", "ベ", "分", "履", "設", "終"]
                 .iter()
                 .map(|symbol| symbol_column(&terminal, symbol))
                 .collect::<Vec<_>>(),
@@ -306,8 +315,16 @@ fn title_menu_is_left_aligned_and_only_the_selection_has_an_arrow_in_both_langua
 fn title_screen_keeps_all_actions_with_and_without_images_at_large_and_small_sizes() {
     for lang in [Lang::En, Lang::Ja] {
         let expected = match lang {
-            Lang::En => ["Start", "Benchmark", "Analysis", "History", "Settings", "Quit"],
-            Lang::Ja => ["開始", "ベンチマーク", "分析", "履歴", "設定", "終了"],
+            Lang::En => [
+                "Today'straining",
+                "Individualtraining",
+                "Benchmark",
+                "Analysis",
+                "History",
+                "Settings",
+                "Quit",
+            ],
+            Lang::Ja => ["今日の訓練", "個別に訓練", "ベンチマーク", "分析", "履歴", "設定", "終了"],
         };
         for images in [false, true] {
             for (width, height) in [(150, 40), (80, 24)] {
@@ -340,4 +357,15 @@ fn title_screen_keeps_all_actions_with_and_without_images_at_large_and_small_siz
             }
         }
     }
+}
+
+#[test]
+fn a_new_app_starts_on_todays_training_and_enter_opens_the_menu() {
+    let home = tempfile::TempDir::new().expect("temporary home");
+    let mut config = Config::default();
+    config.storage.db_path = Some(home.path().join("data").join("sessions.db"));
+    let mut app = rs_typing_trainer::app::App::new(config, home.path().to_path_buf());
+    assert_eq!(app.title_selected, 0);
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(app.screen, Screen::Menu);
 }

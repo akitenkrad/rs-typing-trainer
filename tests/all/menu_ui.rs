@@ -680,7 +680,7 @@ fn esc_outside_the_menu_keeps_the_existing_confirmation_text() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn menu_and_title_show_the_actual_total_minutes() {
+fn menu_shows_the_actual_total_minutes() {
     let mut app = test_app_at(base_config(), chrono::NaiveDate::from_ymd_opt(2026, 11, 18).unwrap());
     open_menu(&mut app, Instant::now());
     app.daily_menu.as_mut().unwrap().steps[1].minutes = 5;
@@ -688,11 +688,6 @@ fn menu_and_title_show_the_actual_total_minutes() {
     assert_ne!(total, 15);
     let text = render(&app, 80, 24).join("\n");
     assert!(text.contains(&format!("{total} min (set: 15)")), "{text}");
-
-    app.handle_key(key(KeyCode::Esc));
-    assert_eq!(app.screen, Screen::Title);
-    let text = render(&app, 120, 40).join("\n");
-    assert!(text.contains(&format!("Today's menu ({total} min (set: 15))")), "{text}");
 }
 
 fn save_iki_history(path: &std::path::Path, interval_ms: u64) {

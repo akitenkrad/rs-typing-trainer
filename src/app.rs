@@ -953,7 +953,7 @@ impl App {
     fn handle_title_key(&mut self, key: KeyEvent, action: InputAction) {
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => self.title_selected = self.title_selected.saturating_sub(1),
-            KeyCode::Down | KeyCode::Char('j') => self.title_selected = (self.title_selected + 1).min(5),
+            KeyCode::Down | KeyCode::Char('j') => self.title_selected = (self.title_selected + 1).min(6),
             KeyCode::Enter => self.activate_title_selection(),
             KeyCode::Char(' ') => self.open_mode_select(),
             KeyCode::Char('h') | KeyCode::Char('H') => self.open_history(),
@@ -1184,15 +1184,16 @@ impl App {
 
     fn activate_title_selection(&mut self) {
         match self.title_selected {
-            0 => self.open_mode_select(),
-            1 => {
+            0 => self.open_menu(),
+            1 => self.open_mode_select(),
+            2 => {
                 self.bench_include_d = false;
                 self.bench_selected = 0;
                 self.screen = Screen::BenchSelect;
             }
-            2 => self.open_analysis(),
-            3 => self.open_history(),
-            4 => {
+            3 => self.open_analysis(),
+            4 => self.open_history(),
+            5 => {
                 self.settings_selected = 0;
                 self.settings_save_error = None;
                 self.settings_original = Some((
@@ -1204,7 +1205,7 @@ impl App {
                 ));
                 self.screen = Screen::Settings;
             }
-            5 => self.should_quit = true,
+            6 => self.should_quit = true,
             _ => {}
         }
     }
