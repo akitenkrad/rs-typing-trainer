@@ -1,0 +1,87 @@
+//! Single entry point for the integration tests.
+//!
+//! Every file under `tests/all/` is a module of this one test binary, so the
+//! tests link once instead of once per file. Run a subset with
+//! `cargo test --test all <module>::`.
+
+mod common;
+
+mod adaptive;
+mod analysis_image;
+mod analysis_metrics;
+mod analysis_ui;
+mod bench;
+mod bench_summary_analysis;
+mod bigtext;
+mod bigtext_image;
+mod blind;
+mod burst_endurance;
+mod cli;
+mod coach_ui;
+mod config_compat;
+mod config_docs;
+mod config_v2;
+mod data;
+mod data_bundled;
+mod deck;
+mod deck_sim;
+mod error_diagnosis;
+mod error_mode;
+mod gate;
+mod ghost;
+mod grades;
+mod graphics_detect;
+mod habits;
+mod history;
+mod i18n;
+mod input_safety;
+mod japanese_analysis;
+mod key_events;
+mod keyboard_fade;
+mod keyboard_image;
+mod keyboard_styles;
+mod keyboard_ui;
+mod layout_user;
+mod layouts;
+mod menu_build;
+mod menu_catalog;
+mod menu_progress;
+mod menu_skills;
+mod menu_summary_ui;
+mod menu_targets;
+mod menu_ui;
+mod migrate_v1;
+mod mode_ui;
+mod modes;
+mod pacer;
+mod player_model;
+mod prescription;
+mod preview;
+mod progress;
+mod prompt_layout;
+mod reading_report;
+mod records;
+mod recovery;
+mod remap;
+mod replay;
+mod result_data;
+mod result_image;
+mod result_ui;
+mod review_schedule;
+mod rhythm;
+mod romaji;
+mod romaji_prop;
+mod schema_v2;
+mod session_log;
+mod settings_write;
+mod shrinkage;
+mod skills_tab_ui;
+mod stats_csv;
+mod storage_path;
+mod summary;
+mod theme;
+mod title_image;
+mod title_ui;
+mod ttrec;
+mod typing_style;
+mod unlock;

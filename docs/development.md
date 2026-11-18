@@ -48,8 +48,20 @@ cargo test --locked --manifest-path tools/gen-data/Cargo.toml
 cargo clippy --all-targets --locked --manifest-path tools/gen-data/Cargo.toml -- -D warnings
 ```
 
-Unit tests live beside the implementation. Integration tests in `tests/` also cover the romaji examples and properties, every training mode, benchmark parallel forms and rotation, hand-calculated analysis metrics and shrinkage, analysis tabs, CSV filters, key filtering and recent-item exclusion, advance-mode editing metrics, v1/v2 configuration precedence, bundled and user TSV data, mode/key/romaji/sentence rendering, timestamp-injected `.ttrec` replay, sample records, configuration-document defaults, SQLite migration, layout vectors, remapping, Press/Release/Repeat handling, comment-preserving writes, CLI behavior and translations.
+Integration tests are compiled into two test binaries instead of one per file. `tests/all/main.rs` declares every file under `tests/all/` as a module, and `tests/perf/main.rs` holds the image-creation timing tests, which run one at a time and assert their budgets only in release builds. Filter by binary and module path:
 
-Layout definitions are compiled with `include_str!`; each `src/layout/defs/*.toml` file records its primary source URL in the first comment. Integration tests construct `App` through `tests/common/mod.rs`, which always supplies a temporary home/database path. Home-directory discovery occurs only in `src/main.rs`; library path resolution requires an explicit home path. Tests do not read the user's configuration or session database.
+```sh
+cargo test --locked --test all                     # every integration test except timing
+cargo test --locked --test all menu_ui::           # one former test file
+cargo test --locked --test all menu_ui::menu_step  # tests in that module whose names start with the text
+cargo test --locked --test all localized           # tests in any module whose names contain the text
+cargo test --locked --test perf -- --nocapture     # timing tests with their reports
+```
+
+A new integration test file goes in `tests/all/` and needs a `mod` line in `tests/all/main.rs`. Shared helpers are `crate::common`. All tests in a binary share one process and run in parallel, so a test must not change environment variables or the current directory, and must use its own temporary directory.
+
+Unit tests live beside the implementation. Integration tests in `tests/all/` also cover the romaji examples and properties, every training mode, benchmark parallel forms and rotation, hand-calculated analysis metrics and shrinkage, analysis tabs, CSV filters, key filtering and recent-item exclusion, advance-mode editing metrics, v1/v2 configuration precedence, bundled and user TSV data, mode/key/romaji/sentence rendering, timestamp-injected `.ttrec` replay, sample records, configuration-document defaults, SQLite migration, layout vectors, remapping, Press/Release/Repeat handling, comment-preserving writes, CLI behavior and translations.
+
+Layout definitions are compiled with `include_str!`; each `src/layout/defs/*.toml` file records its primary source URL in the first comment. Integration tests construct `App` through `tests/all/common/mod.rs`, which always supplies a temporary home/database path. Home-directory discovery occurs only in `src/main.rs`; library path resolution requires an explicit home path. Tests do not read the user's configuration or session database.
 
 The application package embeds `data/*.tsv.gz` with `include_bytes!` and decompresses each dataset once. The data generator is not a workspace member and keeps lindera, IPADIC, and archive dependencies out of the application. See [Prompt data](data.md) for regeneration and review. The smaller sample-record generator is a normal example target and uses only the application dependencies.
