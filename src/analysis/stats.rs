@@ -603,7 +603,7 @@ fn render_language_grade(output: &mut String, grades: &GradesAnalysis, grade: &L
     }
 }
 
-fn component_name(component: Component, lang: Lang) -> &'static str {
+pub(crate) fn component_name(component: Component, lang: Lang) -> &'static str {
     match (component, lang) {
         (Component::Speed, Lang::Ja) => "速さ",
         (Component::Accuracy, Lang::Ja) => "正確さ",

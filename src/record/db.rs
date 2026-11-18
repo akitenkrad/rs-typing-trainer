@@ -595,6 +595,109 @@ pub fn load_menu_check_records(path: &Path, language: &str, up_to_run_id: i64) -
     Ok(records)
 }
 
+/// One row of `skill_snapshots` (§8.2): a raw component value measured from
+/// a menu run. Grades and 0–8 scores are never stored (§8.2).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SkillSnapshotRecord {
+    pub run_id: i64,
+    pub date: chrono::NaiveDate,
+    pub lang: String,
+    pub component: String,
+    pub raw_value: f64,
+    pub n: u64,
+    pub source: String,
+    pub corrected: bool,
+}
+
+fn insert_skill_snapshot(transaction: &Transaction<'_>, row: &SkillSnapshotRecord) -> rusqlite::Result<()> {
+    transaction.execute(
+        "INSERT INTO skill_snapshots (run_id, date, lang, component, raw_value, n, source, corrected)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            row.run_id,
+            row.date.format("%Y-%m-%d").to_string(),
+            row.lang,
+            row.component,
+            row.raw_value,
+            i64::try_from(row.n).unwrap_or(i64::MAX),
+            row.source,
+            i64::from(row.corrected),
+        ],
+    )?;
+    Ok(())
+}
+
+/// Replace every snapshot of `run_id` with `rows` in one transaction
+/// (delete, then insert), so writing the same run again is idempotent.
+pub fn replace_skill_snapshots(path: &Path, run_id: i64, rows: &[SkillSnapshotRecord]) -> AppResult<()> {
+    if let Some(row) = rows.iter().find(|row| row.run_id != run_id) {
+        return Err(AppError::Record(format!("skill snapshot of run {} written as run {run_id}", row.run_id)));
+    }
+    let mut conn = open(path)?;
+    let transaction = conn.transaction()?;
+    transaction.execute("DELETE FROM skill_snapshots WHERE run_id=?1", [run_id])?;
+    for row in rows {
+        insert_skill_snapshot(&transaction, row)?;
+    }
+    transaction.commit()?;
+    Ok(())
+}
+
+/// Replace the whole `skill_snapshots` table with `rows` in one transaction
+/// (`stats --rebuild-skills`).
+pub fn rebuild_skill_snapshots(path: &Path, rows: &[SkillSnapshotRecord]) -> AppResult<()> {
+    let mut conn = open(path)?;
+    let transaction = conn.transaction()?;
+    transaction.execute("DELETE FROM skill_snapshots", [])?;
+    for row in rows {
+        insert_skill_snapshot(&transaction, row)?;
+    }
+    transaction.commit()?;
+    Ok(())
+}
+
+/// Every snapshot, ordered by series (language, component) and then by
+/// date and run id.
+pub fn load_skill_snapshots(path: &Path) -> AppResult<Vec<SkillSnapshotRecord>> {
+    let conn = open(path)?;
+    let mut statement = conn.prepare(
+        "SELECT run_id, date, lang, component, raw_value, n, source, corrected
+         FROM skill_snapshots
+         ORDER BY lang, component, date, run_id, source",
+    )?;
+    statement
+        .query_map([], |row| {
+            let date: String = row.get(1)?;
+            Ok(SkillSnapshotRecord {
+                run_id: row.get(0)?,
+                date: chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d")
+                    .map_err(|error| rusqlite::Error::FromSqlConversionFailure(1, rusqlite::types::Type::Text, Box::new(error)))?,
+                lang: row.get(2)?,
+                component: row.get(3)?,
+                raw_value: row.get(4)?,
+                n: row.get::<_, i64>(5)?.max(0) as u64,
+                source: row.get(6)?,
+                corrected: row.get::<_, i64>(7)? != 0,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(Into::into)
+}
+
+/// Every menu run, oldest first.
+pub fn load_all_menu_runs(path: &Path) -> AppResult<Vec<MenuRunRecord>> {
+    let conn = open(path)?;
+    let mut statement = conn.prepare(
+        "SELECT id, date, layout, lang, catalog_version, minutes, plan_json, completed_steps
+         FROM menu_runs
+         ORDER BY date, id",
+    )?;
+    statement
+        .query_map([], menu_run_from_row)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(Into::into)
+}
+
 fn menu_run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MenuRunRecord> {
     let date: String = row.get(1)?;
     let minutes = row.get::<_, i64>(5)?.clamp(0, i64::from(u8::MAX)) as u8;

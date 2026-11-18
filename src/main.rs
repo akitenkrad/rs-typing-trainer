@@ -43,8 +43,11 @@ fn main() -> ExitCode {
         eprintln!("{}: invalid bundled practice menu: {error}", Msg::AppTitle.text(lang));
         return ExitCode::from(1);
     }
-    if (cli.stats_menu || cli.json) && !matches!(cli.command, Some(Command::Stats { .. })) {
-        eprintln!("{}: --menu and --json are available only with stats", Msg::AppTitle.text(lang));
+    if (cli.stats_menu || cli.stats_skills || cli.rebuild_skills || cli.json) && !matches!(cli.command, Some(Command::Stats { .. })) {
+        eprintln!(
+            "{}: --menu, --skills, --rebuild-skills and --json are available only with stats",
+            Msg::AppTitle.text(lang)
+        );
         return ExitCode::from(2);
     }
     let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
@@ -328,6 +331,31 @@ fn run_stats(
         .map(|value| chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d"))
         .transpose()
         .map_err(|_| color_eyre::eyre::eyre!("--since must use YYYY-MM-DD"))?;
+    if cli.rebuild_skills {
+        let layout = rs_typing_trainer::layout::builtin_layout(&config.keyboard.layout)
+            .or_else(|_| rs_typing_trainer::layout::builtin_layout("qwerty"))
+            .map_err(|error| color_eyre::eyre::eyre!("{error}"))?;
+        let db_path = config.resolve_db_path(home);
+        let context = rs_typing_trainer::practice::menu::progress::JudgeContext {
+            db_path: &db_path,
+            home,
+            config: &config,
+            layout: &layout,
+            as_of: chrono::Local::now().date_naive(),
+        };
+        let output = rs_typing_trainer::practice::menu::skills::rebuild_from_storage(&context, cli.effective_lang(config.general.lang))?;
+        print!("{output}");
+        return Ok(());
+    }
+    if cli.stats_skills {
+        let output = rs_typing_trainer::practice::menu::skills::render_from_storage(
+            &config.resolve_db_path(home),
+            cli.effective_lang(config.general.lang),
+            json,
+        )?;
+        print!("{output}");
+        return Ok(());
+    }
     if menu {
         let output = rs_typing_trainer::practice::menu::render_from_storage(
             &config.resolve_db_path(home),

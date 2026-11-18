@@ -632,38 +632,94 @@ fn component_values(
     japanese_corpus: &[JapaneseText],
     language: &str,
 ) -> Vec<ComponentValue> {
+    component_samples_for_sessions(records, layout, geometry, options, as_of, english_corpus, japanese_corpus, language)
+        .into_iter()
+        .map(|sample| ComponentValue::new(sample.component, sample.value))
+        .collect()
+}
+
+/// One raw component value together with the number of observations it was
+/// computed from. The meaning of `n` depends on the component:
+///
+/// - speed, accuracy: character keystrokes typed in the sessions;
+/// - rhythm: within-word intervals behind the coefficient of variation;
+/// - preview: word-start intervals behind the word-start ratio;
+/// - overlap: comparable key pairs behind the rollover rate;
+/// - transition: observed transition intervals in the player model;
+/// - recovery: post-error intervals behind the post-error slowdown.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ComponentSample {
+    pub component: Component,
+    pub value: f64,
+    pub n: u64,
+}
+
+/// Raw component values of `records` with their observation counts, using the
+/// same computation as the grade report (`n` is documented on
+/// [`ComponentSample`]). A component that cannot be computed is left out.
+#[allow(clippy::too_many_arguments)]
+pub fn component_samples_for_sessions(
+    records: &[SessionRecord],
+    layout: &KeyboardLayout,
+    geometry: &KeyboardGeometry,
+    options: GradeOptions,
+    as_of: DateTime<Utc>,
+    english_corpus: &[String],
+    japanese_corpus: &[JapaneseText],
+    language: &str,
+) -> Vec<ComponentSample> {
     if records.is_empty() {
         return Vec::new();
     }
     let model = build_player_model(records, layout, geometry, options.model, ModelView::Recent, as_of);
+    let keystrokes = records
+        .iter()
+        .map(|record| {
+            record
+                .log
+                .keystrokes
+                .iter()
+                .filter(|key| key.kind == crate::engine::session::KeystrokeKind::Char)
+                .count() as u64
+        })
+        .sum::<u64>();
+    let sample = |component, value, n| ComponentSample { component, value, n };
     let mut values = Vec::new();
     if let Some(value) = median(records.iter().map(|record| record.header.net_wpm)) {
-        values.push(ComponentValue::new(Component::Speed, value));
+        values.push(sample(Component::Speed, value, keystrokes));
     }
     if let Some(value) = median(records.iter().map(|record| record.header.accuracy * 100.0)) {
-        values.push(ComponentValue::new(Component::Accuracy, value));
+        values.push(sample(Component::Accuracy, value, keystrokes));
     }
     let styles = records
         .iter()
         .map(|record| diagnose_style(std::slice::from_ref(record), &model))
         .collect::<Vec<_>>();
     if let Some(value) = median(styles.iter().filter_map(|style| style.rhythm.within_word_cv)) {
-        values.push(ComponentValue::new(Component::Rhythm, value));
+        let n = styles
+            .iter()
+            .filter(|style| style.rhythm.within_word_cv.is_some())
+            .map(|style| style.rhythm.within_word_n)
+            .sum();
+        values.push(sample(Component::Rhythm, value, n));
     }
     if let Some(value) = median(styles.iter().filter_map(|style| style.word_start.as_ref().map(|row| row.ratio))) {
-        values.push(ComponentValue::new(Component::Preview, value));
+        let n = styles.iter().filter_map(|style| style.word_start.as_ref().map(|row| row.n)).sum();
+        values.push(sample(Component::Preview, value, n));
     }
     if let Some(value) = median(styles.iter().filter_map(|style| style.rollover.as_ref().map(|row| row.rate * 100.0))) {
-        values.push(ComponentValue::new(Component::Overlap, value));
+        let n = styles
+            .iter()
+            .filter_map(|style| style.rollover.as_ref().map(|row| row.comparable_pairs))
+            .sum();
+        values.push(sample(Component::Overlap, value, n));
     }
     if let Some(value) = transition_loss_percent(&model, language, english_corpus, japanese_corpus) {
-        values.push(ComponentValue::new(Component::Transition, value));
+        let n = model.transitions.iter().map(|row| row.n).sum();
+        values.push(sample(Component::Transition, value, n));
     }
-    if let Some(value) = diagnose_errors(records, layout, geometry, options.model, as_of)
-        .post_error_slowdown
-        .map(|row| row.excess_ms)
-    {
-        values.push(ComponentValue::new(Component::Recovery, value));
+    if let Some(row) = diagnose_errors(records, layout, geometry, options.model, as_of).post_error_slowdown {
+        values.push(sample(Component::Recovery, row.excess_ms, row.post_n));
     }
     values
 }

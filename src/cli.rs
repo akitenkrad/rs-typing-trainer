@@ -9,6 +9,7 @@ use crate::i18n::Lang;
 
 #[derive(Debug, Default, Parser)]
 #[command(name = "rs-typing-trainer")]
+#[command(group = clap::ArgGroup::new("json_output").multiple(true))]
 pub struct Cli {
     /// Display language. Overrides the configuration file.
     #[arg(long, global = true, value_parser = parse_lang)]
@@ -23,11 +24,20 @@ pub struct Cli {
     pub graphics: Option<GraphicsPreference>,
 
     /// Print today's practice menu from the stats command.
-    #[arg(long = "menu", global = true)]
+    #[arg(long = "menu", global = true, group = "json_output")]
     pub stats_menu: bool,
 
-    /// Emit the practice menu as machine-readable JSON.
-    #[arg(long, global = true, requires = "stats_menu")]
+    /// Print the skill records of the practice menu's check steps and their
+    /// trends from the stats command.
+    #[arg(long = "skills", global = true, group = "json_output", conflicts_with = "stats_menu")]
+    pub stats_skills: bool,
+
+    /// Recompute every stored skill record from the keystroke logs.
+    #[arg(long = "rebuild-skills", global = true, conflicts_with_all = ["stats_menu", "stats_skills"])]
+    pub rebuild_skills: bool,
+
+    /// Emit the practice menu or the skill records as machine-readable JSON.
+    #[arg(long, global = true, requires = "json_output")]
     pub json: bool,
 
     #[command(subcommand)]
@@ -73,16 +83,16 @@ pub enum Command {
     /// Show typing statistics.
     Stats {
         /// Emit machine-readable CSV for one table.
-        #[arg(long, value_enum, conflicts_with_all = ["summary", "grades", "coach", "stats_menu"])]
+        #[arg(long, value_enum, conflicts_with_all = ["summary", "grades", "coach", "stats_menu", "stats_skills", "rebuild_skills"])]
         csv: Option<StatsCsv>,
         /// Print the same rule-based summary shown in the first analysis tab.
-        #[arg(long, conflicts_with_all = ["grades", "coach", "stats_menu"])]
+        #[arg(long, conflicts_with_all = ["grades", "coach", "stats_menu", "stats_skills", "rebuild_skills"])]
         summary: bool,
         /// Print absolute S-to-G skill grades.
-        #[arg(long, conflicts_with = "stats_menu")]
+        #[arg(long, conflicts_with_all = ["stats_menu", "stats_skills", "rebuild_skills"])]
         grades: bool,
         /// Print the same personalized report shown in the Coach tab.
-        #[arg(long, conflicts_with_all = ["summary", "grades", "stats_menu"])]
+        #[arg(long, conflicts_with_all = ["summary", "grades", "stats_menu", "stats_skills", "rebuild_skills"])]
         coach: bool,
         /// Include sessions on or after this date (YYYY-MM-DD).
         #[arg(long)]

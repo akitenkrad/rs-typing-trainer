@@ -233,3 +233,64 @@ fn export_rejects_v1_record_with_exit_code_one() {
     assert_eq!(output.status.code(), Some(1));
     assert!(String::from_utf8(output.stderr).unwrap().contains("no keystroke log"));
 }
+
+#[test]
+fn parses_stats_skills_and_rebuild_skills_and_rejects_other_output_modes() {
+    let cli = Cli::try_parse_from(["rs-typing-trainer", "stats", "--skills"]).unwrap();
+    assert!(cli.stats_skills);
+    assert!(!cli.json);
+    let cli = Cli::try_parse_from(["rs-typing-trainer", "stats", "--skills", "--json", "--lang", "ja"]).unwrap();
+    assert!(cli.stats_skills && cli.json);
+    let cli = Cli::try_parse_from(["rs-typing-trainer", "stats", "--rebuild-skills"]).unwrap();
+    assert!(cli.rebuild_skills);
+
+    // --json still needs --menu or --skills.
+    assert!(Cli::try_parse_from(["rs-typing-trainer", "stats", "--json"]).is_err());
+    assert!(Cli::try_parse_from(["rs-typing-trainer", "stats", "--rebuild-skills", "--json"]).is_err());
+    for other in [
+        &["--menu"][..],
+        &["--rebuild-skills"][..],
+        &["--summary"][..],
+        &["--grades"][..],
+        &["--coach"][..],
+        &["--csv", "sessions"][..],
+    ] {
+        let mut args = vec!["rs-typing-trainer", "stats", "--skills"];
+        args.extend_from_slice(other);
+        assert!(Cli::try_parse_from(&args).is_err(), "{args:?}");
+    }
+    assert!(Cli::try_parse_from(["rs-typing-trainer", "stats", "--rebuild-skills", "--summary"]).is_err());
+}
+
+#[test]
+fn skills_flags_are_rejected_outside_stats() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("sessions.db");
+    let config_path = dir.path().join("config.toml");
+    std::fs::write(&config_path, format!("[storage]\ndb_path = {:?}\n", db_path)).unwrap();
+    let output = ProcessCommand::new(env!("CARGO_BIN_EXE_rs-typing-trainer"))
+        .args(["--config", config_path.to_str().unwrap(), "--skills", "graphics"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(!db_path.exists());
+}
+
+#[test]
+fn stats_rebuild_skills_on_an_empty_database_reports_zero() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("sessions.db");
+    let config_path = dir.path().join("config.toml");
+    std::fs::write(&config_path, format!("[storage]\ndb_path = {:?}\n", db_path)).unwrap();
+    for _ in 0..2 {
+        let output = ProcessCommand::new(env!("CARGO_BIN_EXE_rs-typing-trainer"))
+            .args(["--lang", "ja", "--config", config_path.to_str().unwrap(), "stats", "--rebuild-skills"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap().trim(),
+            "スキルの記録を作り直しました: 0 回のメニュー，0 行"
+        );
+    }
+}

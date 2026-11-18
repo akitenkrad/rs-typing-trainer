@@ -3161,6 +3161,16 @@ impl App {
                 self.menu_step_reference = report.own.as_ref().and_then(|own| own.reference);
                 self.menu_step_others = report.others;
                 self.menu_step_deferral = report.deferred;
+                // §8.1: once the run's check step is recorded, (re)write its
+                // skill snapshots. They are derived from the keystroke logs
+                // and can be rebuilt (`stats --rebuild-skills`), so a failure
+                // is reported and the recorded step is kept.
+                if let Err(error) = crate::practice::menu::skills::record_run_snapshots(&context, run_id) {
+                    eprintln!(
+                        "{}: failed to record skill snapshots of menu run {run_id}: {error}",
+                        Msg::AppTitle.text(self.config.general.lang)
+                    );
+                }
             }
             Err(error) => self.last_save_error = Some(error.to_string()),
         }

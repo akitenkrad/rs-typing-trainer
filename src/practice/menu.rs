@@ -12,6 +12,7 @@ use crate::config::{Config, MenuConfig, ModeKind};
 use crate::i18n::Lang;
 
 pub mod progress;
+pub mod skills;
 
 pub const MENU_VERSION: &str = "menu-v1";
 const MENU_DATA: &str = include_str!("../../data/menu/menu-v1.toml");
