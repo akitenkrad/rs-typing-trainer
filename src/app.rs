@@ -16,8 +16,7 @@ use crate::analysis::prescription::{
     evaluate_stored_prescription, prescription_trends, real_word_records_since, record_prescription_session, select_controls,
 };
 use crate::bench::{
-    BenchPart, BenchResultSummary, BenchResume, BenchSettings, generate_parallel_versions_for_series, is_preferred_bench_series, next_parallel_index,
-    parse_bench_id, preferred_bench_series,
+    BenchPart, BenchResultSummary, BenchResume, BenchSettings, generate_parallel_versions_for_series, next_parallel_index, parse_bench_id,
 };
 use crate::config::{Config, KeyFilter, KeyboardConfig, ModeConfig, ModeKind, SessionConfig};
 use crate::data::{DataCatalog, DataKind, TrainingDataSource};
@@ -304,8 +303,6 @@ pub struct App {
     pub burst_series: BurstSeries,
     pub endurance_comparison: Option<EnduranceComparison>,
     pub recovery_metrics: RecoveryMetrics,
-    pub recommend_preview: bool,
-    pub recommend_rhythm: bool,
     pub daily_menu: Option<crate::practice::menu::DailyMenu>,
     pub menu_error: Option<String>,
     pub menu_selected: usize,
@@ -393,7 +390,6 @@ impl App {
 
     pub fn new_at(config: Config, home_dir: PathBuf, date: chrono::NaiveDate) -> Self {
         let mut app = Self::new_without_storage(config, home_dir, date);
-        app.refresh_recommendations();
         app.refresh_daily_menu();
         app
     }
@@ -497,8 +493,6 @@ impl App {
             burst_series: BurstSeries::default(),
             endurance_comparison: None,
             recovery_metrics: RecoveryMetrics::default(),
-            recommend_preview: false,
-            recommend_rhythm: false,
             daily_menu: None,
             menu_error: None,
             menu_selected: 0,
@@ -768,49 +762,6 @@ impl App {
 
     pub fn db_path(&self) -> PathBuf {
         self.config.resolve_db_path(&self.home_dir)
-    }
-
-    fn refresh_recommendations(&mut self) {
-        let records = db::load_records_filtered(&self.db_path(), None, None).unwrap_or_default();
-        let geometry = crate::layout::geometry::geometry(&self.config.keyboard.geometry).or_else(|| crate::layout::geometry::geometry("ansi"));
-        let Some(geometry) = geometry else { return };
-        let series = preferred_bench_series(records.iter().filter_map(|record| record.header.bench_id.as_deref()), BenchPart::A);
-        let bench_a = records
-            .iter()
-            .filter(|record| {
-                record
-                    .header
-                    .bench_id
-                    .as_deref()
-                    .and_then(parse_bench_id)
-                    .is_some_and(|(candidate_series, part, _)| {
-                        part == BenchPart::A && is_preferred_bench_series(candidate_series, BenchPart::A, series)
-                    })
-            })
-            .collect::<Vec<_>>();
-        let reaction_scores = bench_a
-            .iter()
-            .filter_map(|record| {
-                let details = analyze_records(
-                    std::slice::from_ref(*record),
-                    self.practice_layout(),
-                    &geometry,
-                    AnalysisSettings {
-                        pause_ms: self.config.analysis.pause_ms,
-                        shrinkage_k: self.config.analysis.shrinkage_k,
-                        half_life_days: self.config.analysis.half_life_days,
-                    },
-                );
-                (details.reaction_median_ms > 0.0).then_some(-details.reaction_median_ms)
-            })
-            .collect::<Vec<_>>();
-        self.recommend_preview = reaction_scores
-            .last()
-            .is_some_and(|latest| crate::practice::recommendations::recommend_preview(*latest, &reaction_scores));
-        let rhythm_scores = bench_a.iter().map(|record| -record.header.iki_cv).collect::<Vec<_>>();
-        self.recommend_rhythm = rhythm_scores
-            .last()
-            .is_some_and(|latest| crate::practice::rhythm::recommend_rhythm(*latest, &rhythm_scores));
     }
 
     fn refresh_daily_menu(&mut self) {
@@ -3227,7 +3178,6 @@ impl App {
             }
         }
         self.refresh_result_coaching(&record);
-        self.refresh_recommendations();
         let result_records = db::load_records_filtered(&db_path, None, None).unwrap_or_else(|_| vec![record.clone()]);
         self.result_comparison = build_result_comparison(&result_records, &record);
         self.result_record = Some(record);

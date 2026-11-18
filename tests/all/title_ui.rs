@@ -201,11 +201,9 @@ fn title_shows_database_copy_notice_in_both_languages() {
 }
 
 #[test]
-fn title_replaces_the_old_recommendations_with_one_introductory_menu_line_at_80_by_24() {
+fn title_lists_todays_training_without_the_old_hint_lines_at_80_by_24() {
     let mut app = test_app(Config::default());
     app.storage_notice = true;
-    app.recommend_preview = true;
-    app.recommend_rhythm = true;
     let terminal = render_app(&app);
     let rendered = terminal
         .backend()

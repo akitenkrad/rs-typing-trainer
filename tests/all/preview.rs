@@ -4,7 +4,6 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use rs_typing_trainer::config::{Config, ModeKind};
-use rs_typing_trainer::practice::recommendations::recommend_preview;
 use rs_typing_trainer::ui;
 
 use crate::common;
@@ -61,10 +60,4 @@ fn sentence_hide_typed_removes_the_completed_prefix() {
     let output = render(&app);
     assert!(output.contains("bcde"), "{output}");
     assert!(!output.contains("abcde"), "{output}");
-}
-
-#[test]
-fn preview_is_recommended_only_below_own_lower_quartile() {
-    assert!(recommend_preview(20.0, &[30.0, 40.0, 50.0, 60.0]));
-    assert!(!recommend_preview(45.0, &[30.0, 40.0, 50.0, 60.0]));
 }

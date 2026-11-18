@@ -38,20 +38,6 @@ pub fn median_beat_deviation_ms(bpm: f64, times: &[Duration]) -> f64 {
     median(&mut values)
 }
 
-pub fn recommend_rhythm(rhythm_axis: f64, own_axis_distribution: &[f64]) -> bool {
-    rhythm_axis < percentile(own_axis_distribution, 0.25)
-}
-
-fn percentile(values: &[f64], q: f64) -> f64 {
-    if values.is_empty() {
-        return 0.0;
-    }
-    let mut sorted = values.to_vec();
-    sorted.sort_by(f64::total_cmp);
-    let index = ((sorted.len() - 1) as f64 * q.clamp(0.0, 1.0)).floor() as usize;
-    sorted[index]
-}
-
 fn median(values: &mut [f64]) -> f64 {
     if values.is_empty() {
         return 0.0;

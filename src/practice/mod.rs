@@ -8,7 +8,6 @@ pub mod keyboard_fade;
 pub mod menu;
 pub mod pacer;
 pub mod reading_report;
-pub mod recommendations;
 pub mod recovery;
 pub mod review;
 pub mod rhythm;
