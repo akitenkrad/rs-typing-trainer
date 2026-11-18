@@ -1104,3 +1104,222 @@ fn blind_fade_reads_the_h5_keyboard_removable_mark() {
     let report = store.complete(day(1), run, 1, &check);
     assert_eq!(report.others[0].progress.unwrap().outcome, AdvanceOutcome::CannotDetermine);
 }
+
+// ---------------------------------------------------------------------------
+// MYTASK-3622 (design §5, 2026-11-18): the reference judgment of the
+// prescriptions outside the seven components.
+// ---------------------------------------------------------------------------
+
+use rs_typing_trainer::analysis::grades::Direction;
+use rs_typing_trainer::practice::menu::progress::{RunChange, run_steps_summary};
+use rs_typing_trainer::practice::menu::{RAW_REFERENCE_IMPROVEMENT_RATIO, RAW_REFERENCE_NO_CHANGE_RATIO, raw_reference_judgment};
+
+#[test]
+fn raw_reference_judgment_uses_relative_change_in_the_metric_direction() {
+    assert_eq!(RAW_REFERENCE_IMPROVEMENT_RATIO, 0.05);
+    assert_eq!(RAW_REFERENCE_NO_CHANGE_RATIO, 0.02);
+    let lower = Direction::Lower;
+    assert_eq!(
+        raw_reference_judgment(&[1.5, 1.5], &[1.2, 1.2, 1.2], lower),
+        ReferenceJudgment::InsufficientData
+    );
+    // 1.50 → 1.425 is exactly 5% smaller: improved for "smaller is better".
+    assert_eq!(
+        raw_reference_judgment(&[1.5, 1.5, 1.5], &[1.425, 1.425, 1.425], lower),
+        ReferenceJudgment::Improved
+    );
+    // The same change is a deterioration for "larger is better".
+    assert_eq!(
+        raw_reference_judgment(&[1.5, 1.5, 1.5], &[1.425, 1.425, 1.425], Direction::Higher),
+        ReferenceJudgment::Pending
+    );
+    assert_eq!(
+        raw_reference_judgment(&[1.5, 1.5, 1.5], &[1.44, 1.44, 1.44], lower),
+        ReferenceJudgment::Pending,
+        "4% is not enough"
+    );
+    // Five values within ±2% of the baseline median: no change.
+    assert_eq!(
+        raw_reference_judgment(&[1.5, 1.5, 1.5], &[1.52, 1.48, 1.51, 1.49, 1.5], lower),
+        ReferenceJudgment::NoChange
+    );
+    assert_eq!(
+        raw_reference_judgment(&[1.5, 1.5, 1.5], &[1.52, 1.48, 1.51, 1.5], lower),
+        ReferenceJudgment::Pending,
+        "four values are not yet «no change»"
+    );
+    assert_eq!(
+        raw_reference_judgment(&[1.5, 1.5, 1.5], &[1.54, 1.48, 1.51, 1.49, 1.5], lower),
+        ReferenceJudgment::Pending,
+        "one value outside ±2%"
+    );
+    // Missing values are skipped, not read as 0.
+    assert_eq!(
+        raw_reference_judgment(&[1.5, f64::NAN, 1.5], &[1.2, 1.2, 1.2], lower),
+        ReferenceJudgment::InsufficientData
+    );
+}
+
+const TEXT_REACH: &str = "a quick brown fox jumps over sad lazy dogs ";
+
+/// A session whose intervals come from `interval_ms(index, character)`.
+fn timed_session(
+    date: NaiveDate,
+    hour: u32,
+    mode: &str,
+    params: serde_json::Value,
+    chars: usize,
+    interval_ms: impl Fn(usize, char) -> u64,
+) -> SessionRecord {
+    let mut record = session(date, hour, "en", 40.0, chars);
+    let text = TEXT_REACH.repeat(chars / TEXT_REACH.len() + 1).chars().take(chars).collect::<String>();
+    let mut time_us = 100_000_u64;
+    for (index, (key, character)) in record.log.keystrokes.iter_mut().zip(text.chars()).enumerate() {
+        if index > 0 {
+            time_us += interval_ms(index, character) * 1_000;
+        }
+        key.t_us = time_us;
+        key.typed = Some(character.to_string());
+        key.expected = Some(character.to_string());
+    }
+    record.log.items[0].text = text;
+    record.log.items[0].done_us = Some(time_us);
+    record.log.duration_us = time_us;
+    record.header.mode = mode.to_owned();
+    record.header.mode_params = params.to_string();
+    record
+}
+
+/// Remote rows typed at `far_ms`, the home row at 200 ms.
+fn reach_session(date: NaiveDate, hour: u32, far_ms: u64) -> SessionRecord {
+    timed_session(date, hour, "sentence", serde_json::json!({ "lang": "en" }), 120, |_, character| {
+        if "asdfghjkl".contains(character) {
+            200
+        } else if character.is_alphabetic() {
+            far_ms
+        } else {
+            180
+        }
+    })
+}
+
+#[test]
+fn reach_is_judged_on_the_raw_ratio_of_the_check_steps() {
+    let store = Store::new();
+    for offset in 1..=3 {
+        let menu = plan(day(offset), vec![fixed_step(MenuRole::Check, Lang::En)]);
+        let run = run_for(&store.path, &menu, "en");
+        let check = saved(&store.path, reach_session(day(offset), 9, 300));
+        store.complete(day(offset), run, 0, &check);
+    }
+    let mut last = None;
+    for offset in 4..=6 {
+        let menu = plan(
+            day(offset),
+            vec![
+                prescription_step("reach.unlock", MenuRole::PrimaryA, Lang::En, 1),
+                fixed_step(MenuRole::Check, Lang::En),
+            ],
+        );
+        let run = run_for(&store.path, &menu, "en");
+        let step = saved(&store.path, reach_session(day(offset), 9, 260));
+        let check = saved(&store.path, reach_session(day(offset), 10, 255));
+        store.complete(day(offset), run, 0, &step);
+        let report = store.complete(day(offset), run, 1, &check);
+        let reference = report.others[0].reference;
+        if offset < 6 {
+            assert_eq!(reference, Some(ReferenceJudgment::InsufficientData), "day {offset}");
+        }
+        last = Some((run, reference));
+    }
+    let (run, reference) = last.unwrap();
+    // 300/200 → 255/200 is a 15% smaller ratio: improved.
+    assert_eq!(reference, Some(ReferenceJudgment::Improved));
+    assert_eq!(store.state("en", "reach.unlock").judgment, PrescriptionJudgment::Improved);
+    let summary = run_steps_summary(&store.path, "qwerty", run, Lang::Ja).unwrap().unwrap();
+    assert!(summary.changes.iter().any(|change| matches!(
+        change,
+        RunChange::Improved {
+            controlled: false,
+            assisted: false,
+            ..
+        }
+    )));
+}
+
+/// An endurance session whose second half is `slowdown` slower.
+fn endurance_session(date: NaiveDate, hour: u32, own_step: bool, slowdown: f64) -> SessionRecord {
+    let params = if own_step {
+        serde_json::json!({ "lang": "en", "menu_prescription_id": "endurance.split" })
+    } else {
+        serde_json::json!({ "lang": "en" })
+    };
+    let second = (150.0 * (1.0 + slowdown)).round() as u64;
+    timed_session(date, hour, "endurance", params, 200, |index, _| if index < 100 { 150 } else { second })
+}
+
+#[test]
+fn endurance_is_judged_on_its_own_assisted_steps_against_earlier_endurance_sessions() {
+    let store = Store::new();
+    for offset in 1..=3 {
+        saved(&store.path, endurance_session(day(offset), 9, false, 0.20));
+    }
+    let mut last = None;
+    for offset in 4..=6 {
+        let menu = plan(
+            day(offset),
+            vec![
+                prescription_step("endurance.split", MenuRole::PrimaryA, Lang::En, 1),
+                fixed_step(MenuRole::Check, Lang::En),
+            ],
+        );
+        let run = run_for(&store.path, &menu, "en");
+        let step = saved(&store.path, endurance_session(day(offset), 9, true, 0.10));
+        let check = saved(&store.path, session(day(offset), 10, "en", 40.0, 60));
+        store.complete(day(offset), run, 0, &step);
+        let report = store.complete(day(offset), run, 1, &check);
+        let reference = report.others[0].reference;
+        if offset < 6 {
+            assert_eq!(reference, Some(ReferenceJudgment::InsufficientData), "day {offset}");
+        }
+        last = Some((run, reference));
+    }
+    let (run, reference) = last.unwrap();
+    assert_eq!(reference, Some(ReferenceJudgment::Improved));
+    let summary = run_steps_summary(&store.path, "qwerty", run, Lang::Ja).unwrap().unwrap();
+    assert!(
+        summary
+            .changes
+            .iter()
+            .any(|change| matches!(change, RunChange::Improved { assisted: true, .. })),
+        "{:?}",
+        summary.changes
+    );
+}
+
+#[test]
+fn japanese_spelling_and_blind_fade_have_no_reference_judgment() {
+    for id in ["japanese.spelling", "blind.fade"] {
+        let store = Store::new();
+        let menu = plan(
+            day(1),
+            vec![
+                prescription_step(id, MenuRole::PrimaryA, Lang::En, 1),
+                fixed_step(MenuRole::Check, Lang::En),
+            ],
+        );
+        let run = run_for(&store.path, &menu, "en");
+        let step = saved(&store.path, session(day(1), 9, "en", 40.0, 60));
+        let check = saved(&store.path, session(day(1), 10, "en", 40.0, 60));
+        store.complete(day(1), run, 0, &step);
+        let report = store.complete(day(1), run, 1, &check);
+        assert_eq!(report.others[0].reference, Some(ReferenceJudgment::NotJudged), "{id}");
+        assert_eq!(store.state("en", id).judgment, PrescriptionJudgment::None, "{id}");
+        let summary = run_steps_summary(&store.path, "qwerty", run, Lang::Ja).unwrap().unwrap();
+        assert!(
+            summary.changes.iter().any(|change| matches!(change, RunChange::NoReference { .. })),
+            "{id}: {:?}",
+            summary.changes
+        );
+    }
+}

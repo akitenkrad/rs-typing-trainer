@@ -550,6 +550,14 @@ fn data_status(lines: &mut Vec<String>, records: &[SessionRecord], details: &Det
     });
 }
 
+/// The raw value of one skill axis for a single session, whether or not it is
+/// a benchmark session. `skill_axis_values` reads benchmark parts only; the
+/// practice menu judges `reach.*` on its check steps with this (design §5,
+/// MYTASK-3622).
+pub fn session_axis_value(axis: SkillAxis, record: &SessionRecord, layout: &KeyboardLayout, config: &Config) -> Option<f64> {
+    axis_value(axis, record, layout, config)
+}
+
 fn axis_value(axis: SkillAxis, record: &SessionRecord, layout: &KeyboardLayout, config: &Config) -> Option<f64> {
     match axis {
         SkillAxis::SustainedSpeed | SkillAxis::Japanese => Some(record.header.net_wpm),

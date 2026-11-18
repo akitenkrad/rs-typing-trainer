@@ -394,3 +394,48 @@ keys = ""
     assert_eq!(config.mode.kind, ModeKind::Random);
     assert!(config.mode.keys.is_empty());
 }
+
+/// MYTASK-3623: `[menu]` is part of the written configuration. Unset practice
+/// languages are not written, so they read back as "follow the display
+/// language"; set ones read back unchanged.
+#[test]
+fn menu_section_is_written_and_reads_back_to_the_same_settings() {
+    let default = toml::to_string(&Config::default()).unwrap();
+    assert!(default.contains("[menu]\nminutes = 15\n"), "{default}");
+    assert!(!default.contains("languages"), "{default}");
+    let read = Config::from_toml(&default).unwrap();
+    assert_eq!(read.menu, Config::default().menu);
+    assert_eq!(read.menu.languages, None);
+    assert_eq!(read.menu.practice_languages(Lang::Ja), vec![Lang::Ja], "follows the display language");
+
+    for languages in [vec![Lang::Ja], vec![Lang::En, Lang::Ja]] {
+        let mut config = Config::default();
+        config.menu.minutes = 20;
+        config.menu.languages = Some(languages.clone());
+        let written = toml::to_string(&config).unwrap();
+        let read = Config::from_toml(&written).unwrap();
+        assert_eq!(read.menu, config.menu, "{written}");
+        // The legacy v1 alias `characters.charset` is derived on read, so only
+        // the `[menu]` table is compared on the second round trip.
+        let menu_table = |raw: &str| raw.parse::<toml::Table>().unwrap()["menu"].clone();
+        assert_eq!(
+            menu_table(&toml::to_string(&read).unwrap()),
+            menu_table(&written),
+            "a second round trip is stable"
+        );
+    }
+}
+
+#[test]
+fn saving_settings_with_practice_languages_writes_a_menu_section_to_a_new_file() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("config.toml");
+    let mut config = Config::default();
+    config.menu.languages = Some(vec![Lang::Ja]);
+    rs_typing_trainer::config::save_settings(&path, &config).unwrap();
+
+    let written = fs::read_to_string(&path).unwrap();
+    assert!(written.contains("[menu]"), "{written}");
+    assert!(written.contains("languages = [\"ja\"]"), "{written}");
+    assert_eq!(Config::from_path(&path).unwrap().menu.languages, Some(vec![Lang::Ja]));
+}

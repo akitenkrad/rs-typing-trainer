@@ -277,6 +277,10 @@ pub struct AdvanceCondition {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PrescriptionLevel {
     pub mode: String,
+    /// Minutes of the step (§4.2, MYTASK-3619: the level's minutes are
+    /// authoritative). `0` means "not given": the step then takes the frame
+    /// default of its slot (4–5 or 7 minutes).
+    #[serde(default)]
     pub minutes: u8,
     #[serde(default)]
     pub settings: BTreeMap<String, toml::Value>,
@@ -391,8 +395,16 @@ impl MenuCatalog {
                 validate_settings(&level.settings, &owner)?;
                 level.focus.validate(&format!("{owner}.focus"))?;
                 level.advance.note.validate(&format!("{owner}.advance.note"))?;
-                if level.minutes == 0 || level.advance.sessions == 0 {
-                    return Err(format!("{owner} has invalid minutes or advance sessions"));
+                if level.advance.sessions == 0 {
+                    return Err(format!("{owner} has invalid advance sessions"));
+                }
+                // §4.2 (MYTASK-3619): a mode's own duration setting must not
+                // disagree with the step time.
+                if let Some(mode_minutes) = mode_duration_setting(&level.settings)
+                    && level.minutes != 0
+                    && i64::from(level.minutes) != mode_minutes
+                {
+                    return Err(format!("{owner} has minutes = {} but endurance.minutes = {mode_minutes}", level.minutes));
                 }
             }
         }
@@ -489,12 +501,40 @@ fn value_kind(value: &toml::Value) -> &'static str {
     }
 }
 
+/// The duration a mode keeps in its own setting (`endurance.minutes`), when a
+/// level sets it (§4.2, MYTASK-3619).
+fn mode_duration_setting(settings: &BTreeMap<String, toml::Value>) -> Option<i64> {
+    settings.get("endurance.minutes").and_then(toml::Value::as_integer)
+}
+
+/// Minutes of a prescription step (§4.2, MYTASK-3619): the catalog level's
+/// `minutes` is authoritative, and a mode's own duration setting
+/// (`endurance.minutes`) is kept in agreement with it. `frame` (the slot's
+/// 4–5 or 7 minutes) is used only when the level gives neither.
+pub fn level_minutes(level: &PrescriptionLevel, frame: u8) -> u8 {
+    if level.minutes > 0 {
+        return level.minutes;
+    }
+    mode_duration_setting(&level.settings)
+        .and_then(|minutes| u8::try_from(minutes).ok())
+        .filter(|minutes| *minutes > 0)
+        .unwrap_or(frame)
+}
+
+/// Setting keys under this prefix carry a step's practice target (§4.2,
+/// MYTASK-3618). They are not configuration keys: [`config_for_step`] skips
+/// them and the app reads them through [`StepTargets::of`].
+pub const TARGET_SETTING_PREFIX: &str = "target.";
+
 /// Apply one menu level to an in-memory configuration. This never writes the
 /// user's configuration file.
 pub fn config_for_step(base: &Config, mode: &str, settings: &BTreeMap<String, toml::Value>) -> Result<Config, String> {
     let mut value = toml::Value::try_from(base.clone()).map_err(|error| error.to_string())?;
     set_dotted_value(&mut value, "mode.kind", toml::Value::String(mode.to_owned()))?;
     for (key, setting) in settings {
+        if key.starts_with(TARGET_SETTING_PREFIX) {
+            continue;
+        }
         set_dotted_value(&mut value, key, setting.clone())?;
     }
     let raw = toml::to_string(&value).map_err(|error| error.to_string())?;
@@ -509,7 +549,307 @@ pub fn config_for_menu_step(base: &Config, step: &MenuStep) -> Result<Config, St
     config.adaptive.lang.clone_from(&language);
     config.mode.sentence.lang.clone_from(&language);
     config.mode.phrase.lang = language;
+    // §4.2 (MYTASK-3619): the endurance mode's own duration follows the step
+    // time, so the halves it compares match the session that was played.
+    if config.mode.kind == ModeKind::Endurance && (3..=5).contains(&u64::from(step.minutes)) {
+        config.endurance.minutes = u64::from(step.minutes);
+    }
     Ok(config)
+}
+
+/// The mode the prompt generator runs for a menu step. A Japanese step of a
+/// mode that draws from the English word pool (`words`, `ngram`, `unlock`,
+/// `rhythm`, `burst`) keeps its recorded mode but is fed Japanese words
+/// (`romaji` generation; M3).
+pub fn generator_kind_for_step(kind: ModeKind, language: Lang) -> ModeKind {
+    if language == Lang::Ja
+        && matches!(
+            kind,
+            ModeKind::Words | ModeKind::Ngram | ModeKind::Unlock | ModeKind::Rhythm | ModeKind::Burst
+        )
+    {
+        ModeKind::Romaji
+    } else {
+        kind
+    }
+}
+
+/// Design §4.2 / §11 (MYTASK-3618): a step whose target narrows the word pool
+/// keeps the narrowing only while at least this many words contain the
+/// target. Below it the narrowing is relaxed (the same bound under which the
+/// prompt generator warns that items may repeat).
+pub const MIN_TARGET_WORDS: usize = 20;
+
+/// The romaji spelling a `japanese.spelling` step practices (§4.2).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SpellingTarget {
+    pub kana: String,
+    pub current: String,
+    pub candidate: String,
+}
+
+impl SpellingTarget {
+    /// The same wording as the coach's spelling suggestion.
+    pub fn label(&self) -> String {
+        format!("{}: {} → {}", self.kana, self.current, self.candidate)
+    }
+}
+
+/// Per-language targets that prescriptions put into their prompts (§4.2,
+/// MYTASK-3618).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LanguageTargets {
+    /// The weak transitions `transition.adaptive` selects from the player
+    /// model of the language (its focus), as `(from, to)`.
+    pub transitions: Vec<(String, String)>,
+    /// The suggested romaji spelling, when the analysis has one.
+    pub spelling: Option<SpellingTarget>,
+}
+
+/// The practice target stored in a step's settings (§4.2, MYTASK-3618).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StepTargets {
+    /// Target transitions as the two characters joined (`"th"`).
+    pub transitions: Vec<String>,
+    pub spelling: Option<SpellingTarget>,
+    /// Too few words contained the target, so the word pool is not narrowed.
+    pub relaxed: bool,
+}
+
+impl StepTargets {
+    pub fn of(step: &MenuStep) -> Self {
+        let transitions = step
+            .settings
+            .get("target.transitions")
+            .and_then(toml::Value::as_array)
+            .map(|values| values.iter().filter_map(toml::Value::as_str).map(str::to_owned).collect())
+            .unwrap_or_default();
+        let spelling = step.settings.get("target.spelling").and_then(toml::Value::as_table).and_then(|table| {
+            let text = |key: &str| table.get(key).and_then(toml::Value::as_str).map(str::to_owned);
+            Some(SpellingTarget {
+                kana: text("kana")?,
+                current: text("current")?,
+                candidate: text("candidate")?,
+            })
+        });
+        let relaxed = step.settings.get("target.relaxed").and_then(toml::Value::as_bool).unwrap_or(false);
+        Self {
+            transitions,
+            spelling,
+            relaxed,
+        }
+    }
+
+    fn narrows_words(&self) -> bool {
+        !self.transitions.is_empty() || self.spelling.is_some()
+    }
+}
+
+/// The keys of the remote rows (top and bottom letter rows) of a layout; the
+/// target of `reach.unlock` (§4.2, MYTASK-3618).
+pub fn remote_row_keys(layout: &crate::layout::KeyboardLayout) -> String {
+    const REMOTE_CODES: [&str; 17] = [
+        "KeyQ", "KeyW", "KeyE", "KeyR", "KeyT", "KeyY", "KeyU", "KeyI", "KeyO", "KeyP", "KeyZ", "KeyX", "KeyC", "KeyV", "KeyB", "KeyN", "KeyM",
+    ];
+    let mut keys = String::new();
+    for code in REMOTE_CODES {
+        if let Some(character) = layout.key(code).map(|pair| pair.normal)
+            && character.is_alphabetic()
+            && !keys.contains(character)
+        {
+            keys.push(character);
+        }
+    }
+    keys
+}
+
+/// The word pool a step's prompts are drawn from, when its target narrows
+/// words (English words, or Japanese words for a Japanese step).
+fn target_word_kind(step: &MenuStep) -> Option<crate::data::DataKind> {
+    let kind = mode_kind(&step.mode)?;
+    match generator_kind_for_step(kind, step.language) {
+        ModeKind::Romaji => Some(crate::data::DataKind::JapaneseWord),
+        ModeKind::Words | ModeKind::Unlock | ModeKind::Rhythm | ModeKind::Burst => Some(crate::data::DataKind::EnglishWord),
+        _ => None,
+    }
+}
+
+/// Keys (`DataItem::key`) of the words that contain the step's target, or
+/// `None` when the step does not narrow its word pool.
+fn target_word_keys(catalog: &crate::data::DataCatalog, step: &MenuStep, targets: &StepTargets) -> Option<std::collections::HashSet<String>> {
+    if !targets.narrows_words() {
+        return None;
+    }
+    let kind = target_word_kind(step)?;
+    let keys = catalog
+        .fixed_items(kind)
+        .into_iter()
+        .filter(|item| {
+            let typed = match &item.reading {
+                Some(reading) => crate::engine::romaji::RomajiJudge::new(reading).guide().to_owned(),
+                None => item.text.clone(),
+            };
+            let transition = targets.transitions.iter().any(|pair| typed.contains(pair.as_str()));
+            let spelling = targets
+                .spelling
+                .as_ref()
+                .is_some_and(|spelling| item.reading.as_deref().is_some_and(|reading| reading.contains(spelling.kana.as_str())));
+            transition || spelling
+        })
+        .map(|item| item.key.clone())
+        .collect::<std::collections::HashSet<_>>();
+    Some(keys)
+}
+
+/// Narrow a catalog to the words that contain a menu step's target (§4.2,
+/// MYTASK-3618), reusing the daily-deck narrowing (`retain_kind_keys`). Does
+/// nothing when the step has no word target, when the target was relaxed, or
+/// when no word contains it. Returns whether the catalog was narrowed.
+pub fn restrict_catalog_to_step_targets(catalog: &mut crate::data::DataCatalog, step: &MenuStep) -> bool {
+    let targets = StepTargets::of(step);
+    if targets.relaxed {
+        return false;
+    }
+    let (Some(kind), Some(keys)) = (target_word_kind(step), target_word_keys(catalog, step, &targets)) else {
+        return false;
+    };
+    if keys.is_empty() {
+        return false;
+    }
+    catalog.retain_kind_keys(kind, &keys);
+    true
+}
+
+/// Number of prompts the generator would draw a step from, after the target
+/// narrowing; the same generator and settings the app uses.
+fn target_candidate_count(
+    catalog: &crate::data::DataCatalog,
+    layout: &crate::layout::KeyboardLayout,
+    base: &Config,
+    step: &MenuStep,
+) -> Result<usize, String> {
+    let mut config = config_for_menu_step(base, step)?;
+    config.mode.kind = generator_kind_for_step(config.mode.kind, step.language);
+    let mut catalog = catalog.clone();
+    if let (Some(kind), Some(keys)) = (target_word_kind(step), target_word_keys(&catalog, step, &StepTargets::of(step))) {
+        if keys.is_empty() {
+            return Ok(0);
+        }
+        catalog.retain_kind_keys(kind, &keys);
+    }
+    Ok(crate::engine::modes::ModeGenerator::new(config.mode, catalog, layout.clone(), 0).original_candidate_count())
+}
+
+/// Put each prescription's target into its step (§4.2, MYTASK-3618).
+/// `targets` is keyed by language code (`"en"`, `"ja"`).
+///
+/// - `reach.unlock`: the remote-row keys become `mode.keys`, so its `only` /
+///   `include` filter prefers words with them;
+/// - `transition.adaptive` level ③ (`words`) and `transition.ngram`: the
+///   language's target transitions; their keys become `mode.keys` and words
+///   are narrowed to the ones containing a target transition;
+/// - `japanese.spelling`: words containing the kana of the suggested
+///   spelling, and the suggestion is shown in the focus and the reason.
+///
+/// A word target with fewer than [`MIN_TARGET_WORDS`] matching prompts is
+/// relaxed (no narrowing, `include` instead of `only`) and the reason says so.
+pub fn apply_step_targets(
+    menu: &mut DailyMenu,
+    targets: &BTreeMap<String, LanguageTargets>,
+    catalog: &crate::data::DataCatalog,
+    layout: &crate::layout::KeyboardLayout,
+    base: &Config,
+    display: Lang,
+) -> Result<(), String> {
+    let empty = LanguageTargets::default();
+    for step in menu
+        .steps
+        .iter_mut()
+        .filter(|step| matches!(step.role, MenuRole::PrimaryA | MenuRole::PrimaryB))
+    {
+        let language = targets.get(language_code(step.language)).unwrap_or(&empty);
+        let mut has_target = false;
+        match step.prescription_id.as_str() {
+            "reach.unlock" => {
+                let keys = remote_row_keys(layout);
+                if !keys.is_empty() {
+                    step.settings.insert("mode.keys".to_owned(), toml::Value::String(keys));
+                    has_target = true;
+                }
+            }
+            "transition.adaptive" | "transition.ngram" if matches!(step.mode.as_str(), "words" | "ngram") => {
+                if language.transitions.is_empty() {
+                    if step.mode == "words" {
+                        // No target yet: do not let the free-play key
+                        // selection filter the words instead.
+                        step.settings.insert("mode.keys".to_owned(), toml::Value::String(String::new()));
+                    }
+                    step.reason.push_str(match display {
+                        Lang::En => "; no target transition yet",
+                        Lang::Ja => "；対象の遷移はまだない",
+                    });
+                } else {
+                    let mut keys = String::new();
+                    for character in language.transitions.iter().flat_map(|(from, to)| from.chars().chain(to.chars())) {
+                        if !keys.contains(character) {
+                            keys.push(character);
+                        }
+                    }
+                    let pairs = language.transitions.iter().map(|(from, to)| format!("{from}{to}")).collect::<Vec<_>>();
+                    step.settings.insert("mode.keys".to_owned(), toml::Value::String(keys));
+                    step.settings.insert(
+                        "target.transitions".to_owned(),
+                        toml::Value::Array(pairs.iter().cloned().map(toml::Value::String).collect()),
+                    );
+                    step.reason.push_str(&match display {
+                        Lang::En => format!("; target transitions {}", pairs.join(" ")),
+                        Lang::Ja => format!("；対象の遷移 {}", pairs.join(" ")),
+                    });
+                    has_target = true;
+                }
+            }
+            "japanese.spelling" => {
+                if let Some(spelling) = &language.spelling {
+                    let label = spelling.label();
+                    step.focus.push_str(&match display {
+                        Lang::En => format!(" ({label})"),
+                        Lang::Ja => format!("（{label}）"),
+                    });
+                    step.reason.push_str(&match display {
+                        Lang::En => format!("; suggested spelling {label}"),
+                        Lang::Ja => format!("；勧めた綴り {label}"),
+                    });
+                    if step.mode == "romaji" {
+                        let mut table = toml::map::Map::new();
+                        table.insert("kana".to_owned(), toml::Value::String(spelling.kana.clone()));
+                        table.insert("current".to_owned(), toml::Value::String(spelling.current.clone()));
+                        table.insert("candidate".to_owned(), toml::Value::String(spelling.candidate.clone()));
+                        step.settings.insert("target.spelling".to_owned(), toml::Value::Table(table));
+                        step.settings
+                            .insert("mode.keys".to_owned(), toml::Value::String(spelling.candidate.clone()));
+                        has_target = true;
+                    }
+                }
+            }
+            _ => {}
+        }
+        if !has_target || target_word_kind(step).is_none() {
+            continue;
+        }
+        let count = target_candidate_count(catalog, layout, base, step)?;
+        if count < MIN_TARGET_WORDS {
+            step.settings.insert("target.relaxed".to_owned(), toml::Value::Boolean(true));
+            if step.settings.get("mode.key_filter").and_then(toml::Value::as_str) == Some("only") {
+                step.settings
+                    .insert("mode.key_filter".to_owned(), toml::Value::String("include".to_owned()));
+            }
+            step.reason.push_str(&match display {
+                Lang::En => format!("; only {count} words contain the target, so the narrowing is relaxed"),
+                Lang::Ja => format!("；対象を含む語が {count} 語しかないため絞り込みを緩めた"),
+            });
+        }
+    }
+    Ok(())
 }
 
 fn set_dotted_value(root: &mut toml::Value, path: &str, setting: toml::Value) -> Result<(), String> {
@@ -545,6 +885,10 @@ pub struct MenuBuildInput {
     pub japanese_percentile: Option<f64>,
     pub has_spelling_suggestion: bool,
     pub endurance_break_recommended: bool,
+    /// §4.1 4 (MYTASK-3621): the keyboard display is shown in the settings
+    /// (`keyboard.show` is not `hidden` and `session.blind` is off) and the H5
+    /// assistance comparison marks it removable for this language.
+    pub blind_assistance_removable: bool,
     /// Display-only context for preview prescriptions; never used for ranking.
     pub reaction_ms: Option<f64>,
     /// Display-only context for preview prescriptions; never used for ranking.
@@ -678,6 +1022,8 @@ pub enum ReferenceJudgment {
     Pending,
     Improved,
     NoChange,
+    /// The prescription has no reference judgment (§5, MYTASK-3622).
+    NotJudged,
 }
 
 /// Design §5: a direction-normalized component score must improve by 0.3.
@@ -764,6 +1110,79 @@ pub fn apply_maintenance_recheck(state: &mut PrescriptionProgress, date: NaiveDa
     }
 }
 
+/// What the reference judgment of a prescription compares (§5).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReferenceBasis {
+    /// `transition.*`: the controlled R3 verdict, not a reference judgment.
+    R3,
+    /// The 0–8 score of one of the seven components on the check steps.
+    ComponentScore(Component),
+    /// The raw `advance.metric` on the check steps (`reach.*`, MYTASK-3622).
+    RawCheck,
+    /// The raw `advance.metric` on the prescription step itself, which is
+    /// assisted (`endurance.*`, MYTASK-3622).
+    AssistedStep,
+    /// Not judged (`japanese.spelling`, `blind.fade`; MYTASK-3622).
+    NotJudged,
+}
+
+pub fn reference_basis(prescription: &MenuPrescription) -> ReferenceBasis {
+    if prescription.component == MenuComponent::Transition {
+        return ReferenceBasis::R3;
+    }
+    if let Some(component) = grade_component_for_menu_component(prescription.component) {
+        return ReferenceBasis::ComponentScore(component);
+    }
+    match prescription.component {
+        MenuComponent::Reach | MenuComponent::Endurance => match prescription.levels.first().map(|level| level.advance.source) {
+            Some(AdvanceSource::Check) => ReferenceBasis::RawCheck,
+            Some(AdvanceSource::Step) => ReferenceBasis::AssistedStep,
+            None => ReferenceBasis::NotJudged,
+        },
+        _ => ReferenceBasis::NotJudged,
+    }
+}
+
+/// Design §5 (MYTASK-3622): a raw value must improve by 5% in its direction.
+pub const RAW_REFERENCE_IMPROVEMENT_RATIO: f64 = 0.05;
+/// Design §5 (MYTASK-3622): raw changes strictly inside ±2% count as unchanged.
+pub const RAW_REFERENCE_NO_CHANGE_RATIO: f64 = 0.02;
+
+/// Design §5 (MYTASK-3622): the reference judgment on a raw `advance.metric`
+/// value for prescriptions outside the seven components. The medians of the
+/// three values before the prescription and of the latest three after it are
+/// compared as a relative change of the baseline median, signed so that a
+/// positive change is an improvement in `direction` (the reach IKI ratio and
+/// the endurance second-half slowdown are better when smaller). A zero
+/// baseline has no relative change and stays pending.
+pub fn raw_reference_judgment(baseline: &[f64], after: &[f64], direction: Direction) -> ReferenceJudgment {
+    let baseline = baseline.iter().copied().filter(|value| value.is_finite()).collect::<Vec<_>>();
+    let after = after.iter().copied().filter(|value| value.is_finite()).collect::<Vec<_>>();
+    if baseline.len() < 3 || after.len() < 3 {
+        return ReferenceJudgment::InsufficientData;
+    }
+    let base = median(&baseline[baseline.len() - 3..]);
+    if base.abs() <= f64::EPSILON {
+        return ReferenceJudgment::Pending;
+    }
+    let improvement = |value: f64| match direction {
+        Direction::Lower => (base - value) / base.abs(),
+        Direction::Higher => (value - base) / base.abs(),
+    };
+    let recent = median(&after[after.len() - 3..]);
+    if improvement(recent) + f64::EPSILON >= RAW_REFERENCE_IMPROVEMENT_RATIO {
+        return ReferenceJudgment::Improved;
+    }
+    if after.len() >= REFERENCE_NO_CHANGE_RUN
+        && after[after.len() - REFERENCE_NO_CHANGE_RUN..]
+            .iter()
+            .all(|value| improvement(*value).abs() < RAW_REFERENCE_NO_CHANGE_RATIO)
+    {
+        return ReferenceJudgment::NoChange;
+    }
+    ReferenceJudgment::Pending
+}
+
 pub fn reference_judgment(baseline: &[f64], after: &[f64]) -> ReferenceJudgment {
     let baseline = baseline.iter().copied().filter(|value| value.is_finite()).collect::<Vec<_>>();
     let after = after.iter().copied().filter(|value| value.is_finite()).collect::<Vec<_>>();
@@ -799,7 +1218,7 @@ pub fn apply_reference_judgment(
                 state.paused_until = date.checked_add_signed(chrono::Duration::days(MENU_RECHECK_DAYS));
             }
         }
-        ReferenceJudgment::InsufficientData | ReferenceJudgment::Pending => {}
+        ReferenceJudgment::InsufficientData | ReferenceJudgment::Pending | ReferenceJudgment::NotJudged => {}
     }
 }
 
@@ -844,6 +1263,15 @@ pub struct DailyMenu {
     pub steps: Vec<MenuStep>,
 }
 
+impl DailyMenu {
+    /// The actual length of the menu (§4.2, MYTASK-3619). Prescription steps
+    /// take their catalog level's minutes, so this can differ from
+    /// `requested_minutes`; the difference is not redistributed.
+    pub fn total_minutes(&self) -> u32 {
+        self.steps.iter().map(|step| u32::from(step.minutes)).sum()
+    }
+}
+
 pub fn build_menu(
     catalog: &MenuCatalog,
     input: &MenuBuildInput,
@@ -869,6 +1297,8 @@ struct CandidateChoice {
     prescription_id: String,
     component: MenuComponent,
     overall_gain: f64,
+    /// Added only to fill the slots after maintenance was removed (§4.1 5).
+    filler: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -1033,17 +1463,16 @@ fn build_language_plan<'a>(catalog: &MenuCatalog, source: &'a MenuLanguageInput,
         candidates.retain(|component| *component != MenuComponent::Accuracy);
     }
 
-    let top_candidates_maintenance = !candidates.is_empty()
-        && candidates
-            .iter()
-            .take(2)
-            .all(|component| component_is_maintenance(catalog, *component, &source.states));
+    // §4.1 5 (MYTASK-3620): a prescription in maintenance is not a candidate
+    // (§3.1). Earlier versions only moved it down one place.
+    candidates.retain(|component| !component_in_maintenance(catalog, *component, &source.states));
+    let fewer_than_two = candidates.len() < 2;
     let weakest_grade_percentile = grade.components.iter().map(|row| row.score * 12.5).min_by(f64::total_cmp);
-    if top_candidates_maintenance && input.endurance_break_recommended {
+    if fewer_than_two && input.endurance_break_recommended {
         candidates.insert(0, MenuComponent::Endurance);
     }
     if input.has_spelling_suggestion
-        && (top_candidates_maintenance
+        && (fewer_than_two
             || input
                 .japanese_percentile
                 .zip(weakest_grade_percentile)
@@ -1052,13 +1481,18 @@ fn build_language_plan<'a>(catalog: &MenuCatalog, source: &'a MenuLanguageInput,
         candidates.insert(0, MenuComponent::Japanese);
     }
     if input.reach_percentile.is_some_and(|percentile| percentile < 25.0)
-        && (top_candidates_maintenance
+        && (fewer_than_two
             || input
                 .reach_percentile
                 .zip(weakest_grade_percentile)
                 .is_some_and(|(reach, weakest)| reach < weakest))
     {
         candidates.insert(0, MenuComponent::Reach);
+    }
+    // §4.1 4 (MYTASK-3621): removing the keyboard display only takes away an
+    // aid, so it goes to the front as soon as H5 marks it removable.
+    if input.blind_assistance_removable {
+        candidates.insert(0, MenuComponent::Blind);
     }
 
     let language_history = history
@@ -1068,7 +1502,7 @@ fn build_language_plan<'a>(catalog: &MenuCatalog, source: &'a MenuLanguageInput,
         .collect::<Vec<_>>();
     let repeated = repeated_components(catalog, input.as_of, &language_history);
     for component in MenuComponent::from_grade_components() {
-        if repeated.contains(&component) || component_is_maintenance(catalog, component, &source.states) {
+        if repeated.contains(&component) {
             demote_once(&mut candidates, component);
         }
     }
@@ -1081,6 +1515,7 @@ fn build_language_plan<'a>(catalog: &MenuCatalog, source: &'a MenuLanguageInput,
             prescription_id: row.0.id.clone(),
             component: row.3,
             overall_gain: f64::INFINITY,
+            filler: false,
         });
     }
     for component in candidates {
@@ -1091,6 +1526,9 @@ fn build_language_plan<'a>(catalog: &MenuCatalog, source: &'a MenuLanguageInput,
         let Some(row) = available_prescription(catalog, id, &source.states) else {
             continue;
         };
+        if prescription_in_maintenance(&row.0.id, &source.states) {
+            continue;
+        }
         if selected.iter().all(|selected| selected.component != row.0.component) {
             let overall_gain = opportunities
                 .iter()
@@ -1100,8 +1538,23 @@ fn build_language_plan<'a>(catalog: &MenuCatalog, source: &'a MenuLanguageInput,
                 prescription_id: row.0.id.clone(),
                 component: row.3,
                 overall_gain,
+                filler: false,
             });
         }
+    }
+    // §4.1 5 (MYTASK-3620): when removing maintenance leaves too few
+    // candidates, fill with `transition.adaptive`.
+    if selected.len() < 2
+        && selected.iter().all(|selected| selected.component != MenuComponent::Transition)
+        && let Some(row) = available_prescription(catalog, "transition.adaptive", &source.states)
+        && !prescription_in_maintenance(&row.0.id, &source.states)
+    {
+        selected.push(CandidateChoice {
+            prescription_id: row.0.id.clone(),
+            component: row.3,
+            overall_gain: 0.0,
+            filler: true,
+        });
     }
     Ok(LanguagePlan {
         source,
@@ -1308,6 +1761,18 @@ fn prescription_step_with_reason(
     reason: &str,
 ) -> MenuStep {
     let (prescription, level, level_number, _) = selected;
+    let mut advance = level.advance.note.text(display).to_owned();
+    match reference_basis(prescription) {
+        ReferenceBasis::NotJudged => advance.push_str(match display {
+            Lang::En => " (no reference judgment)",
+            Lang::Ja => "（参考の判定なし）",
+        }),
+        ReferenceBasis::AssistedStep => advance.push_str(match display {
+            Lang::En => " (reference judgment uses this assisted step, so it is weaker still)",
+            Lang::Ja => "（参考の判定は補助つきの段の値．参考の度合いがさらに弱い）",
+        }),
+        ReferenceBasis::R3 | ReferenceBasis::ComponentScore(_) | ReferenceBasis::RawCheck => {}
+    }
     MenuStep {
         role,
         language: practice,
@@ -1318,7 +1783,7 @@ fn prescription_step_with_reason(
         minutes,
         reason: reason.to_owned(),
         focus: level.focus.text(display).to_owned(),
-        advance: level.advance.note.text(display).to_owned(),
+        advance,
         advance_condition: Some(level.advance.clone()),
         evidence: Some(prescription.evidence.label(display).to_owned()),
         evidence_note: Some(prescription.evidence_note.text(display).to_owned()),
@@ -1347,7 +1812,7 @@ fn primary_step(
         let mut step = prescription_step(
             &selected,
             role,
-            minutes,
+            level_minutes(selected.1, minutes),
             grade,
             &plan.source.input,
             StepLanguage {
@@ -1365,6 +1830,18 @@ fn primary_step(
             step.reason.push_str(match display {
                 Lang::En => "; improved (reference only; no control)",
                 Lang::Ja => "；改善（参考．対照なし）",
+            });
+            if reference_basis(selected.0) == ReferenceBasis::AssistedStep {
+                step.reason.push_str(match display {
+                    Lang::En => "; from the assisted step itself",
+                    Lang::Ja => "．補助つきの段の値",
+                });
+            }
+        }
+        if candidate.filler {
+            step.reason.push_str(match display {
+                Lang::En => "; fills the slot (too few candidates after removing maintenance)",
+                Lang::Ja => "；維持を除くと候補が足りないため遷移で埋める",
             });
         }
         return Ok(step);
@@ -1608,12 +2085,14 @@ fn available_prescription<'a>(
     }
 }
 
-fn component_is_maintenance(catalog: &MenuCatalog, component: MenuComponent, states: &BTreeMap<String, PrescriptionState>) -> bool {
+fn prescription_in_maintenance(id: &str, states: &BTreeMap<String, PrescriptionState>) -> bool {
+    states.get(id).is_some_and(|state| state.judgment == PrescriptionJudgment::Maintenance)
+}
+
+/// The prescription a component would use is in maintenance (§3.1, §4.1 5).
+fn component_in_maintenance(catalog: &MenuCatalog, component: MenuComponent, states: &BTreeMap<String, PrescriptionState>) -> bool {
     let Some(id) = default_prescription_id(component) else { return false };
-    let Some(row) = catalog.prescription(id) else { return false };
-    states
-        .get(&row.id)
-        .is_some_and(|state| state.judgment == PrescriptionJudgment::Maintenance)
+    available_prescription(catalog, id, states).is_some_and(|row| prescription_in_maintenance(&row.0.id, states))
 }
 
 fn repeated_components(catalog: &MenuCatalog, as_of: NaiveDate, history: &[PastMenu]) -> BTreeSet<MenuComponent> {
@@ -1703,7 +2182,20 @@ pub fn build_from_storage(
         corpus.words_en(),
         corpus.words_ja(),
     );
-    let r3_ineffective = db::load_prescriptions(path)?
+    let prescription_rows = db::load_prescriptions(path)?;
+    let excluded_controls = crate::analysis::prescription::prescription_trends(&prescription_rows, at).controls;
+    let judge_context = progress::JudgeContext {
+        db_path: path,
+        home,
+        config,
+        layout: &layout,
+        as_of,
+    };
+    // §4.1 4 (MYTASK-3621): `blind.fade` is a candidate only while the
+    // keyboard display is actually shown.
+    let keyboard_shown = config.keyboard.show != "hidden" && !config.session.blind;
+    let mut language_targets = BTreeMap::<String, LanguageTargets>::new();
+    let r3_ineffective = prescription_rows
         .iter()
         .rev()
         .find(|row| progress::is_r3_adaptive_kind(&row.kind))
@@ -1775,6 +2267,24 @@ pub fn build_from_storage(
             .find(|record| record.header.mode == "endurance")
             .is_some_and(|record| crate::practice::session_variants::compare_endurance_log(&record.log).warn);
         let details = analyze_records(&language_records, &layout, &keyboard_geometry, model);
+        language_targets.insert(
+            language.to_owned(),
+            LanguageTargets {
+                transitions: target_transitions(&details, &corpus, practice, config, &excluded_controls),
+                spelling: diagnosis
+                    .japanese
+                    .spelling
+                    .iter()
+                    .find(|row| row.decision == SpellingDecision::Suggested)
+                    .map(|row| SpellingTarget {
+                        kana: row.kana.clone(),
+                        current: row.current.clone(),
+                        candidate: row.candidate.clone(),
+                    }),
+            },
+        );
+        let blind_assistance_removable =
+            keyboard_shown && progress::blind_assistance_value(&judge_context, language)?.is_some_and(|value| value >= 1.0);
         let reaction_median_ms = (details.reaction_median_ms > 0.0).then_some(details.reaction_median_ms);
         let reaction_ms = language_records.last().and_then(|record| {
             let details = analyze_records(std::slice::from_ref(record), &layout, &keyboard_geometry, model);
@@ -1797,6 +2307,7 @@ pub fn build_from_storage(
                 japanese_percentile,
                 has_spelling_suggestion,
                 endurance_break_recommended,
+                blind_assistance_removable,
                 reaction_ms,
                 reaction_median_ms,
                 last_bench_date,
@@ -1804,7 +2315,60 @@ pub fn build_from_storage(
             states,
         });
     }
-    build_menu_for_languages(bundled_catalog().map_err(AppError::Record)?, &inputs, display, &config.menu, &history).map_err(AppError::Record)
+    let mut menu =
+        build_menu_for_languages(bundled_catalog().map_err(AppError::Record)?, &inputs, display, &config.menu, &history).map_err(AppError::Record)?;
+    apply_step_targets(&mut menu, &language_targets, &corpus, &layout, config, display).map_err(AppError::Record)?;
+    Ok(menu)
+}
+
+/// The weak transitions `transition.adaptive` selects for one language (its
+/// focus, §4.2 MYTASK-3618), computed by the adaptive planner with a fixed
+/// seed so the day's menu is reproducible. Transitions held out as R3
+/// controls are never targets, and only letter-to-letter transitions are
+/// kept (words and n-gram drills cannot target a space).
+fn target_transitions(
+    details: &crate::analysis::metrics::DetailedMetrics,
+    corpus: &crate::data::DataCatalog,
+    language: Lang,
+    config: &Config,
+    excluded_controls: &[(String, String)],
+) -> Vec<(String, String)> {
+    use crate::data::TrainingDataSource;
+    use crate::practice::adaptive::{AdaptiveHistory, AdaptiveOptions, build_plan_seeded};
+
+    let words = match language {
+        Lang::En => corpus.words_en().to_vec(),
+        Lang::Ja => corpus
+            .words_ja()
+            .iter()
+            .map(|item| crate::engine::romaji::RomajiJudge::new(&item.reading).guide().to_owned())
+            .collect(),
+    };
+    let plan = build_plan_seeded(
+        details,
+        &words,
+        AdaptiveOptions {
+            error_weight_ms: config.adaptive.error_weight,
+            drill_ratio: config.adaptive.drill_ratio,
+            min_transition_types: 50,
+            min_transition_n: config.analysis.min_transition_n,
+            max_share: config.adaptive.max_share,
+        },
+        &[],
+        0,
+        &AdaptiveHistory {
+            excluded_controls: excluded_controls.to_vec(),
+            ..AdaptiveHistory::default()
+        },
+    );
+    if plan.fallback_to_words {
+        return Vec::new();
+    }
+    let letter = |value: &str| {
+        let mut characters = value.chars();
+        characters.next().is_some_and(char::is_alphabetic) && characters.next().is_none()
+    };
+    plan.focus().into_iter().filter(|(from, to)| letter(from) && letter(to)).collect()
 }
 
 /// Bench reference prompts used to correct WPM for difficulty (shared by the
@@ -1887,19 +2451,32 @@ pub fn render_from_storage(
     }
 }
 
+/// "13 min (set: 15)" — the actual total, with `[menu] minutes` only when
+/// the two differ (§4.2, MYTASK-3619).
+pub fn minutes_label(menu: &DailyMenu, lang: Lang) -> String {
+    let total = menu.total_minutes();
+    let requested = u32::from(menu.requested_minutes);
+    match (lang, total == requested) {
+        (Lang::En, true) => format!("{total} min"),
+        (Lang::En, false) => format!("{total} min (set: {requested})"),
+        (Lang::Ja, true) => format!("{total} 分"),
+        (Lang::Ja, false) => format!("{total} 分（設定 {requested} 分）"),
+    }
+}
+
 fn render_text(menu: &DailyMenu, lang: Lang) -> String {
     use std::fmt::Write;
 
     let mut output = String::new();
     match lang {
         Lang::En => {
-            let _ = writeln!(output, "Today's practice menu — {} minutes", menu.requested_minutes);
+            let _ = writeln!(output, "Today's practice menu — {}", minutes_label(menu, lang));
             if menu.bench_recommended {
                 let _ = writeln!(output, "Benchmark recommended first (about 4 minutes).");
             }
         }
         Lang::Ja => {
-            let _ = writeln!(output, "今日の練習メニュー — {} 分", menu.requested_minutes);
+            let _ = writeln!(output, "今日の練習メニュー — {}", minutes_label(menu, lang));
             if menu.bench_recommended {
                 let _ = writeln!(output, "先にベンチ（約 4 分）を勧めます．");
             }

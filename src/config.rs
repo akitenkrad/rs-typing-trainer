@@ -53,9 +53,8 @@ pub struct Config {
     pub burst: BurstConfig,
     #[serde(default)]
     pub endurance: EnduranceConfig,
-    /// Daily practice-menu length. Kept out of serialized defaults until the
-    /// M7 documentation update, but accepted from `[menu]` now.
-    #[serde(default, skip_serializing)]
+    /// Daily practice menu (`[menu]`).
+    #[serde(default)]
     pub menu: MenuConfig,
     /// Legacy v1 section retained as a compatibility view.
     #[serde(default)]
@@ -395,7 +394,9 @@ pub struct EnduranceConfig {
 pub struct MenuConfig {
     #[serde(default = "default_menu_minutes")]
     pub minutes: u8,
-    #[serde(default)]
+    /// Unset follows the display language and is not written out, so a
+    /// written configuration reads back as "follow the display language".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub languages: Option<Vec<Lang>>,
 }
 

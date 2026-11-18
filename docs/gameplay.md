@@ -84,7 +84,7 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | Practice menu | `Enter` / `Space` | Start the selected step |
 | Practice menu | `Esc` / `Q` | Return to the title screen |
 | Menu focus | Any key / `Esc` | Start the countdown now (it starts after about two seconds otherwise) / abandon the step |
-| Menu step countdown or play | `Esc` | Abandon the step without saving it and leave the run |
+| Menu step countdown or play | `Esc` twice within 2 seconds | Abandon the step without saving it and leave the run; another key or the timeout cancels the first press |
 | Menu step result | `Space` / `Enter` | Continue with the next step (or the next `burst` sprint) |
 | Menu step result | `Esc` | Leave the run: the summary when a step has finished, otherwise the menu |
 | Menu summary | `Enter` / `Space` / `Esc` | Return to the menu |
@@ -134,7 +134,7 @@ Press `M` on the title screen to open today's practice menu. How the steps are c
 
 Select a step with `↑`/`↓` and press `Enter`. The steps are normally played from the top, but any step can be started. Before each step, a `FOCUS` screen shows what to attend to for about two seconds; any key starts the countdown at once, and `Esc` abandons the step. The step then runs with its own mode and settings for the minutes shown on the menu. These settings apply only to that session; your configuration file is not changed.
 
-The finish step consists of three `burst` sprints: `Enter` after each sprint starts the next one, and the step counts as finished after the third. On the result screen of every step, `Enter` continues with the next step, and `Esc` leaves the run. In a menu step, a single `Esc` during the countdown or play abandons the step without saving it and leaves the run; the two-press confirmation of ordinary sessions does not apply. A finished step is marked `Done` on the menu. Playing a `Done` step again saves the session but does not count toward the menu a second time.
+The finish step consists of three `burst` sprints: `Enter` after each sprint starts the next one, and the step counts as finished after the third. On the result screen of every step, `Enter` continues with the next step, and `Esc` leaves the run. During the countdown or play of a menu step, `Esc` asks first, as in ordinary sessions: the first press shows `Press Esc again to stop (this step is not recorded)` during play (`Press Esc again to quit` during the countdown), and a second `Esc` within 2 seconds abandons the step without saving it and leaves the run. Another key or the timeout cancels the first press. A finished step is marked `Done` on the menu. Playing a `Done` step again saves the session but does not count toward the menu a second time.
 
 When you leave the run after at least one finished step — with `Esc`, or by finishing the last step — the menu summary screen opens first. `Enter`, `Space` or `Esc` on it returns to the menu.
 

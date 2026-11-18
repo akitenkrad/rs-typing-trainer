@@ -42,11 +42,14 @@ pub fn render(frame: &mut Frame, app: &App) {
         ])
         .split(inner);
 
+    // §4.2 (MYTASK-3619): the actual total; prescription steps keep their
+    // catalog minutes, so it can differ from `[menu] minutes`.
+    let minutes = crate::practice::menu::minutes_label(menu, lang);
     let summary = match (lang, menu.introductory) {
-        (Lang::En, true) => format!("{} min · Introductory menu (more data needed)", menu.requested_minutes),
-        (Lang::En, false) => format!("{} min · Personalized menu", menu.requested_minutes),
-        (Lang::Ja, true) => format!("{} 分・データ不足のため入門メニュー", menu.requested_minutes),
-        (Lang::Ja, false) => format!("{} 分・個別メニュー", menu.requested_minutes),
+        (Lang::En, true) => format!("{minutes} · Introductory menu (more data needed)"),
+        (Lang::En, false) => format!("{minutes} · Personalized menu"),
+        (Lang::Ja, true) => format!("{minutes}・データ不足のため入門メニュー"),
+        (Lang::Ja, false) => format!("{minutes}・個別メニュー"),
     };
     let bench = if menu.bench_recommended {
         match lang {

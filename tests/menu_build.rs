@@ -64,6 +64,7 @@ fn input(accuracy: f64, weakest: Component) -> MenuBuildInput {
         japanese_percentile: None,
         has_spelling_suggestion: false,
         endurance_break_recommended: false,
+        blind_assistance_removable: false,
         reaction_ms: None,
         reaction_median_ms: None,
         last_bench_date: None,
@@ -146,8 +147,12 @@ fn a_component_used_as_primary_on_both_recent_days_drops_one_place() {
     assert_eq!(primary_id(&menu, MenuRole::PrimaryB), "preview.wide");
 }
 
+/// MYTASK-3620 (design §3.1, §4.1 5, 2026-11-18): a prescription in
+/// maintenance is removed from the candidates. The earlier expectation (it
+/// only drops one place and stays as primary B) followed the old §4.1 5
+/// wording, which contradicted §3.1.
 #[test]
-fn maintenance_component_drops_one_place_but_remains_available() {
+fn maintenance_prescription_is_removed_from_the_candidates() {
     let mut states = BTreeMap::new();
     states.insert(
         "preview.wide".to_owned(),
@@ -167,7 +172,8 @@ fn maintenance_component_drops_one_place_but_remains_available() {
     .unwrap();
 
     assert_ne!(primary_id(&menu, MenuRole::PrimaryA), "preview.wide");
-    assert_eq!(primary_id(&menu, MenuRole::PrimaryB), "preview.wide");
+    assert_ne!(primary_id(&menu, MenuRole::PrimaryB), "preview.wide");
+    assert!(menu.steps.iter().all(|step| step.prescription_id != "preview.wide"));
 }
 
 #[test]
@@ -238,7 +244,11 @@ fn menu_minutes_control_primary_b_and_phase_durations() {
         &BTreeMap::new(),
     )
     .unwrap();
-    assert_eq!(twenty.steps.iter().find(|step| step.role == MenuRole::PrimaryA).unwrap().minutes, 7);
+    // MYTASK-3619 (design §4.2, 2026-11-18): a prescription step takes its
+    // catalog level's minutes (preview.wide: 4); the 20-minute frame of 7 is
+    // only the default for a level without minutes. The earlier expectation
+    // of 7 stretched every primary A to the frame.
+    assert_eq!(twenty.steps.iter().find(|step| step.role == MenuRole::PrimaryA).unwrap().minutes, 4);
     assert_eq!(twenty.steps.iter().find(|step| step.role == MenuRole::Check).unwrap().minutes, 4);
 }
 
@@ -566,4 +576,225 @@ fn two_language_daily_rotation_uses_yesterdays_record_instead_of_calendar_parity
     let current_check = with_history.steps.iter().find(|step| step.role == MenuRole::Check).unwrap().language;
     assert_ne!(current_a, prior_a);
     assert_ne!(current_check, prior_check);
+}
+
+// ---------------------------------------------------------------------------
+// MYTASK-3619〜3622 (design §4.1, §4.2, §5; 2026-11-18)
+// ---------------------------------------------------------------------------
+
+fn states_with(entries: &[(&str, PrescriptionState)]) -> BTreeMap<String, PrescriptionState> {
+    entries.iter().map(|(id, state)| ((*id).to_owned(), *state)).collect()
+}
+
+fn maintenance() -> PrescriptionState {
+    PrescriptionState {
+        judgment: PrescriptionJudgment::Maintenance,
+        ..PrescriptionState::default()
+    }
+}
+
+/// Every grade component in maintenance except the ones listed.
+fn all_in_maintenance_except(keep: &[&str]) -> BTreeMap<String, PrescriptionState> {
+    let ids = [
+        "speed.pacer",
+        "accuracy.gate",
+        "rhythm.metronome",
+        "transition.adaptive",
+        "preview.wide",
+        "recovery.retry",
+        "overlap.burst",
+    ];
+    states_with(
+        &ids.iter()
+            .filter(|id| !keep.contains(id))
+            .map(|id| (*id, maintenance()))
+            .collect::<Vec<_>>(),
+    )
+}
+
+#[test]
+fn removing_maintenance_fills_a_missing_slot_with_transition_adaptive() {
+    // Only preview remains after maintenance is removed: B is filled with
+    // transition.adaptive (§4.1 5, MYTASK-3620).
+    let mut states = all_in_maintenance_except(&["preview.wide", "transition.adaptive"]);
+    states.remove("transition.adaptive");
+    let mut case = input(97.0, Component::Preview);
+    let grade = case.grade.as_mut().unwrap();
+    for row in &mut grade.components {
+        if row.component == Component::Transition {
+            row.grade = Level::S;
+        }
+    }
+    let menu = build_menu(bundled_catalog().unwrap(), &case, &MenuConfig::default(), &[], &states).unwrap();
+
+    assert_eq!(primary_id(&menu, MenuRole::PrimaryA), "preview.wide");
+    assert_eq!(primary_id(&menu, MenuRole::PrimaryB), "transition.adaptive");
+    let filler = menu.steps.iter().find(|step| step.role == MenuRole::PrimaryB).unwrap();
+    assert!(filler.reason.contains("too few candidates"), "{}", filler.reason);
+}
+
+#[test]
+fn extra_weaknesses_enter_when_fewer_than_two_candidates_remain_after_maintenance() {
+    // §4.1 4 (MYTASK-3620): the condition counts candidates without
+    // maintenance. Reach at the 20th percentile is not worse than the
+    // weakest component, so it enters only because maintenance left one.
+    let mut case = input(97.0, Component::Preview);
+    case.reach_percentile = Some(20.0);
+    let without = build_menu(bundled_catalog().unwrap(), &case, &MenuConfig::default(), &[], &BTreeMap::new()).unwrap();
+    assert!(without.steps.iter().all(|step| step.prescription_id != "reach.unlock"));
+
+    let states = all_in_maintenance_except(&["preview.wide"]);
+    let menu = build_menu(bundled_catalog().unwrap(), &case, &MenuConfig::default(), &[], &states).unwrap();
+    assert_eq!(primary_id(&menu, MenuRole::PrimaryA), "reach.unlock");
+    assert_eq!(primary_id(&menu, MenuRole::PrimaryB), "preview.wide");
+}
+
+#[test]
+fn removable_keyboard_assistance_puts_blind_fade_first() {
+    // §4.1 4 (MYTASK-3621).
+    let mut case = input(97.0, Component::Preview);
+    case.blind_assistance_removable = true;
+    let menu = build_menu(bundled_catalog().unwrap(), &case, &MenuConfig::default(), &[], &BTreeMap::new()).unwrap();
+    assert_eq!(primary_id(&menu, MenuRole::PrimaryA), "blind.fade");
+    assert_eq!(primary_id(&menu, MenuRole::PrimaryB), "preview.wide");
+    let blind = menu.steps.iter().find(|step| step.role == MenuRole::PrimaryA).unwrap();
+    assert_eq!(blind.settings.get("keyboard.show").and_then(toml::Value::as_str), Some("auto"));
+
+    // Accuracy priority still wins primary A.
+    let mut low = input(94.0, Component::Preview);
+    low.blind_assistance_removable = true;
+    let menu = build_menu(bundled_catalog().unwrap(), &low, &MenuConfig::default(), &[], &BTreeMap::new()).unwrap();
+    assert_eq!(primary_id(&menu, MenuRole::PrimaryA), "accuracy.gate");
+    assert_eq!(primary_id(&menu, MenuRole::PrimaryB), "blind.fade");
+
+    // Without the mark it is not a candidate.
+    let menu = build_menu(
+        bundled_catalog().unwrap(),
+        &input(97.0, Component::Preview),
+        &MenuConfig::default(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert!(menu.steps.iter().all(|step| step.prescription_id != "blind.fade"));
+}
+
+#[test]
+fn prescription_steps_take_the_catalog_level_minutes_and_the_total_is_shown() {
+    // §4.2 (MYTASK-3619): endurance.split level ③ is 5 minutes in a 20-minute
+    // menu (frame 7) and in a 10-minute menu (frame 4); the difference is not
+    // redistributed and the total says so.
+    let mut case = input(97.0, Component::Preview);
+    case.endurance_break_recommended = true;
+    let mut states = all_in_maintenance_except(&[]);
+    states.insert(
+        "endurance.split".to_owned(),
+        PrescriptionState {
+            level: 3,
+            ..PrescriptionState::default()
+        },
+    );
+    for minutes in [10, 20] {
+        let menu = build_menu(
+            bundled_catalog().unwrap(),
+            &case,
+            &MenuConfig {
+                minutes,
+                ..MenuConfig::default()
+            },
+            &[],
+            &states,
+        )
+        .unwrap();
+        let primary = menu.steps.iter().find(|step| step.role == MenuRole::PrimaryA).unwrap();
+        assert_eq!(primary.prescription_id, "endurance.split");
+        assert_eq!(primary.minutes, 5, "{minutes}-minute menu");
+        assert_eq!(primary.settings.get("endurance.minutes").and_then(toml::Value::as_integer), Some(5));
+        let total = menu.steps.iter().map(|step| u32::from(step.minutes)).sum::<u32>();
+        assert_eq!(menu.total_minutes(), total);
+        assert_ne!(menu.total_minutes(), u32::from(minutes));
+        let label = rs_typing_trainer::practice::menu::minutes_label(&menu, Lang::Ja);
+        assert_eq!(label, format!("{total} 分（設定 {minutes} 分）"));
+    }
+}
+
+#[test]
+fn a_level_without_minutes_uses_the_frame_and_endurance_minutes_must_match_the_step() {
+    use rs_typing_trainer::practice::menu::{level_minutes, parse_catalog};
+
+    let catalog = bundled_catalog().unwrap();
+    let mut level = catalog.prescription("preview.wide").unwrap().levels[0].clone();
+    assert_eq!(level_minutes(&level, 7), 4);
+    level.minutes = 0;
+    assert_eq!(level_minutes(&level, 7), 7, "no minutes: the frame default");
+    let mut endurance = catalog.prescription("endurance.split").unwrap().levels[1].clone();
+    endurance.minutes = 0;
+    assert_eq!(level_minutes(&endurance, 7), 4, "the mode's own duration setting");
+
+    let raw = include_str!("../data/menu/menu-v1.toml");
+    let mismatched = raw.replacen(
+        "minutes = 4\nsettings = { \"endurance.minutes\" = 4 }",
+        "minutes = 5\nsettings = { \"endurance.minutes\" = 4 }",
+        1,
+    );
+    assert_ne!(raw, mismatched);
+    let error = parse_catalog(&mismatched).unwrap_err();
+    assert!(error.contains("endurance.minutes"), "{error}");
+    let without_minutes = raw.replacen(
+        "minutes = 4\nsettings = { \"endurance.minutes\" = 4 }",
+        "settings = { \"endurance.minutes\" = 4 }",
+        1,
+    );
+    assert!(parse_catalog(&without_minutes).is_ok(), "minutes is optional");
+}
+
+#[test]
+fn endurance_menu_step_keeps_the_mode_duration_equal_to_the_step_time() {
+    use rs_typing_trainer::practice::menu::config_for_menu_step;
+
+    let mut case = input(97.0, Component::Preview);
+    case.endurance_break_recommended = true;
+    let mut states = all_in_maintenance_except(&[]);
+    states.insert(
+        "endurance.split".to_owned(),
+        PrescriptionState {
+            level: 2,
+            ..PrescriptionState::default()
+        },
+    );
+    let menu = build_menu(bundled_catalog().unwrap(), &case, &MenuConfig::default(), &[], &states).unwrap();
+    let step = menu.steps.iter().find(|step| step.prescription_id == "endurance.split").unwrap();
+    assert_eq!(step.minutes, 4);
+    let mut base = Config::default();
+    base.endurance.minutes = 3;
+    let config = config_for_menu_step(&base, step).unwrap();
+    assert_eq!(config.endurance.minutes, u64::from(step.minutes));
+}
+
+#[test]
+fn reference_basis_and_no_reference_note_for_prescriptions_outside_the_seven_components() {
+    use rs_typing_trainer::practice::menu::{ReferenceBasis, reference_basis};
+
+    let catalog = bundled_catalog().unwrap();
+    let basis = |id: &str| reference_basis(catalog.prescription(id).unwrap());
+    assert_eq!(basis("reach.unlock"), ReferenceBasis::RawCheck);
+    assert_eq!(basis("endurance.split"), ReferenceBasis::AssistedStep);
+    assert_eq!(basis("japanese.spelling"), ReferenceBasis::NotJudged);
+    assert_eq!(basis("blind.fade"), ReferenceBasis::NotJudged);
+    assert_eq!(basis("transition.adaptive"), ReferenceBasis::R3);
+    assert_eq!(basis("preview.wide"), ReferenceBasis::ComponentScore(Component::Preview));
+
+    let mut case = input(97.0, Component::Preview);
+    case.blind_assistance_removable = true;
+    case.language = "ja".to_owned();
+    case.grade.as_mut().unwrap().language = "ja".to_owned();
+    let menu = build_menu(catalog, &case, &MenuConfig::default(), &[], &BTreeMap::new()).unwrap();
+    let blind = menu.steps.iter().find(|step| step.prescription_id == "blind.fade").unwrap();
+    assert!(blind.advance.contains("参考の判定なし"), "{}", blind.advance);
+
+    let mut case = input(97.0, Component::Preview);
+    case.endurance_break_recommended = true;
+    let menu = build_menu(catalog, &case, &MenuConfig::default(), &[], &all_in_maintenance_except(&[])).unwrap();
+    let endurance = menu.steps.iter().find(|step| step.prescription_id == "endurance.split").unwrap();
+    assert!(endurance.advance.contains("assisted step"), "{}", endurance.advance);
 }

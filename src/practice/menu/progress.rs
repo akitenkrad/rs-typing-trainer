@@ -18,9 +18,9 @@ use chrono::NaiveDate;
 
 use super::{
     AdvanceCondition, AdvanceOutcome, AdvanceSource, DailyMenu, MenuCatalog, MenuMetric, MenuRole, MenuStep, PrescriptionJudgment,
-    PrescriptionProgress, ProgressUpdate, ReferenceJudgment, apply_advance_outcome, apply_maintenance_recheck, apply_reference_judgment,
-    bundled_catalog, current_metric_value, evaluate_advance_measurement, grade_component_for_menu_component, grade_component_for_metric,
-    is_alternate_or_only_prescription, language_code, reference_judgment, resume_after_pause,
+    PrescriptionProgress, ProgressUpdate, ReferenceBasis, ReferenceJudgment, apply_advance_outcome, apply_maintenance_recheck,
+    apply_reference_judgment, bundled_catalog, current_metric_value, evaluate_advance_measurement, grade_component_for_menu_component,
+    grade_component_for_metric, is_alternate_or_only_prescription, language_code, raw_reference_judgment, reference_judgment, resume_after_pause,
 };
 use crate::analysis::grades::{Component, ComponentGrade, GradeOptions, component_grades_for_session};
 use crate::analysis::metrics::AnalysisSettings;
@@ -394,11 +394,12 @@ pub fn session_metric_value(ctx: &JudgeContext<'_>, metric: MenuMetric, record: 
             );
             anticipation_rate(&diagnosis)
         }),
-        MenuMetric::FarHomeIkiRatio => crate::analysis::summary::skill_axis_values(std::slice::from_ref(record), ctx.layout, ctx.config)
-            .into_iter()
-            .find(|value| value.axis == crate::analysis::summary::SkillAxis::Reach)
-            .and_then(|value| value.raw)
-            .filter(|value| value.is_finite()),
+        // The reach axis of this one session. `skill_axis_values` reads only
+        // benchmark sessions, so a check step never had a value (MYTASK-3622).
+        MenuMetric::FarHomeIkiRatio => {
+            crate::analysis::summary::session_axis_value(crate::analysis::summary::SkillAxis::Reach, record, ctx.layout, ctx.config)
+                .filter(|value| value.is_finite())
+        }
         MenuMetric::BlindAssistanceRemovable => blind_assistance_value(ctx, language)?,
         _ => current_metric_value(metric, record).filter(|value| value.is_finite()),
     })
@@ -505,7 +506,10 @@ fn judge_pairs(ctx: &JudgeContext<'_>, run_id: i64, menu: &DailyMenu, catalog: &
         let prescription = catalog.prescription(&step.prescription_id).expect("filtered above");
         let condition: &AdvanceCondition = step.advance_condition.as_ref().expect("filtered above");
         let is_r3 = condition.metric == MenuMetric::PrescriptionR3;
-        let component = grade_component_for_menu_component(prescription.component);
+        let basis = super::reference_basis(prescription);
+        // §5 (MYTASK-3622): dated raw values for prescriptions outside the
+        // seven components, split at the prescription start below.
+        let raw = raw_reference_series(ctx, &checks, basis, condition.metric, &step.prescription_id)?;
         let advance = if condition.source == AdvanceSource::Check && !is_r3 {
             let value = checks.metric(ctx, condition.metric, current)?;
             let mut previous = Vec::new();
@@ -534,10 +538,20 @@ fn judge_pairs(ctx: &JudgeContext<'_>, run_id: i64, menu: &DailyMenu, catalog: &
             // §5: transitions are judged by R3, everything else by the
             // uncontrolled reference judgment on the check-step scores.
             let reference = (!is_r3 && state.judgment != PrescriptionJudgment::Maintenance).then(|| {
-                let judgment = component.map_or(ReferenceJudgment::InsufficientData, |component| {
-                    let (baseline, after) = checks.split_scores(component, started);
-                    reference_judgment(&baseline, &after)
-                });
+                let judgment = match basis {
+                    ReferenceBasis::ComponentScore(component) => {
+                        let (baseline, after) = checks.split_scores(component, started);
+                        reference_judgment(&baseline, &after)
+                    }
+                    ReferenceBasis::RawCheck | ReferenceBasis::AssistedStep => {
+                        let (baseline, after) = raw.split(started);
+                        raw_reference_judgment(&baseline, &after, condition.metric.direction())
+                    }
+                    ReferenceBasis::NotJudged => ReferenceJudgment::NotJudged,
+                    ReferenceBasis::R3 => ReferenceJudgment::InsufficientData,
+                };
+                // Swaps and pauses follow the same rules as the seven
+                // components (§5).
                 apply_reference_judgment(state, judgment, alternate, as_of);
                 judgment
             });
@@ -567,6 +581,79 @@ fn judge_pairs(ctx: &JudgeContext<'_>, run_id: i64, menu: &DailyMenu, catalog: &
         judged.extend(judgment);
     }
     Ok(judged)
+}
+
+/// Dated raw values for the raw-value reference judgment (§5, MYTASK-3622).
+#[derive(Default)]
+struct RawSeries {
+    /// Candidates for the baseline (only those before the start are used).
+    before: Vec<(NaiveDate, f64)>,
+    /// Candidates for the "after" series (only those on or after the start).
+    after: Vec<(NaiveDate, f64)>,
+}
+
+impl RawSeries {
+    fn split(&self, started: NaiveDate) -> (Vec<f64>, Vec<f64>) {
+        (
+            self.before.iter().filter(|(date, _)| *date < started).map(|(_, value)| *value).collect(),
+            self.after.iter().filter(|(date, _)| *date >= started).map(|(_, value)| *value).collect(),
+        )
+    }
+}
+
+/// - `RawCheck` (reach): the metric on the check steps, before and after.
+/// - `AssistedStep` (endurance): the metric on endurance sessions of the
+///   language before the start, and on this prescription's own steps after it
+///   (`advance.source = "step"`; the steps are assisted, so the judgment is
+///   only a weak reference).
+///
+/// Missing values are skipped, never 0.
+fn raw_reference_series(
+    ctx: &JudgeContext<'_>,
+    checks: &CheckSeries,
+    basis: ReferenceBasis,
+    metric: MenuMetric,
+    prescription_id: &str,
+) -> AppResult<RawSeries> {
+    let mut series = RawSeries::default();
+    match basis {
+        ReferenceBasis::RawCheck => {
+            for point in checks.previous.iter().chain(checks.current.iter()) {
+                if let Some(value) = checks.metric(ctx, metric, point)? {
+                    series.before.push((point.date, value));
+                    series.after.push((point.date, value));
+                }
+            }
+        }
+        ReferenceBasis::AssistedStep => {
+            for record in db::load_records_filtered(ctx.db_path, None, None)?
+                .iter()
+                .filter(|record| crate::analysis::model::session_language(record) == checks.language)
+            {
+                let Some(date) = chrono::DateTime::parse_from_rfc3339(&record.header.started_at)
+                    .ok()
+                    .map(|time| time.date_naive())
+                else {
+                    continue;
+                };
+                let params = serde_json::from_str::<serde_json::Value>(&record.header.mode_params).unwrap_or_default();
+                let own_step = params.get("menu_prescription_id").and_then(serde_json::Value::as_str) == Some(prescription_id);
+                if !own_step && record.header.mode != "endurance" {
+                    continue;
+                }
+                let Some(value) = session_metric_value(ctx, metric, record, checks.language)? else {
+                    continue;
+                };
+                if own_step {
+                    series.after.push((date, value));
+                } else {
+                    series.before.push((date, value));
+                }
+            }
+        }
+        ReferenceBasis::R3 | ReferenceBasis::ComponentScore(_) | ReferenceBasis::NotJudged => {}
+    }
+    Ok(series)
 }
 
 /// §4.3: a prescription in maintenance is checked once more 14 days after
@@ -666,23 +753,34 @@ pub enum RunChange {
     },
     /// §5: the prescription is replaced by its alternate from the next menu.
     /// `controlled` is true for R3 (transition) judgments.
+    /// `assisted` marks a reference judgment taken on the assisted
+    /// prescription step itself (`endurance.*`, MYTASK-3622).
     Swapped {
         title: String,
         language: Lang,
         alternate: String,
         controlled: bool,
+        assisted: bool,
     },
     /// §5: the prescription (an alternate) rests until `until`.
     Paused {
         title: String,
         language: Lang,
         until: NaiveDate,
+        assisted: bool,
     },
     /// §5: «improved» — controlled (R3) or reference only.
     Improved {
         title: String,
         language: Lang,
         controlled: bool,
+        assisted: bool,
+    },
+    /// §5 (MYTASK-3622): the prescription has no reference judgment
+    /// (`japanese.spelling`, `blind.fade`).
+    NoReference {
+        title: String,
+        language: Lang,
     },
 }
 
@@ -693,7 +791,7 @@ impl RunChange {
         match self {
             Self::LevelUp { .. } | Self::LevelDown { .. } | Self::Maintenance { .. } => 0,
             Self::Swapped { .. } | Self::Paused { .. } => 1,
-            Self::Improved { .. } => 2,
+            Self::Improved { .. } | Self::NoReference { .. } => 2,
         }
     }
 }
@@ -850,6 +948,7 @@ pub fn run_steps_summary(db_path: &Path, layout: &str, run_id: i64, display: Lan
                                     language: step.language,
                                     alternate,
                                     controlled: true,
+                                    assisted: false,
                                 });
                             }
                         }
@@ -857,15 +956,24 @@ pub fn run_steps_summary(db_path: &Path, layout: &str, run_id: i64, display: Lan
                             title: step.title.clone(),
                             language: step.language,
                             controlled: true,
+                            assisted: false,
                         }),
                         None => {}
                     }
                 } else if let Some(state) = state.as_ref().filter(|state| state.pair_judged_run == Some(run.id)) {
-                    if let Some(until) = state.paused_until.filter(|until| *until > run.date) {
+                    let basis = super::reference_basis(prescription);
+                    let assisted = basis == super::ReferenceBasis::AssistedStep;
+                    if basis == super::ReferenceBasis::NotJudged {
+                        changes.push(RunChange::NoReference {
+                            title: step.title.clone(),
+                            language: step.language,
+                        });
+                    } else if let Some(until) = state.paused_until.filter(|until| *until > run.date) {
                         changes.push(RunChange::Paused {
                             title: step.title.clone(),
                             language: step.language,
                             until,
+                            assisted,
                         });
                     } else if state.judgment == PrescriptionJudgment::NoChange {
                         if let Some(alternate) = alternate {
@@ -874,6 +982,7 @@ pub fn run_steps_summary(db_path: &Path, layout: &str, run_id: i64, display: Lan
                                 language: step.language,
                                 alternate,
                                 controlled: false,
+                                assisted,
                             });
                         }
                     } else if state.judgment == PrescriptionJudgment::Improved {
@@ -881,6 +990,7 @@ pub fn run_steps_summary(db_path: &Path, layout: &str, run_id: i64, display: Lan
                             title: step.title.clone(),
                             language: step.language,
                             controlled: false,
+                            assisted,
                         });
                     }
                 }

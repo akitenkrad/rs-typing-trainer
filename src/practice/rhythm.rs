@@ -2,8 +2,18 @@
 
 use std::time::Duration;
 
+/// Tempo of the rhythm mode outside the menu: 90% of the own median speed.
+pub const DEFAULT_RHYTHM_RATIO: f64 = 0.9;
+
 pub fn default_bpm(median_iki_ms: f64) -> f64 {
-    if median_iki_ms <= 0.0 { 180.0 } else { 60_000.0 / median_iki_ms * 0.9 }
+    bpm_for_ratio(median_iki_ms, DEFAULT_RHYTHM_RATIO)
+}
+
+/// Tempo at `ratio` × the own median speed (one beat per median IKI); 180
+/// BPM without history. The menu's `rhythm.metronome` levels pass their
+/// `pacer.ratio` (design §4.2, MYTASK-3619).
+pub fn bpm_for_ratio(median_iki_ms: f64, ratio: f64) -> f64 {
+    if median_iki_ms <= 0.0 { 180.0 } else { 60_000.0 / median_iki_ms * ratio }
 }
 
 pub fn beat_index(bpm: f64, elapsed: Duration) -> u64 {

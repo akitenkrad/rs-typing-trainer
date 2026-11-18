@@ -51,6 +51,7 @@ fn configuration_tables_match_every_struct_default() {
         "data.sentences_ja",
         "data.words_en",
         "data.words_ja",
+        "menu.languages",
         "metrics.db_path",
         "rhythm.bpm",
         "storage.db_path",

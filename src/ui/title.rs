@@ -157,11 +157,19 @@ pub fn render(frame: &mut Frame, app: &App) {
         )));
     }
     let introductory = app.daily_menu.as_ref().is_some_and(|menu| menu.introductory);
+    // §4.2 (MYTASK-3619): the menu's actual total once it is built.
+    let minutes = app.daily_menu.as_ref().map_or_else(
+        || match lang {
+            crate::i18n::Lang::En => format!("{} min", cfg.menu.minutes),
+            crate::i18n::Lang::Ja => format!("{} 分", cfg.menu.minutes),
+        },
+        |menu| crate::practice::menu::minutes_label(menu, lang),
+    );
     let menu_line = match (lang, introductory) {
-        (crate::i18n::Lang::En, true) => format!("Today's menu ({} min) — M to open (introductory: more data needed)", cfg.menu.minutes),
-        (crate::i18n::Lang::En, false) => format!("Today's menu ({} min) — M to open", cfg.menu.minutes),
-        (crate::i18n::Lang::Ja, true) => format!("今日のメニュー（{} 分）— M で開く（データ不足のため入門メニュー）", cfg.menu.minutes),
-        (crate::i18n::Lang::Ja, false) => format!("今日のメニュー（{} 分）— M で開く", cfg.menu.minutes),
+        (crate::i18n::Lang::En, true) => format!("Today's menu ({minutes}) — M to open (introductory: more data needed)"),
+        (crate::i18n::Lang::En, false) => format!("Today's menu ({minutes}) — M to open"),
+        (crate::i18n::Lang::Ja, true) => format!("今日のメニュー（{minutes}）— M で開く（データ不足のため入門メニュー）"),
+        (crate::i18n::Lang::Ja, false) => format!("今日のメニュー（{minutes}）— M で開く"),
     };
     info_lines.push(Line::from(Span::styled(menu_line, Style::default().fg(theme.warning))));
     let info = Paragraph::new(info_lines)

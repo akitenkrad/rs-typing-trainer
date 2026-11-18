@@ -518,7 +518,9 @@ fn render_sub_stats(frame: &mut Frame, game: &crate::app::GameState, theme: &The
 
 fn render_footer(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let Some(game) = app.game.as_ref() else { return };
-    let abort = if app.abort_confirmation_active() {
+    let abort = if app.abort_confirmation_active() && app.menu_active_step.is_some() {
+        Msg::MenuAbortConfirmHint.text(app.config.general.lang)
+    } else if app.abort_confirmation_active() {
         Msg::AbortConfirmHint.text(app.config.general.lang)
     } else {
         Msg::AbortHint.text(app.config.general.lang)

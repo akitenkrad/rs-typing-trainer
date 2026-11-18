@@ -331,6 +331,21 @@ fn graduation_text(step: &StepSummary, lang: Lang) -> String {
 }
 
 fn change_text(change: &RunChange, lang: Lang) -> String {
+    let text = change_text_without_note(change, lang);
+    // §5 (MYTASK-3622): an endurance judgment is taken on the assisted step
+    // itself, so it is an even weaker reference.
+    let assisted = matches!(
+        change,
+        RunChange::Swapped { assisted: true, .. } | RunChange::Paused { assisted: true, .. } | RunChange::Improved { assisted: true, .. }
+    );
+    match (assisted, lang) {
+        (false, _) => text,
+        (true, Lang::Ja) => format!("{text}（補助つきの段の値）"),
+        (true, Lang::En) => format!("{text} (from the assisted step)"),
+    }
+}
+
+fn change_text_without_note(change: &RunChange, lang: Lang) -> String {
     let language = |language: Lang| practice_language_label(language, lang);
     match (change, lang) {
         (RunChange::LevelUp { title, language: l, level }, Lang::Ja) => format!("{} {title}がレベル {} へ", language(*l), circled(*level)),
@@ -345,6 +360,7 @@ fn change_text(change: &RunChange, lang: Lang) -> String {
                 language: l,
                 alternate,
                 controlled,
+                ..
             },
             Lang::Ja,
         ) => {
@@ -361,6 +377,7 @@ fn change_text(change: &RunChange, lang: Lang) -> String {
                 language: l,
                 alternate,
                 controlled,
+                ..
             },
             Lang::En,
         ) => {
@@ -371,10 +388,20 @@ fn change_text(change: &RunChange, lang: Lang) -> String {
             };
             format!("{} {title}: {verdict}; switching to {alternate} next time", language(*l))
         }
-        (RunChange::Paused { title, language: l, until }, Lang::Ja) => {
+        (
+            RunChange::Paused {
+                title, language: l, until, ..
+            },
+            Lang::Ja,
+        ) => {
             format!("{} {title}: 変化なし（参考．対照なし）．{} まで休止", language(*l), until.format("%m/%d"))
         }
-        (RunChange::Paused { title, language: l, until }, Lang::En) => format!(
+        (
+            RunChange::Paused {
+                title, language: l, until, ..
+            },
+            Lang::En,
+        ) => format!(
             "{} {title}: no change (reference only; no control); resting until {}",
             language(*l),
             until.format("%m/%d")
@@ -384,6 +411,7 @@ fn change_text(change: &RunChange, lang: Lang) -> String {
                 title,
                 language: l,
                 controlled: true,
+                ..
             },
             Lang::Ja,
         ) => format!("{} {title}: 効いた（R3．対照つき）", language(*l)),
@@ -392,6 +420,7 @@ fn change_text(change: &RunChange, lang: Lang) -> String {
                 title,
                 language: l,
                 controlled: true,
+                ..
             },
             Lang::En,
         ) => format!("{} {title}: effective (R3, controlled)", language(*l)),
@@ -399,6 +428,8 @@ fn change_text(change: &RunChange, lang: Lang) -> String {
         (RunChange::Improved { title, language: l, .. }, Lang::En) => {
             format!("{} {title}: improved (reference only; no control)", language(*l))
         }
+        (RunChange::NoReference { title, language: l }, Lang::Ja) => format!("{} {title}: 参考の判定なし", language(*l)),
+        (RunChange::NoReference { title, language: l }, Lang::En) => format!("{} {title}: no reference judgment", language(*l)),
     }
 }
 

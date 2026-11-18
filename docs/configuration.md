@@ -72,6 +72,8 @@ Every supported key is listed here. “Unset” means that the application deriv
 | `rhythm.bell` | boolean | `false` | Emit a terminal bell on beats. |
 | `burst.words` | integer | `12` | Words per sprint, from 10 through 15. |
 | `endurance.minutes` | integer | `4` | Endurance duration, from 3 through 5 minutes. |
+| `menu.minutes` | integer | `15` | Practice-menu length: `10`, `15` or `20`; see [Practice menu](#practice-menu). |
+| `menu.languages` | array of `en` / `ja` | `—` | Practice languages; unset follows the interface language. See [Practice menu](#practice-menu). |
 | `ui.animation_enabled` | boolean | `true` | Enable item slide animations. |
 | `ui.animation_speed` | number | `1.0` | Animation speed multiplier. |
 | `ui.theme` | `default` / `mono` / `neon` | `"default"` | Colour theme. |
@@ -89,10 +91,10 @@ Legacy session timing aliases are resolved independently for each key. An explic
 
 ## Practice menu
 
-The `[menu]` section configures the [practice menu](training.md#practice-menu). It is listed separately from the table above:
+The `[menu]` section configures the [practice menu](training.md#practice-menu). Its keys are also in the table above and are described here in detail:
 
-- `menu.minutes` — integer, default `15`. Menu length; only `10`, `15` and `20` are accepted, and any other value is a configuration error. Ten minutes drops primary B; twenty minutes lengthens primary A to 7 minutes and the check step to 4 minutes.
-- `menu.languages` — array of `en` / `ja`, default unset. The practice languages of the menu: `["en"]`, `["ja"]`, or both (`["en", "ja"]`), which mixes both languages in one menu. Unset follows the interface language (`general.lang`, or `--lang`). An empty array, more than two entries or a repeated language is a configuration error. The settings screen's “Practice-menu language” chooses Same as display (unset), English, Japanese, or English + 日本語; it is independent of the interface language and of `adaptive.lang`.
+- `menu.minutes` — integer, default `15`. Menu length; only `10`, `15` and `20` are accepted, and any other value is a configuration error. Ten minutes drops primary B; twenty minutes lengthens the check step to 4 minutes. Prescription steps run for the minutes of their catalog level, so the actual total can differ from this value (see [Steps and length](training.md#steps-and-length)).
+- `menu.languages` — array of `en` / `ja`, default unset. The practice languages of the menu: `["en"]`, `["ja"]`, or both (`["en", "ja"]`), which mixes both languages in one menu. Unset follows the interface language (`general.lang`, or `--lang`); an unset value is not written out, so a written configuration reads back as following the interface language. An empty array, more than two entries or a repeated language is a configuration error. The settings screen's “Practice-menu language” chooses Same as display (unset), English, Japanese, or English + 日本語; it is independent of the interface language and of `adaptive.lang`.
 
 ```toml
 [menu]
@@ -100,6 +102,6 @@ minutes = 15
 languages = ["en", "ja"]
 ```
 
-`menu.minutes` is changed only in the file. The steps of a menu override other keys (mode, pacer, gate, preview and so on) for one session at a time and never write them back.
+`menu.minutes` is changed only in the file. Choosing a practice-menu language on the settings screen and saving writes `languages` to the `[menu]` section (choosing “Same as display” removes the key). The steps of a menu override other keys (mode, pacer, gate, preview and so on) for one session at a time and never write them back.
 
 The settings screen edits layout, input layout, geometry, keyboard visibility, keyboard appearance, prompt size, terminal graphics, language, practice-menu language, error mode, and result feedback while preserving comments and unrelated TOML keys. See [Training modes](modes.md), [Training tools](training.md), and [Keyboard layouts](keyboard.md) for behavior behind these values.

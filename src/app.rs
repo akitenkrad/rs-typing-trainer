@@ -905,7 +905,11 @@ impl App {
             Screen::KeyPicker => self.handle_key_picker_key(key, action),
             Screen::Countdown { .. } => {
                 if matches!(action, InputAction::Abort) && self.menu_active_step.is_some() {
-                    self.abort_menu_step();
+                    // MYTASK-3624: the same two-press confirmation as other
+                    // modes; the unfinished step is not recorded.
+                    if self.confirm_abort(now) {
+                        self.abort_menu_step();
+                    }
                 } else if matches!(action, InputAction::Abort) && self.confirm_abort(now) {
                     if self.bench_run.is_some() {
                         self.abort_benchmark();
@@ -2175,10 +2179,14 @@ impl App {
         match action {
             InputAction::Abort => {
                 if self.menu_active_step.is_some() {
-                    if let Some(game) = self.game.as_mut() {
-                        game.session.abort(now.saturating_duration_since(game.started_at));
+                    // MYTASK-3624: confirm before leaving a menu step, as in
+                    // the other modes. The unfinished step is not recorded.
+                    if self.confirm_abort(now) {
+                        if let Some(game) = self.game.as_mut() {
+                            game.session.abort(now.saturating_duration_since(game.started_at));
+                        }
+                        self.abort_menu_step();
                     }
-                    self.abort_menu_step();
                 } else if self.confirm_abort(now) {
                     if let Some(game) = self.game.as_mut() {
                         game.session.abort(now.saturating_duration_since(game.started_at));
@@ -2569,16 +2577,35 @@ impl App {
         } else {
             HashMap::new()
         };
+        let active_menu_step = self
+            .menu_active_step
+            .and_then(|index| self.daily_menu.as_ref().and_then(|menu| menu.steps.get(index)))
+            .cloned();
+        // §4.2 (MYTASK-3619): a menu level's `pacer.ratio` sets the rhythm
+        // tempo (own median IKI speed × ratio), overriding a fixed
+        // `rhythm.bpm`. Outside the menu the tempo stays as before.
+        let menu_rhythm_ratio = active_menu_step
+            .as_ref()
+            .filter(|step| step.settings.contains_key("pacer.ratio"))
+            .map(|_| self.config.pacer.ratio);
         self.rhythm_bpm = (!is_bench && self.config.mode.kind == ModeKind::Rhythm).then(|| {
-            self.config.rhythm.bpm.unwrap_or_else(|| {
+            let median_iki = || {
                 let mut values = records
                     .iter()
                     .filter(|record| record.header.metrics_version > 0 && record.header.iki_median_ms > 0.0)
                     .map(|record| record.header.iki_median_ms)
                     .collect::<Vec<_>>();
                 values.sort_by(f64::total_cmp);
-                crate::practice::rhythm::default_bpm(values.get(values.len() / 2).copied().unwrap_or(0.0))
-            })
+                values.get(values.len() / 2).copied().unwrap_or(0.0)
+            };
+            match menu_rhythm_ratio {
+                Some(ratio) => crate::practice::rhythm::bpm_for_ratio(median_iki(), ratio),
+                None => self
+                    .config
+                    .rhythm
+                    .bpm
+                    .unwrap_or_else(|| crate::practice::rhythm::default_bpm(median_iki())),
+            }
         });
         if !is_bench && self.config.mode.kind == ModeKind::Unlock {
             let state = db::load_unlock_state(&db_path, &self.config.keyboard.layout)
@@ -2590,20 +2617,16 @@ impl App {
         } else {
             self.unlock_state = None;
         }
-        let japanese_menu_step = self
-            .menu_active_step
-            .and_then(|index| self.daily_menu.as_ref().and_then(|menu| menu.steps.get(index)))
-            .is_some_and(|step| step.language == Lang::Ja);
-        if japanese_menu_step
-            && matches!(
-                self.config.mode.kind,
-                ModeKind::Words | ModeKind::Ngram | ModeKind::Unlock | ModeKind::Rhythm | ModeKind::Burst
-            )
-        {
+        if let Some(step) = active_menu_step.as_ref() {
             // These modes use the English word pool by default. Keep their
             // gameplay behavior, but feed the generator Japanese word prompts
             // for a Japanese menu step.
-            generator_config.kind = ModeKind::Romaji;
+            generator_config.kind = crate::practice::menu::generator_kind_for_step(generator_config.kind, step.language);
+            // §4.2 (MYTASK-3618): words that contain the step's target come
+            // first; the daily deck below is built from the narrowed pool.
+            if !is_bench {
+                crate::practice::menu::restrict_catalog_to_step_targets(&mut catalog, step);
+            }
         }
         let pacer_supported = matches!(
             self.config.mode.kind,

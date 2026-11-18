@@ -261,7 +261,11 @@ fn menu_runs_steps_in_order_restores_settings_and_keeps_completion_marks() {
     app.handle_key_at(key(KeyCode::Char('x')), now + Duration::from_secs(131));
     app.on_tick_at(Duration::from_secs(3), now + Duration::from_secs(135)).unwrap();
     assert_eq!(app.screen, Screen::Playing);
+    // MYTASK-3624: the first Esc of a menu step only asks for confirmation
+    // (the earlier expectation left on the first Esc, with no confirmation).
     app.handle_key_at(key(KeyCode::Esc), now + Duration::from_secs(136));
+    assert_eq!(app.screen, Screen::Playing);
+    app.handle_key_at(key(KeyCode::Esc), now + Duration::from_millis(136_500));
     // §7: leaving a run with a finished step shows «summary so far» first.
     assert_eq!(app.screen, Screen::MenuSummary);
     app.handle_key_at(key(KeyCode::Enter), now + Duration::from_secs(137));
@@ -596,4 +600,159 @@ fn wide_menu_result_line_names_the_step_position_and_level() {
     // At 80 columns the condition and this session's outcome keep priority.
     let narrow = render(&app, 80, 24).join("\n");
     assert!(narrow.contains("This session: cannot determine"), "{narrow}");
+}
+
+// ---------------------------------------------------------------------------
+// MYTASK-3624: Esc during a menu step asks for confirmation
+// ---------------------------------------------------------------------------
+
+fn start_selected_step(app: &mut rs_typing_trainer::app::App, now: Instant) {
+    app.handle_key_at(key(KeyCode::Enter), now);
+    app.handle_key_at(key(KeyCode::Char('x')), now + Duration::from_millis(10));
+    app.on_tick_at(Duration::from_secs(3), now + Duration::from_secs(4)).unwrap();
+    assert_eq!(app.screen, Screen::Playing);
+}
+
+#[test]
+fn esc_during_a_menu_step_asks_once_and_a_second_esc_within_the_window_stops_without_recording() {
+    let mut config = base_config();
+    config.general.lang = rs_typing_trainer::i18n::Lang::Ja;
+    let mut app = test_app_at(config, chrono::NaiveDate::from_ymd_opt(2026, 11, 18).unwrap());
+    let now = Instant::now();
+    open_menu(&mut app, now);
+    start_selected_step(&mut app, now);
+
+    let first = now + Duration::from_secs(5);
+    app.handle_key_at(key(KeyCode::Esc), first);
+    assert_eq!(app.screen, Screen::Playing, "the first Esc only asks");
+    assert!(app.abort_confirmation_active());
+    let text = render(&app, 100, 24).join("\n").replace(' ', "");
+    assert!(text.contains("もう一度Escでやめる（この段は記録しません）"), "{text}");
+
+    // After the confirmation window the next Esc asks again.
+    let late = first + Duration::from_secs(3);
+    app.on_tick_at(Duration::ZERO, late).unwrap();
+    app.handle_key_at(key(KeyCode::Esc), late);
+    assert_eq!(app.screen, Screen::Playing);
+
+    app.handle_key_at(key(KeyCode::Esc), late + Duration::from_millis(500));
+    // Nothing was finished, so the menu (not the summary) comes back.
+    assert_eq!(app.screen, Screen::Menu);
+    assert!(app.menu_completed.is_empty(), "the stopped step is not recorded");
+    assert_eq!(app.menu_active_step, None);
+    assert_eq!(app.config.mode.kind, ModeKind::Random, "the menu step settings are undone");
+}
+
+#[test]
+fn esc_during_a_menu_countdown_also_asks_for_confirmation() {
+    let mut app = test_app_at(base_config(), chrono::NaiveDate::from_ymd_opt(2026, 11, 18).unwrap());
+    let now = Instant::now();
+    open_menu(&mut app, now);
+    app.handle_key_at(key(KeyCode::Enter), now);
+    app.handle_key_at(key(KeyCode::Char('x')), now + Duration::from_millis(10));
+    assert!(matches!(app.screen, Screen::Countdown { .. }));
+
+    app.handle_key_at(key(KeyCode::Esc), now + Duration::from_millis(100));
+    assert!(matches!(app.screen, Screen::Countdown { .. }));
+    app.handle_key_at(key(KeyCode::Esc), now + Duration::from_millis(200));
+    assert_eq!(app.screen, Screen::Menu);
+}
+
+#[test]
+fn esc_outside_the_menu_keeps_the_existing_confirmation_text() {
+    let mut app = test_app(base_config());
+    let now = Instant::now();
+    app.handle_key_at(key(KeyCode::Char(' ')), now);
+    assert_eq!(app.screen, Screen::ModeSelect);
+    app.handle_key_at(key(KeyCode::Enter), now);
+    app.on_tick_at(Duration::from_secs(3), now + Duration::from_secs(4)).unwrap();
+    assert_eq!(app.screen, Screen::Playing);
+    app.handle_key_at(key(KeyCode::Esc), now + Duration::from_secs(5));
+    let text = render(&app, 100, 24).join("\n");
+    assert!(text.contains("Press Esc again to quit"), "{text}");
+    assert!(!text.contains("not recorded"), "{text}");
+    app.handle_key_at(key(KeyCode::Esc), now + Duration::from_millis(5_500));
+    assert_eq!(app.screen, Screen::Title);
+}
+
+// ---------------------------------------------------------------------------
+// MYTASK-3619: the menu shows the actual total; rhythm uses the level ratio
+// ---------------------------------------------------------------------------
+
+#[test]
+fn menu_and_title_show_the_actual_total_minutes() {
+    let mut app = test_app_at(base_config(), chrono::NaiveDate::from_ymd_opt(2026, 11, 18).unwrap());
+    open_menu(&mut app, Instant::now());
+    app.daily_menu.as_mut().unwrap().steps[1].minutes = 5;
+    let total = app.daily_menu.as_ref().unwrap().total_minutes();
+    assert_ne!(total, 15);
+    let text = render(&app, 80, 24).join("\n");
+    assert!(text.contains(&format!("{total} min (set: 15)")), "{text}");
+
+    app.handle_key(key(KeyCode::Esc));
+    assert_eq!(app.screen, Screen::Title);
+    let text = render(&app, 120, 40).join("\n");
+    assert!(text.contains(&format!("Today's menu ({total} min (set: 15))")), "{text}");
+}
+
+fn save_iki_history(path: &std::path::Path, interval_ms: u64) {
+    let config = Config::default();
+    let mut session = Session::new(Duration::from_secs(10), Duration::ZERO, Item::exact("abcdefghij"));
+    session.activate(Duration::ZERO);
+    for (index, character) in "abcdefghij".chars().enumerate() {
+        session.input_char(Duration::from_millis(100 + index as u64 * interval_ms), &character.to_string());
+    }
+    session.tick(Duration::from_secs(10));
+    let record = SessionRecord::from_log(&config, session.into_log(), Utc.with_ymd_and_hms(2026, 11, 17, 8, 0, 0).unwrap());
+    assert!(record.header.iki_median_ms > 0.0);
+    rs_typing_trainer::record::db::save(path, &record).unwrap();
+}
+
+#[test]
+fn rhythm_menu_levels_set_the_tempo_from_their_pacer_ratio_and_free_play_keeps_ninety_percent() {
+    let mut config = base_config();
+    config.rhythm.bpm = Some(100.0);
+    let mut app = test_app_at(config, chrono::NaiveDate::from_ymd_opt(2026, 11, 18).unwrap());
+    let path = app.config.storage.db_path.clone().unwrap();
+    save_iki_history(&path, 200);
+    let median = rs_typing_trainer::record::db::load_records_filtered(&path, None, None).unwrap()[0]
+        .header
+        .iki_median_ms;
+    let now = Instant::now();
+    open_menu(&mut app, now);
+    let catalog = bundled_catalog().unwrap();
+    let mut tempos = Vec::new();
+    for level in 0..2 {
+        let row = &catalog.prescription("rhythm.metronome").unwrap().levels[level];
+        let step = &mut app.daily_menu.as_mut().unwrap().steps[1];
+        step.prescription_id = "rhythm.metronome".to_owned();
+        step.mode = row.mode.clone();
+        step.settings = row.settings.clone();
+        app.menu_selected = 1;
+        let at = now + Duration::from_secs(10 * (level as u64 + 1));
+        start_selected_step(&mut app, at);
+        let ratio = row.settings["pacer.ratio"].as_float().unwrap();
+        assert_eq!(app.rhythm_bpm, Some(rs_typing_trainer::practice::rhythm::bpm_for_ratio(median, ratio)));
+        tempos.push(app.rhythm_bpm.unwrap());
+        app.handle_key_at(key(KeyCode::Esc), at + Duration::from_secs(5));
+        app.handle_key_at(key(KeyCode::Esc), at + Duration::from_millis(5_100));
+        assert_eq!(app.screen, Screen::Menu);
+    }
+    assert!(tempos[1] > tempos[0], "level ② (95%) is faster than level ① (90%): {tempos:?}");
+
+    // Outside the menu the fixed rhythm.bpm and the 90% default are unchanged.
+    app.handle_key(key(KeyCode::Esc));
+    assert_eq!(app.screen, Screen::Title);
+    app.config.mode.kind = ModeKind::Rhythm;
+    let later = now + Duration::from_secs(60);
+    app.handle_key_at(key(KeyCode::Char(' ')), later);
+    assert_eq!(app.screen, Screen::ModeSelect);
+    app.handle_key_at(key(KeyCode::Enter), later);
+    app.on_tick_at(Duration::from_secs(3), later + Duration::from_secs(4)).unwrap();
+    assert_eq!(app.screen, Screen::Playing);
+    assert_eq!(app.rhythm_bpm, Some(100.0), "a fixed rhythm.bpm still wins outside the menu");
+    assert_eq!(
+        rs_typing_trainer::practice::rhythm::default_bpm(median),
+        rs_typing_trainer::practice::rhythm::bpm_for_ratio(median, 0.9)
+    );
 }
