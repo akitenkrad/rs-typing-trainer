@@ -137,6 +137,129 @@ Analysis and `stats --csv sessions` report the median number of keystrokes neede
 retry_on_error = false
 ```
 
+## Practice menu
+
+The practice menu turns the analysis into one day of practice: which prescription to run, with which settings, for how long, what to attend to, and when to move on. The catalog of prescriptions is data bundled with the binary (`data/menu/menu-v1.toml`, version `menu-v1`) and is validated at startup; the code only holds the assembly rules. Every threshold below is an initial value recorded with that catalog version, not an established training standard.
+
+### Opening the menu
+
+The title screen shows `Today's menu (15 min) — M to open` (with `(introductory: more data needed)` when the introductory menu applies). Press `M` to open the menu screen. Each row shows the completion mark, step number, practice language, step name, prescription, level and minutes. The selected row adds the reason it was chosen, the focus, the graduation condition, and the evidence strength with its note. When no benchmark exists in a practice language, or the latest one is at least seven days old, the menu says that a benchmark (about 4 minutes) is recommended first; taking it is optional. See [Playing a menu](gameplay.md#practice-menu) for running the steps.
+
+The menu for a day is fixed once its first step starts (for the same layout, practice languages and length): reopening it later that day shows the same plan with the finished steps marked, so playing a step does not reshuffle the remaining ones. `rs-typing-trainer stats --menu` prints the same plan without the TUI (see [CLI](analysis.md#practice-menu-and-skill-records)).
+
+### Steps and length
+
+| # | Step | Content | 10 min | 15 min (default) | 20 min |
+|---|---|---|---:|---:|---:|
+| 1 | Warm-up | `words`, pacer off, gate off | 2 | 2 | 2 |
+| 2 | Primary A | the first-ranked prescription at its current level | 4 | 5 | 7 |
+| 3 | Primary B | the second-ranked prescription at its current level | — | 4 | 4 |
+| 4 | Check | `sentence` without aids: one preview item, pacer off; the keyboard follows your own setting | 3 | 3 | 4 |
+| 5 | Finish | three `burst` sprints | 1 | 1 | 1 |
+
+`[menu] minutes` selects 10, 15 or 20 (see [Configuration](configuration.md#practice-menu)). The 20-minute plan therefore totals 18 minutes. A prescription step runs for the minutes of its slot above, not for the `minutes` written on the catalog level. The settings of a step override the configuration for that session only and are never written back to the configuration file.
+
+The check step is the daily small measurement. It removes every aid so that its keystrokes can be compared across days; the skill records and most graduation conditions are taken from it, because the prescription steps run with aids.
+
+<!-- FIGURE: the five steps of a 15-minute menu on a time axis (warm-up 2, primary A 5, primary B 4, check 3, finish 1), marking which steps feed graduation and the skill records -->
+
+### How weaknesses are chosen
+
+1. **Enough data.** A language needs an overall grade (speed and accuracy present) and at least 2,000 logged character keystrokes. Otherwise it gets the introductory menu (below).
+2. **Accuracy first.** When the accuracy grade is D or lower (below 96.0% under `grades-v1`), primary A is always an accuracy prescription: `accuracy.anticipation` when anticipation is the most common error kind, otherwise `accuracy.gate`. Speed practice is not stacked on careless keystrokes.
+3. **Overall gain.** The remaining components follow the existing ranking by how much a one-point increase would raise the overall score (components already at S are skipped; ties keep the fixed component order speed, accuracy, rhythm, transitions, preview, recovery, overlap).
+4. **Weaknesses outside the grades.** Reach (the reach axis is below your own 25th percentile), Japanese (a `suggested` romaji spelling exists) and endurance (the latest `endurance` session recommended a break) are put at the front of the list when the top two candidates are both in maintenance. Reach and Japanese are also put at the front when their percentile is below the weakest graded component (its 0–8 score scaled to 0–100).
+5. **Variety.** A component that was a primary prescription on both of the previous two days, or whose prescription is in maintenance, moves down one place. The accuracy-first rule is never moved down.
+6. **Prescription.** Each component uses its default prescription unless that one was judged “not effective” or “no change”, in which case its alternate is used. A paused prescription is skipped, and so is its component.
+
+Reaction time is not used for ranking. A preview step only adds it to the reason, for example `Preview C (1.58); reaction 412 ms (own median 380 ms)`.
+
+`blind.fade` is in the catalog, but no current assembly rule selects the visual-assistance component, so it is not offered.
+
+### Introductory menu
+
+When no practice language has enough data, the menu is: warm-up (2 min), `transition.adaptive` at its current level as primary A (the remaining time: 3, 8 or 13 minutes), check (3 min) and finish (2 min), with the reason `Introductory menu: fewer than 2,000 logged keystrokes or no overall grade`. With two practice languages and neither ready, the introductory menu alternates the language daily.
+
+### Two practice languages
+
+`[menu] languages` chooses the practice languages; without it the menu follows the interface language. With English and Japanese, one menu mixes both languages without changing its length. Each step is typed in one language, and the step row shows it (`EN`/`JA`, or `英`/`日` in the Japanese interface).
+
+- Candidates, the accuracy-first rule, the overall-gain ranking, the two-day demotion, levels, judgments and skill records are all kept per language.
+- Primary A: the language whose accuracy is D or lower (the lower one when both are). Otherwise the language whose first candidate has the larger overall gain; on a tie, the language not used for primary A yesterday, then English.
+- Primary B: the first candidate of the **other** language, so that both languages get practice. The 10-minute menu has no primary B, so primary A alternates the language from day to day instead.
+- The warm-up uses primary A's language, the finish uses primary B's language (primary A's when there is no B), and the check step rotates the languages daily.
+- When one language lacks data, its introductory transition step takes the primary-B slot so that records accumulate.
+
+A Japanese step in `words`, `ngram`, `unlock`, `rhythm` or `burst` receives Japanese word prompts typed in romaji; the recorded mode stays the same and the session is classified as Japanese.
+
+### Levels and graduation
+
+A prescription has one or more levels ordered from most aids to fewest. Following the guidance hypothesis (Salmoni et al., 1984) — relying on aids can leave unaided performance behind — each graduation removes one aid, and the final level checks whether the same result holds without it. Level, the consecutive count and judgments are stored per layout, practice language and prescription.
+
+A graduation condition is judged from one of two sources:
+
+- **The step itself** (`accuracy.gate`, `speed.pacer`, `endurance.split`): judged when the step finishes.
+- **The same run's check step** (all others except transitions): judged once per run, when both the prescription step and a check step in the same language have been played, in either order. “At or below your median” compares the check value with the median of your earlier check steps in that language. With no earlier check, or when today's check is in the other language, the condition is not judged in that run.
+- **Transitions** (`transition.*`): graduate when the existing R3 verdict of the latest adaptive prescription is “effective”. A verdict counts only once.
+
+A session that meets the condition advances the count; one that does not resets it; one that cannot be determined (missing data) leaves it unchanged. Missing data is never treated as zero. Reaching the required count moves to the next level. Graduating the last level puts the prescription into **maintenance**: it is checked once more after 14 days at a check step, and if that check's component score is below the median of the earlier checks, practice resumes from its last level rather than from level 1.
+
+### Reference judgment, swaps and pauses
+
+| Prescription | Judgment | Swap |
+|---|---|---|
+| Transitions (`transition.*`) | The existing R3 verdict with matched controls | “Not effective” switches to the alternate. Insufficient data does not switch. |
+| Others | **Reference judgment** on the component's 0–8 score from check steps: the median of the last three checks before the prescription started against the median of the last three checks since then. +0.3 or more is “improved”. When at least five checks exist since the start and the last five all stay within ±0.1 of the baseline median, the result is “no change”. | “No change” switches to the alternate. When the alternate (or a prescription that is its own alternate) is also “no change”, it rests for 14 days, during which its component is skipped. |
+
+The reference judgment has **no control**. Anything else that changed during the same period — other practice, familiarity with the prompts, the day's condition — is mixed into it, so the screens always write it as `improved (reference only; no control)`. It is a prompt to keep or change a prescription, not evidence that the prescription works. Practice WPM is still not evidence of improvement; judge progress with benchmarks. The thresholds (+0.3, ±0.1, five checks, 14 days) are initial values.
+
+Reach, Japanese and endurance have no 0–8 score, so they never receive a reference judgment and are not swapped or paused by it.
+
+### Prescription catalog (`menu-v1`)
+
+Evidence strength uses five levels. None is “strong”: no typing-training intervention in this catalog has been confirmed by an intervention study.
+
+| Value | Meaning |
+|---|---|
+| `phenomenon` | Established as a phenomenon of skilled typists; whether training it helps is unverified |
+| `medium` | A general skill-learning principle exists, and the app can check it within the player |
+| `correlational` | Only a correlation with faster typists |
+| `weak` | Practical know-how or an existing product's convention |
+| `hypothesis` | Tried for the first time in this app |
+
+| ID | Name | Aim (component) | Levels (most aids first) | Graduation condition | Evidence |
+|---|---|---|---|---|---|
+| `accuracy.gate` | Accuracy gate | Accuracy: give up speed and make every keystroke certain | ① `words`, `stop`, gate 97%, no pacer → ② gate 96% → ③ `sentence`, gate 96% | Pass the accuracy gate three sessions in a row (step) | `medium` |
+| `accuracy.anticipation` | Control anticipation errors | Accuracy when anticipation is the most common error: confirm the next character before pressing | ① `words`, pacer ratio 0.90 → ② 0.95 | Anticipation share of first errors at or below your median, three times in a row (check) | `weak` |
+| `transition.adaptive` | Adaptive transitions | Transitions: prepare the next finger before typing | ① `adaptive`, drill share 30% → ② 20% → ③ `words` with `include` | R3 judges the prescription effective | `medium` |
+| `transition.ngram` | N-gram transition drill | Transitions (alternate): isolate a transition, then return to words | ① `ngram`, `pairs` | R3 judges the prescription effective | `weak` |
+| `preview.wide` | Widen preview | Preview: look at the next word, not the character being typed | ① `sentence`, preview 3, typed text hidden → ② preview 2 → ③ preview 1, typed text shown | Word-onset ratio at or below your median, three times in a row (check) | `phenomenon` |
+| `preview.phrase` | Read through phrases | Preview (alternate): start reading the next phrase at the boundary | ① `phrase`, long course, preview 2 → ② mixed course, preview 1 | Same as `preview.wide` | `weak` |
+| `rhythm.metronome` | Even rhythm | Rhythm: keep intervals even rather than faster | ① `rhythm` → ② `rhythm` → ③ `words` without the beat | Within-word IKI CV at or below your median, three times in a row (check) | `hypothesis` |
+| `recovery.retry` | Recover after errors | Recovery: correct and return to the prior pace without stopping | ① `sentence`, `advance`, retry on error → ② without retry | Post-error excess time at or below your median, three times in a row (check) | `hypothesis` |
+| `overlap.burst` | Relaxed rollover | Overlap: the next press may come before the prior release; stay relaxed | ① `burst` → ② `phrase`, short course, pacer ratio 1.05 | Rollover rate at or above your median, three times in a row (check) | `correlational` |
+| `speed.pacer` | Follow a faster pacer | Speed: follow a slightly faster pace, but stop chasing when accuracy breaks | ① `phrase`, pacer ratio 1.05 → ② 1.10 | Reach the pacer target at 95% accuracy or better, three sessions in a row (step) | `medium` |
+| `reach.unlock` | Unlock remote rows | Reach: return to the home row after reaching | ① `words`, `only` with home-row base keys → ② `include` | Remote-row/home-row IKI ratio at or below your median, three times in a row (check) | `weak` |
+| `japanese.spelling` | Use the suggested romaji spelling | Japanese: use the suggested spelling consistently | ① `romaji`, `include` → ② Japanese `sentence` | Suggested spelling used at least 80% of the time, three times in a row (check) | `weak` |
+| `endurance.split` | Hold form through the second half | Endurance: keep the first-half technique in the second half | ① `endurance` 3 min → ② 4 min → ③ 5 min | Second-half slowdown below 15%, three sessions in a row (step) | `hypothesis` |
+| `blind.fade` | Fade keyboard assistance | Visual assistance: do not look at the keyboard display | ① `keyboard.show = "auto"` → ② `hidden` → ③ `session.blind` | H5 marks keyboard assistance as removable (check) | `correlational` |
+
+Notes on how the current implementation runs these levels:
+
+- `words`, `ngram` and `romaji` levels use the key selection already in `mode.keys`; the menu does not insert the target transition or remote-row keys.
+- Both `rhythm` levels play at the rhythm mode's own tempo (90% of the rate derived from your median IKI); the catalog's pacer ratio does not change that tempo.
+- `endurance.split` levels differ in `endurance.minutes`, but a menu step lasts the minutes of its slot, so the length does not grow with the level.
+- The spelling-usage rate is not measured yet, so the `japanese.spelling` condition always remains undetermined.
+- `blind.fade` is not currently selected (see above).
+
+The evidence notes behind these values: preview follows Salthouse (1986), who found slower typing when preview was restricted; accuracy and progressive overload follow general deliberate-practice principles (Ericsson et al., 1993); rollover and not looking at the keyboard are correlations with faster typists (Dhakal et al., 2018; Feit et al., 2016). Faster typists also make fewer errors (Dhakal et al., 2018), but that correlation is not direct evidence that raising accuracy makes you faster.
+
+```toml
+[menu]
+minutes = 15            # 10 | 15 | 20
+# languages = ["en", "ja"]  # omit to follow the interface language
+```
+
 ## Why these tools exist
 
 The design follows deliberate-practice principles: target a specific weakness, keep the challenge slightly above current performance, and provide immediate feedback. Fixed benchmarks remain separate because changing practice difficulty makes practice scores incomparable. Sparse transition measurements use shrinkage, and repeated sentences are compared only when their content is identical.
@@ -147,3 +270,4 @@ References:
 - Salthouse, T. A. (1986). “Perceptual, cognitive, and motoric aspects of transcription typing.” *Psychological Bulletin*, 99(3), 303–319.
 - Feit, A. M., Weir, D., & Oulasvirta, A. (2016). “How We Type: Movement Strategies and Performance in Everyday Typing.” *Proceedings of CHI 2016*.
 - Dhakal, V., Feit, A. M., Kristensson, P. O., & Oulasvirta, A. (2018). “Observations on Typing from 136 Million Keystrokes.” *Proceedings of CHI 2018*.
+- Salmoni, A. W., Schmidt, R. A., & Walter, C. B. (1984). “Knowledge of results and motor learning: A review and critical reappraisal.” *Psychological Bulletin*, 95(3), 355–386.

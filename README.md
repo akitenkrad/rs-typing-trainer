@@ -34,7 +34,7 @@ rs-typing-trainer replay examples/records/dvorak-sentence-en.ttrec
 
 - [Playing rs-typing-trainer](docs/gameplay.md) — controls and session history
 - [Training modes and romaji input](docs/modes.md) — modes, key filters, romaji spellings, error handling and data files
-- [Training tools](docs/training.md) — adaptive practice, pacing, fading, look-ahead, rhythm, burst, endurance and recovery
+- [Training tools](docs/training.md) — the daily practice menu, adaptive practice, pacing, fading, look-ahead, rhythm, burst, endurance and recovery
 - [Keyboard layouts and display](docs/keyboard.md) — bundled and custom layouts, remapping and release events
 - [Prompt data](docs/data.md) — bundled datasets, licenses, processing and regeneration
 - [Benchmarks and analysis](docs/analysis.md) — parallel forms, metrics, analysis screen and CSV export

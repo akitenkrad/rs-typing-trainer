@@ -26,6 +26,7 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | Title | `H` | Open history |
 | Title | `B` | Open `bench-v2` selection |
 | Title | `A` | Open analysis |
+| Title | `M` | Open today's practice menu |
 | Title | `S` | Open settings |
 | Title | `Q` / `Esc` | Quit |
 | Mode selection | `↑` / `↓` (`k` / `j`) | Select any practice mode |
@@ -79,6 +80,15 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | Settings | `←` / `→` (`h` / `l`) | Change the selected value |
 | Settings | `Enter` | Save and return to the title |
 | Settings | `Esc` / `Q` | Cancel and return to the title |
+| Practice menu | `↑` / `↓` (`k` / `j`) | Select a step |
+| Practice menu | `Enter` / `Space` | Start the selected step |
+| Practice menu | `Esc` / `Q` | Return to the title screen |
+| Menu focus | Any key / `Esc` | Start the countdown now (it starts after about two seconds otherwise) / abandon the step |
+| Menu step countdown or play | `Esc` | Abandon the step without saving it and leave the run |
+| Menu step result | `Space` / `Enter` | Continue with the next step (or the next `burst` sprint) |
+| Menu step result | `Esc` | Leave the run: the summary when a step has finished, otherwise the menu |
+| Menu summary | `Enter` / `Space` / `Esc` | Return to the menu |
+| Analysis skills | `L` | Switch the language of the skill series |
 
 While a word is sliding in or out, for about 200 ms on each side, keystrokes are dropped. This prevents the key that completed one word from being credited to the next word.
 
@@ -115,6 +125,58 @@ If terminal images are disabled or unavailable, the result uses text for the sam
 After the final benchmark part, the summary fills the available height with three sections. The top shows the run grade and component grades beside one card per completed part. Each card contains WPM, accuracy, the change from the preceding run, the change from the previous personal best, and the short form ID. The middle shows up to 20 attempts per part with separate WPM and accuracy lines; the current run is enlarged. For A/C, a labelled v2 divider breaks the line between versions. The lower section combines expected mistyped keys across every part in this run and lists up to five sufficiently observed slow transitions, one or two weak fingers, improvements and regressions from the preceding matching part, and one to three concrete practice suggestions. Existing active transition prescriptions take priority.
 
 The summary degrades visuals in this order as space becomes scarce: trends, mistype keyboard, grade badge, then part cards. Its text form still includes the grade line, every part's WPM/accuracy/preceding/personal-best values, and the analysis prose. An 80×24 terminal therefore remains usable without overlapping the return hint.
+
+## Practice menu
+
+Press `M` on the title screen to open today's practice menu. How the steps are chosen, their levels and graduation conditions are described in [Training tools](training.md#practice-menu); this section covers playing them.
+
+### Playing the steps
+
+Select a step with `↑`/`↓` and press `Enter`. The steps are normally played from the top, but any step can be started. Before each step, a `FOCUS` screen shows what to attend to for about two seconds; any key starts the countdown at once, and `Esc` abandons the step. The step then runs with its own mode and settings for the minutes shown on the menu. These settings apply only to that session; your configuration file is not changed.
+
+The finish step consists of three `burst` sprints: `Enter` after each sprint starts the next one, and the step counts as finished after the third. On the result screen of every step, `Enter` continues with the next step, and `Esc` leaves the run. In a menu step, a single `Esc` during the countdown or play abandons the step without saving it and leaves the run; the two-press confirmation of ordinary sessions does not apply. A finished step is marked `Done` on the menu. Playing a `Done` step again saves the session but does not count toward the menu a second time.
+
+When you leave the run after at least one finished step — with `Esc`, or by finishing the last step — the menu summary screen opens first. `Enter`, `Space` or `Esc` on it returns to the menu.
+
+### The menu line on the result screen
+
+The result screen of a menu step adds one line above the key hint, and the hint becomes `[Enter] Next step    [Esc] Menu`:
+
+```text
+Menu 2/5 Widen preview ② — Graduation condition: Keep word-onset delay at or below your median for three sessions. — This session: judged after the check step
+```
+
+The step position and title are dropped first when the window is narrow. “This session” is one of:
+
+- `met 2/3`, `not met 0/3` or `cannot determine 1/3`: the outcome of this session and the consecutive count toward the level's required number;
+- `graduated → level 3` or `graduated → maintenance`;
+- `judged after the check step`, when the condition uses the same run's check step and it has not been played yet;
+- `today's check is in Japanese, judged next time` (or English), when today's check step is in the other language.
+
+`; improved (reference only; no control)` is appended when the reference judgment taken at this step is “improved”. The check step has no condition of its own; its line lists the prescriptions it judged, for example `Judged with this check: Widen preview met 2/3; Even rhythm not met 0/3`.
+
+### Menu summary screen
+
+The summary is titled `TODAY'S PRACTICE 2026-11-18 (15 min / 5 of 5 steps)`. When you leave before the last step, it is titled `SUMMARY SO FAR` and unplayed steps show `not played`. It has three sections.
+
+<!-- FIGURE: screenshot of the menu summary screen (upper: steps, middle: skills now with the practice overall and the official bench grade on separate rows, lower: today's changes), text fallback at 80×24 and the image version -->
+
+**Upper section — this run.** One row per planned step: `Step`, the practice language, `Prescription · level` (the level as ①②③), `This time`, `Prev` and `Graduation`.
+
+- `This time` is the prescription's graduation metric (for example `1.48` for word-onset delay, `412 ms`, `18%`), or net WPM for the warm-up, check and finish. Pass/fail metrics (accuracy gate, pacer target, R3, keyboard assistance) show `met` or `not met`.
+- `Prev` is the difference from the latest earlier run of the same prescription at the same level in the same language. Green `▲` is better, red `▼` is worse and `±` is unchanged; for lower-is-better metrics, a decrease is shown as `▲`. Pass/fail metrics have no difference.
+- `Graduation` shows the consecutive count as dots, for example `●●○ 2/3`. A step that graduated shows `●●● → Lv 3` or `●●● → maint.` in bold green.
+
+**Middle section — skills now.** `Skills now — English (check step; vs 7-run moving median)`. It appears only after the run's check step, and before that reads `Shown after the check step`. One row per component: `Gr` (grade under the current thresholds), `This time`, `Prev diff`, `Median (7)`, a 28-day line drawn with `▁▂▃▄▅▆▇`, and `Trend` (`improving`, `flat` or `declining`). A component without a value in this run shows `— (no data)`; it is never shown as zero. The definitions are in [Skill trends](analysis.md#skill-trends).
+
+The last two rows keep two sources apart:
+
+- `Overall (from practice): C 3.40 (prev C 3.30)` — computed from this run's check-step values with the usual overall formula. It is a practice value from one three-minute check.
+- `Official grade (bench English, 11/12): C` — the grade from benchmarks, as in the Coach tab, marked `(interim)` when fewer than three results exist. Only benchmarks change the official grade; a good practice overall never promotes it.
+
+**Lower section — today's changes.** Up to four lines, in this order: level changes, swaps and pauses, judgments, changes beyond the typical change, and the benchmark reminder. Examples: `EN Widen preview moves up to level 2`, `EN Widen preview: no change (reference only; no control); switching to Read through phrases next time`, `EN Accuracy gate: improved (reference only; no control)`, `Preview: improved beyond the typical change (-0.06; typical ±0.04)`, `5 days since the benchmark. Re-measure in 2 days`. Transition judgments by R3 are written `effective (R3, controlled)` or `not effective (R3)`.
+
+With terminal images, a window of at least 120×29 cells draws the 28-day lines as images, and at least 37 rows adds the practice-overall grade badge. Otherwise everything is drawn as text, so an 80×24 terminal keeps every value.
 
 ## Session history
 

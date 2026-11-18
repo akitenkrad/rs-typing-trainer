@@ -87,4 +87,19 @@ Every supported key is listed here. “Unset” means that the application deriv
 
 Legacy session timing aliases are resolved independently for each key. An explicit `session` value takes precedence; otherwise the corresponding `game` value is used, falling back to the default when neither key is present.
 
-The settings screen edits layout, input layout, geometry, keyboard visibility, keyboard appearance, prompt size, terminal graphics, language, error mode, and result feedback while preserving comments and unrelated TOML keys. See [Training modes](modes.md), [Training tools](training.md), and [Keyboard layouts](keyboard.md) for behavior behind these values.
+## Practice menu
+
+The `[menu]` section configures the [practice menu](training.md#practice-menu). It is listed separately from the table above:
+
+- `menu.minutes` — integer, default `15`. Menu length; only `10`, `15` and `20` are accepted, and any other value is a configuration error. Ten minutes drops primary B; twenty minutes lengthens primary A to 7 minutes and the check step to 4 minutes.
+- `menu.languages` — array of `en` / `ja`, default unset. The practice languages of the menu: `["en"]`, `["ja"]`, or both (`["en", "ja"]`), which mixes both languages in one menu. Unset follows the interface language (`general.lang`, or `--lang`). An empty array, more than two entries or a repeated language is a configuration error. The settings screen's “Practice-menu language” chooses Same as display (unset), English, Japanese, or English + 日本語; it is independent of the interface language and of `adaptive.lang`.
+
+```toml
+[menu]
+minutes = 15
+languages = ["en", "ja"]
+```
+
+`menu.minutes` is changed only in the file. The steps of a menu override other keys (mode, pacer, gate, preview and so on) for one session at a time and never write them back.
+
+The settings screen edits layout, input layout, geometry, keyboard visibility, keyboard appearance, prompt size, terminal graphics, language, practice-menu language, error mode, and result feedback while preserving comments and unrelated TOML keys. See [Training modes](modes.md), [Training tools](training.md), and [Keyboard layouts](keyboard.md) for behavior behind these values.

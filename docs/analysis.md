@@ -135,7 +135,7 @@ The benchmark tab reports sustained speed, accuracy, rhythm, transitions, reach,
 
 ## Analysis screen
 
-Press `A` on the title screen. `Tab` or `←/→` changes tabs. `P` cycles all time, 30 days and 7 days; `M` cycles the mode filter. Every tab, including Coach, uses the records left by these filters. The expensive player model, diagnosis, progress, habits and grade calculations run once when the screen opens and again only when either filter changes; redraws use the cached report.
+Press `A` on the title screen. `Tab` or `←/→` changes tabs. `P` cycles all time, 30 days and 7 days; `M` cycles the mode filter. Every tab, including Coach, uses the records left by these filters, except that the Skills tab reads only menu check steps (see below). The expensive player model, diagnosis, progress, habits and grade calculations run once when the screen opens and again only when either filter changes; redraws use the cached report.
 
 - Coach: a scrollable four-part report. With terminal images, each language starts with a G-to-S ladder: the darker, outlined step is the current grade and the triangle locates the continuous 0–8 score. The radar chart below uses the same scale on every component axis; the outer rings are higher grades, the axis suffix is that component's grade, and a labelled axis without a vertex has no data. The radar is omitted in short areas, and the existing prose continues below all graphics. “Where you are now” combines the S-to-G grade, component values and next-grade gaps, promotion/demotion, four-week speed/accuracy slopes, difficulty-adjusted form and the selected goal. “Last prescription” reports the target and matched-control changes in milliseconds with the R3 verdict. “Best opportunities” starts with the component that most raises overall and adds up to two concrete diagnoses, evidence counts, assumptions and a practice mode. Error advice is specific to anticipation, repeated-previous, adjacent-key, same-finger and opposite-hand errors; a total below 20 first errors is marked as a reference. Transition evidence is an effective count and is therefore shown as a rounded `n≈`, while observed counts use `n=`. Only `suggested` spelling rows appear. “Habits” includes only supported H1–H3/H5 findings; H4 is marked exploratory. Data coverage and benchmark reminders remain at the end. `T` opens goal candidates; `↑`/`↓` and `Enter` save one.
 - Trend: daily medians for net WPM, accuracy and median IKI, separated by mode or benchmark series and part. Charts show endpoint dates and value bounds after two valid days have accumulated; before that they show the current value. With terminal images, horizontal distance represents calendar time, including days without records. The translucent fan on the speed chart narrows to the latest language-level daily speed and widens to the fitted 28-day forecast interval; it is omitted when no learning curve is available.
@@ -143,8 +143,49 @@ Press `A` on the title screen. `Tab` or `←/→` changes tabs. `P` cycles all t
 - Transitions: the 20 slowest and 20 most error-prone shrunk estimates. With terminal images, the selected slow transition is drawn as an arrow between key centres; a repeated key is a loop and a character absent from the active layout has no arrow. The lower two columns use bar length for estimated IKI and estimated error rate. Their dark-to-bright colour uses error rate within that column, and the selected slow bar has an outline. Counts and values remain terminal text, with insufficient rows below the bars. Select a slow transition and press `Enter` to prepare two-key `ngram` practice.
 - Fingers/Hands: finger accuracy/IKI and same-finger versus alternating-hand timing. With terminal images, the finger chart orders left pinky through left index, one shared thumb, then right index through right pinky; the thumb splits into two bars only when separate left/right thumb data is available. IKI bars rise and error-rate bars fall; their colours match the keyboard finger guide, and samples below 30 are translucent. The adjacent four bars compare left hand, right hand, different keys on one finger, and alternating hands on one millisecond scale. Missing fingers are marked `—`, and all original numeric rows continue below the figures.
 - Bench: latest part results, comparisons and the eight axes. With terminal images, the radar radius is the personal-history percentile; the 50 and 100 labels sit between axes. An axis marked “under 3” has no percentile vertex. The part A–D sparklines keep attempt order from left to right, emphasize the latest point, and repeat its WPM and change from the previous result. B/D place v1 and v2 in one sequence; A/C use only the preferred version here. The original WPM and raw/percentile rows remain below the graphics.
+- Skills: the seven components measured by the practice menu's check steps, one small chart per component, stacked vertically (see [Skill trends](#skill-trends)).
 
 The four-week slope uses benchmark A when it is available, then another available benchmark part. A/C select v2 when present and otherwise v1; B/D combine both versions. Without a benchmark it uses practice records and explicitly warns that practice WPM is not evidence of improvement. Slopes above `+0.5 WPM/week` are upward, below `-0.5 WPM/week` are downward, and values in between are flat. Recommendations follow fixed rules: low accuracy selects a 95% accuracy gate with the pacer off; a slow transition selects `adaptive` and names the pair; weak reach selects `unlock` or `ngram`; weak reaction increases look-ahead; weak rhythm selects `rhythm`; second-half endurance deterioration selects `endurance` plus a break; and weak Japanese selects `romaji`.
+
+## Skill trends
+
+Benchmarks are taken once or twice a week, which is too sparse to follow day-to-day change. The [practice menu](training.md#practice-menu) therefore treats its check step — `sentence` with every aid removed, the same kind of prompt at the same length every day — as a small daily measurement. These records complement benchmarks; they never change the official grade.
+
+### What is recorded
+
+When a menu's check step finishes, the raw values of the seven graded components are computed and stored for that run. The series language is the language of the check session; English and Japanese are separate series.
+
+- Speed, accuracy, rhythm, preview and overlap come from the check step alone (`source = check`). Speed is the difficulty-corrected WPM (form × expected WPM of the reference benchmark) when it can be computed; otherwise it is the raw net WPM and is marked uncorrected (`corrected = false`).
+- Transitions and recovery need more keystrokes, so they pool the check step with the same run's warm-up and finish in the same language (`source = check+steps`; prescription steps are excluded because they run with aids). A day with fewer observations than `[analysis] min_transition_n` stores nothing for them.
+- A component that cannot be computed, including one without a single observation, is left out. It is never stored as zero.
+
+Only raw values are stored. Grades and 0–8 scores are computed on display with the current thresholds (`grades-v1`), so a threshold revision never rewrites past records. Finishing another step of the same run after the check step recomputes that run's rows. `stats --rebuild-skills` recomputes every run from the keystroke logs after a change to the computation.
+
+### Trend figures
+
+A three-minute check varies a lot from day to day, so a single previous difference cannot separate chance from progress. Each series therefore shows these figures for its latest point:
+
+| Figure | Definition | No data when |
+|---|---|---|
+| Previous difference | Latest value − the previous run's value in the same series. Raw units; for lower-is-better components a negative difference is an improvement. | The series has only one run. |
+| Moving median | Median of the latest 7 runs, including the current one. The window counts runs, not days, so days without practice do not shrink it; the median resists outlier days. | Fewer than 5 runs. |
+| Typical change | Median absolute previous difference over the latest 20 differences. | Fewer than 4 differences (5 runs). |
+| Beyond typical | `abs(previous difference) > typical change`. Only then does the summary call a change beyond the typical change. | Either value is missing. |
+| Trend | Least-squares slope against calendar days of the points within the latest 28 days (ending on the latest point), in units per week. It is `improving` or `declining` when the slope in the better or worse direction exceeds a quarter of the typical change per week, otherwise `flat`. | Points span fewer than two ISO calendar weeks within those 28 days, or the typical change is missing. |
+
+Missing values are shown as `— (no data)` on screen, `null` in JSON and an empty cell in CSV. The thresholds (7 and 5 runs, 20 differences, 28 days, one quarter) are initial values. Because the check step rotates daily between two practice languages, each language's series then gains a point only every other day.
+
+### Skills tab
+
+<!-- FIGURE: the Skills tab with the prescription-history band on top and seven component charts (faint run points, bold 7-run moving median, grade bands, bench diamonds on speed and accuracy) -->
+
+The analysis screen's last tab, Skills, draws the series of one language. Its header reads `English — · each run (faint)  ━ 7-run moving median  ◆ bench (speed, accuracy)  bands: grades F–S`.
+
+- Each component has a label column — name, grade and latest value, then `med` with the moving median and the gap to the next grade (for example `→B +0.12`) — and a chart. Each run is a faint point and the 7-run moving median is a bold line. The F–S grade boundaries are drawn behind them as faint bands, so the distance from the line to the next band shows how close the next grade is. The horizontal axis is calendar time, as in the Trend tab.
+- Benchmark results are overlaid only on speed (net WPM) and accuracy, the two components that the benchmark trend records per session (part A for English, part C for Japanese). They use a different mark — `◆` with terminal images, `█` in the text chart — so official and practice values stay distinguishable. The other five components have no benchmark points.
+- The **prescription history** band above the charts shows which prescription was played on each menu day: the upper half of a cell is primary A and the lower half primary B, and each menu day's colour continues until the next menu day. The legend lists each prescription with the levels played. It is labelled `Prescriptions (ref.)` and `upper A / lower B, no control`: comparing the line before and after a prescription started has no control, so it is a reference, not evidence of an effect.
+- `L` switches the series language when both languages have records (by default the interface language, else the first language with records). `P` limits the displayed period to all time, 30 days or 7 days; moving medians are still computed over the whole series, so the first point of a period uses earlier runs. `M` (mode filter) does not change this tab, because its series come only from menu check steps and benchmark points are always taken from benchmark sessions.
+- Without any skill record the tab shows `No skill records yet. Shown after finishing the check step of a practice menu.` Without terminal images every chart is drawn with text.
 
 ## CLI and CSV columns
 
@@ -186,6 +227,31 @@ rs-typing-trainer stats --summary --since 2026-10-01 --mode words
 | `reviews` | `from, to, next_due, interval_days` |
 | `grades` | `language, component, value, unit, grade, score, next_grade, next_threshold, gap, source, n_sessions, version` |
 | `grade_history` | `date, language, component, grade, score, version` |
+
+### Practice menu and skill records
+
+```sh
+rs-typing-trainer stats --menu
+rs-typing-trainer stats --menu --json
+rs-typing-trainer stats --skills
+rs-typing-trainer stats --skills --json
+rs-typing-trainer stats --skills --csv
+rs-typing-trainer stats --rebuild-skills
+```
+
+`stats --menu` prints today's [practice menu](training.md#practice-menu) without the TUI: the length, the benchmark recommendation, and for each step its number and role, language, prescription ID, title, level, mode, minutes, reason, focus, graduation condition and evidence strength. Once a step of today's menu has been started, the stored plan is printed. It only reads the database. `--json` emits the plan as stored in `menu_runs.plan_json` (`date`, `language`, `catalog_version`, `requested_minutes`, `introductory`, `bench_recommended` and `steps`, each with `role`, `language`, `prescription_id`, `title`, `level`, `mode`, `minutes`, `reason`, `focus`, `advance`, `advance_condition`, `evidence`, `evidence_note` and `settings`).
+
+`stats --skills` prints, for every language with records, one row per component: the latest value (speed marked `(uncorrected)` when difficulty correction was unavailable), grade, 0–8 score, previous difference, 7-run moving median, typical change, whether the latest difference is beyond it, and the 28-day trend with its slope per week. With no record yet it says so. `--json` emits `grade_version` and `languages`, each with `language` and `components`; every component has `component`, `unit`, `runs`, `latest` (`run_id`, `date`, `raw_value`, `n`, `source`, `corrected`), `grade`, `score`, `previous_difference`, `moving_median`, `typical_change`, `beyond_typical`, `slope_per_week` and `trend` (`improving`, `flat` or `declining`), with `null` for missing values. `--csv` takes no table name with `--skills` and emits one row per stored point:
+
+| CSV | Columns |
+|---|---|
+| `--skills --csv` | `date, lang, component, raw_value, grade, score, moving_median, previous_diff, corrected, source` |
+
+`moving_median` and `previous_diff` are the values as they stood at that point; missing values are empty cells. `grade` and `score` use the current thresholds.
+
+`stats --rebuild-skills` recomputes the skill records of every menu run from the keystroke logs and replaces the whole `skill_snapshots` table in one transaction, then prints the number of runs and rows. Use it after a change to the computation; the menu runs, steps and prescription states are not touched.
+
+`--lang` only selects the display language: the menu always uses `[menu] languages`, and `--skills` prints every language with records. `--menu`, `--skills` and `--rebuild-skills` exclude one another and cannot be combined with `--summary`, `--grades`, `--coach` or a CSV table name. `--json` requires `--menu` or `--skills` and cannot be combined with `--csv`. These records are stored in database version 8; see [Practice-menu records](records.md#practice-menu-records-version-8).
 
 ## Measurement cautions
 

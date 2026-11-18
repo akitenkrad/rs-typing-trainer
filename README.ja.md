@@ -32,7 +32,7 @@ rs-typing-trainer replay examples/records/dvorak-sentence-en.ttrec
 
 - [遊び方](docs/gameplay.ja.md) — 操作とセッション履歴
 - [訓練モードとローマ字入力](docs/modes.ja.md) — モード，キーの絞り込み，ローマ字綴り，誤入力，データファイル
-- [訓練機能](docs/training.ja.md) — 適応出題，ペーサー，自動薄化，先読み，リズム，バースト，持久，立ち直り
+- [訓練機能](docs/training.ja.md) — 毎日の練習メニュー，適応出題，ペーサー，自動薄化，先読み，リズム，バースト，持久，立ち直り
 - [キーボードの配列と表示](docs/keyboard.ja.md) — 同梱・利用者定義の配列，読み替え，Release イベント
 - [出題データ](docs/data.ja.md) — 同梱データ，ライセンス，加工，再生成
 - [ベンチマークと分析](docs/analysis.ja.md) — 平行版，指標，分析画面，CSV 出力
