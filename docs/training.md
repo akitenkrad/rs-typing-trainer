@@ -161,7 +161,18 @@ The menu for a day is fixed once its first step starts (for the same layout, pra
 
 The check step is the daily small measurement. It removes every aid so that its keystrokes can be compared across days; the skill records and most graduation conditions are taken from it, because the prescription steps run with aids.
 
-<!-- FIGURE: the five steps of a 15-minute menu on a time axis (warm-up 2, primary A 5, primary B 4, check 3, finish 1), marking which steps feed graduation and the skill records -->
+```text
+ 0      2          6          10     13 14 min
+ ├──────┼──────────┼──────────┼──────┼──┤
+ │Warm- │ Primary A│ Primary B│Check │F │
+ │up    │ (level)  │ (level)  │      │  │
+ └──────┴──────────┴──────────┴──────┴──┘
+          ▲ step-source graduation (e.g. accuracy.gate, endurance.split)
+                                  ▲ check-source graduation, reference
+                                    verdicts and the skill records
+```
+
+A 15-minute menu with two 4-minute prescriptions (the actual total is 14 minutes; see the previous paragraph). Prescription steps run with assistance, so most graduation conditions, every reference verdict and the skill records come from the unassisted check step; only `advance.source = "step"` conditions use the prescription step itself. Transitions and recovery in the skill records also pool the same-language warm-up and finish.
 
 ### How weaknesses are chosen
 

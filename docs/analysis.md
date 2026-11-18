@@ -177,7 +177,34 @@ Missing values are shown as `— (no data)` on screen, `null` in JSON and an emp
 
 ### Skills tab
 
-<!-- FIGURE: the Skills tab with the prescription-history band on top and seven component charts (faint run points, bold 7-run moving median, grade bands, bench diamonds on speed and accuracy) -->
+The text version of the Skills tab at 80×24 (sample data; with terminal images each chart is drawn as an image with grade bands):
+
+```text
+┌ ANALYSIS ────────────────────────────────────────────────────────────────────┐
+│       Coach  Trend  Keyboard  Transitions  Fingers/Hands  Bench  Skills      │
+│                                                                              │
+│English — · each run (faint)  ━ 7-run moving median  █ bench (speed, accuracy…│
+│Prescriptions (ref.)▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀│
+│upper A / lower B, no control: ■Widen preview ①  ■Accuracy gate ①             │
+│Speed D 58.0        ⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒•⠒⠒⠒⠒⠒⠒•⠒⠒⠒⠒⠒⠒█│
+│med 55.0 →C +2.0    •      █      •      •              ⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠊⠉⠉⠉│
+│Accuracy C 96.6     ⠒⠒⠒⠒⠒⠒⠒█⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒█│
+│med 96.0 →B +0.4    •⠉⠉⠉⠉⠉⠉•⠉⠉⠉⠉⠉⠉•⠉⠉⠉⠉⠉⠉•⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠔⠒⠒⠒│
+│Rhythm                                                                        │
+│— (no data)                                                                   │
+│Transitions                                                                   │
+│— (no data)                                                                   │
+│Preview C 1.54      •      •      •      •              ⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⣀⣀⣀⣀⣀⣀⣀⡀   │
+│med 1.60 →B -0.14   ⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉•⠉⠉⠉⠉⠉⠉•⠉⠉⠉⠉⠉⠉•⠉⠉⠉⠈⠉⠉⠉│
+│Recovery                                                                      │
+│— (no data)                                                                   │
+│Overlap                                                                       │
+│— (no data)                                                                   │
+│                                                                              │
+│          [Tab/←→] tab   [P] period: all   [M] mode: all   [ESC] back         │
+│                             [L] language: English                            │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
 
 The analysis screen's last tab, Skills, draws the series of one language. Its header reads `English — · each run (faint)  ━ 7-run moving median  ◆ bench (speed, accuracy)  bands: grades F–S`.
 

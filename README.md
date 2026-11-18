@@ -6,7 +6,7 @@
 
 A terminal typing trainer for practising a chosen set of characters. It measures WPM, CPS, accuracy, consistency and reaction time, stores completed sessions in SQLite, and lets you review past results. The interface is available in English and Japanese. Built with [ratatui](https://ratatui.rs).
 
-Absolute S-to-G grades make speed, accuracy and typing-technique components visible. A personalized Coach connects those grades and recorded diagnoses to concrete practice, then reports whether adaptive prescriptions helped.
+Absolute S-to-G grades make speed, accuracy and typing-technique components visible. A personalized Coach connects those grades and recorded diagnoses to concrete practice, then reports whether adaptive prescriptions helped. **Today's training**, the first item on the title screen, builds a short daily practice menu from those weaknesses, moves each prescription through its levels, and tracks your skills from an unassisted check step every day.
 
 ## Install
 

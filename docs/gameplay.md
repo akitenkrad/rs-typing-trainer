@@ -159,7 +159,34 @@ The step position and title are dropped first when the window is narrow. “This
 
 The summary is titled `TODAY'S PRACTICE 2026-11-18 (15 min / 5 of 5 steps)`. When you leave before the last step, it is titled `SUMMARY SO FAR` and unplayed steps show `not played`. It has three sections.
 
-<!-- FIGURE: screenshot of the menu summary screen (upper: steps, middle: skills now with the practice overall and the official bench grade on separate rows, lower: today's changes), text fallback at 80×24 and the image version -->
+The text version of the summary screen at 80×24 (sample data):
+
+```text
+┌ TODAY'S PRACTICE 2026-11-11 (15 min / 5 of 5 steps) ─────────────────────────┐
+│  Step           Prescription · level        This time Prev     Graduation    │
+│  1 Warm-up   EN words                       62 WPM    ▲+3                    │
+│  2 Primary A EN Accuracy gate ①             met       —        ●●● → Lv 2    │
+│  3 Primary B EN Widen preview ②             1.48      ▲-0.06   ●●○ 2/3       │
+│  4 Check     EN sentence                    58 WPM    ▲+1                    │
+│  5 Finish    EN burst                       74 WPM    —                      │
+│  ── Skills now — English (check step; vs 7-run moving median) ─────────────  │
+│  Component   Gr This time    Prev diff Median (7) 28 days  Trend             │
+│  Speed       D  59.0 WPM     ▲+0.5     57.5       ▁▂▁▃▄▅▆▇ improving         │
+│  Accuracy    B  97.0 %       ±0.0      97.0       ▄▄▄▄▄▄▄▄ flat              │
+│  Rhythm      — (no data)                                                     │
+│  Transitions — (no data)                                                     │
+│  Preview     B  1.40         ▲-0.16    1.56       ▇▆▆▆▆▅▆▁ improving         │
+│  Recovery    — (no data)                                                     │
+│  Overlap     — (no data)                                                     │
+│  Overall (from practice): C 4.51 (prev C 4.34)                               │
+│  Official grade (bench): — (no data)                                         │
+│  ── Today's changes ───────────────────────────────────────────────────────  │
+│  ・EN Accuracy gate moves up to level 2                                      │
+│  ・EN Widen preview: improved (reference only; no control)                   │
+│  ・Preview: improved beyond the typical change (-0.16; typical ±0.01)        │
+│  ・No benchmark yet. A benchmark (about 4 min) is recommended                │
+└ [Enter/Esc] Back to the menu ────────────────────────────────────────────────┘
+```
 
 **Upper section — this run.** One row per planned step: `Step`, the practice language, `Prescription · level` (the level as ①②③), `This time`, `Prev` and `Graduation`.
 
