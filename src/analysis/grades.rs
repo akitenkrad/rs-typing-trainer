@@ -668,6 +668,35 @@ fn component_values(
     values
 }
 
+/// Compute one session's raw component values and direction-normalized 0–8
+/// scores with the same implementation used by the grade report. Practice
+/// menu judgments and M5 skill snapshots share this entry point.
+#[allow(clippy::too_many_arguments)]
+pub fn component_grades_for_session(
+    record: &SessionRecord,
+    layout: &KeyboardLayout,
+    geometry: &KeyboardGeometry,
+    options: GradeOptions,
+    as_of: DateTime<Utc>,
+    english_corpus: &[String],
+    japanese_corpus: &[JapaneseText],
+    language: &str,
+) -> Result<Vec<ComponentGrade>, String> {
+    component_values(
+        std::slice::from_ref(record),
+        layout,
+        geometry,
+        options,
+        as_of,
+        english_corpus,
+        japanese_corpus,
+        language,
+    )
+    .into_iter()
+    .map(|value| grade_component(language, value.component, value.value))
+    .collect()
+}
+
 fn transition_loss_percent(model: &PlayerModel, language: &str, english_corpus: &[String], japanese_corpus: &[JapaneseText]) -> Option<f64> {
     let baseline = model.personal_iki_median_ms;
     if baseline <= 0.0 || !baseline.is_finite() {

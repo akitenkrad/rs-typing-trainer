@@ -457,7 +457,7 @@ fn v5_database_migrates_and_prescription_roundtrips() {
 
     assert_eq!(db::list(&path).unwrap().len(), 1);
     let conn = rusqlite::Connection::open(&path).unwrap();
-    assert_eq!(conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 7);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 8);
     for table in ["transition_model", "prescriptions"] {
         let exists: i64 = conn
             .query_row(

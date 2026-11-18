@@ -1,7 +1,7 @@
 use chrono::{TimeZone, Utc};
 use rs_typing_trainer::analysis::grades::{
     Component, ComponentValue, GradeChangeKind, GradeHistoryPoint, GradeOptions, GradeSource, GradeStatus, Level, analyze_grades, bundled_thresholds,
-    detect_grade_changes, evaluate_language, grade_component,
+    component_grades_for_session, detect_grade_changes, evaluate_language, grade_component,
 };
 use rs_typing_trainer::analysis::metrics::AnalysisSettings;
 use rs_typing_trainer::analysis::progress::SessionForm;
@@ -99,6 +99,31 @@ fn required_and_optional_missing_components_are_distinguished() {
 fn japanese_uses_its_own_speed_thresholds() {
     assert_eq!(grade_component("ja", Component::Speed, 95.0).unwrap().grade, Level::S);
     assert_eq!(grade_component("en", Component::Speed, 95.0).unwrap().grade, Level::A);
+}
+
+#[test]
+fn one_session_component_values_reuse_grade_scoring_for_menu_and_snapshots() {
+    let at = Utc.with_ymd_and_hms(2026, 11, 18, 8, 0, 0).unwrap();
+    let record = practice_record(at, 0.98);
+    let values = component_grades_for_session(
+        &record,
+        &builtin_layout("qwerty").unwrap(),
+        &geometry("ansi").unwrap(),
+        GradeOptions {
+            model: AnalysisSettings::default(),
+        },
+        at + chrono::Duration::minutes(2),
+        &["ab".to_owned()],
+        &[JapaneseText {
+            text: "あ".to_owned(),
+            reading: "a".to_owned(),
+        }],
+        "en",
+    )
+    .unwrap();
+    let speed = values.iter().find(|row| row.component == Component::Speed).unwrap();
+    assert_eq!(speed.value, 60.0);
+    assert_eq!(speed.score, grade_component("en", Component::Speed, 60.0).unwrap().score);
 }
 
 #[test]

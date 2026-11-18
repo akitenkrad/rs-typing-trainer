@@ -11,6 +11,8 @@ use crate::analysis::grades::{Component, Direction, LanguageGrade, Level, ranked
 use crate::config::{Config, MenuConfig, ModeKind};
 use crate::i18n::Lang;
 
+pub mod progress;
+
 pub const MENU_VERSION: &str = "menu-v1";
 const MENU_DATA: &str = include_str!("../../data/menu/menu-v1.toml");
 
@@ -203,6 +205,24 @@ impl MenuMetric {
         }
     }
 
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::WordOnsetRatio => "word-onset-ratio",
+            Self::WithinWordIkiCv => "within-word-iki-cv",
+            Self::PostErrorExcessMs => "post-error-excess-ms",
+            Self::RolloverRate => "rollover-rate",
+            Self::AccuracyGatePassed => "accuracy-gate-passed",
+            Self::AnticipationRate => "anticipation-rate",
+            Self::PacerTargetReached => "pacer-target-reached",
+            Self::FarHomeIkiRatio => "far-home-iki-ratio",
+            Self::SpellingUsageRate => "spelling-usage-rate",
+            Self::EnduranceSecondHalfSlowdown => "endurance-second-half-slowdown",
+            Self::BlindAssistanceRemovable => "blind-assistance-removable",
+            Self::PrescriptionR3 => "prescription-r3",
+            Self::NetWpm => "net-wpm",
+        }
+    }
+
     pub fn direction(self) -> Direction {
         match self {
             Self::WordOnsetRatio
@@ -283,6 +303,37 @@ pub enum MenuRole {
     PrimaryB,
     Check,
     Finish,
+}
+
+impl MenuRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Warmup => "warmup",
+            Self::PrimaryA => "primary-a",
+            Self::PrimaryB => "primary-b",
+            Self::Check => "check",
+            Self::Finish => "finish",
+        }
+    }
+}
+
+/// Key of the `menu_runs.lang` column: the configured practice languages
+/// (§4.2 `[menu] languages`), not the languages that happen to appear in the
+/// assembled steps. An introductory or 10-minute menu may use only one of two
+/// configured languages, and the same day's run must still be found.
+pub fn menu_language_key(languages: &[Lang]) -> String {
+    languages
+        .iter()
+        .map(|language| language_code(*language))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// The `menu_runs.lang` key for the current settings (§8.2).
+pub fn menu_run_language_key(config: &Config, display: Lang) -> String {
+    menu_language_key(&config.menu.practice_languages(display))
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -504,6 +555,7 @@ pub struct MenuBuildInput {
 pub struct PastMenu {
     pub date: NaiveDate,
     pub language: Option<String>,
+    pub check_language: Option<String>,
     pub primary_prescription_ids: Vec<String>,
 }
 
@@ -513,10 +565,13 @@ pub struct MenuLanguageInput {
     pub states: BTreeMap<String, PrescriptionState>,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum PrescriptionJudgment {
     #[default]
     None,
+    Improved,
+    NoChange,
     Ineffective,
     Maintenance,
 }
@@ -535,6 +590,226 @@ impl Default for PrescriptionState {
             judgment: PrescriptionJudgment::None,
             paused: false,
         }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrescriptionProgress {
+    #[serde(default = "default_progress_level")]
+    pub level: u8,
+    #[serde(default)]
+    pub consecutive: u8,
+    #[serde(default)]
+    pub judgment: PrescriptionJudgment,
+    #[serde(default)]
+    pub paused_until: Option<NaiveDate>,
+    #[serde(default)]
+    pub maintenance_due: Option<NaiveDate>,
+    #[serde(default)]
+    pub started_on: Option<NaiveDate>,
+    /// The `menu_runs.id` whose prescription step and same-language check
+    /// step were last judged together (§4.3/§5). Each run is judged once.
+    #[serde(default)]
+    pub pair_judged_run: Option<i64>,
+    /// Identity (`<prescriptions.id>@<evaluated_at>`) of the last R3 verdict
+    /// counted toward graduation, so an old verdict is never counted again.
+    #[serde(default)]
+    pub r3_counted: Option<String>,
+}
+
+const fn default_progress_level() -> u8 {
+    1
+}
+
+impl Default for PrescriptionProgress {
+    fn default() -> Self {
+        Self {
+            level: 1,
+            consecutive: 0,
+            judgment: PrescriptionJudgment::None,
+            paused_until: None,
+            maintenance_due: None,
+            started_on: None,
+            pair_judged_run: None,
+            r3_counted: None,
+        }
+    }
+}
+
+impl PrescriptionProgress {
+    pub fn build_state(&self, as_of: NaiveDate) -> PrescriptionState {
+        let pause_active = self.paused_until.is_some_and(|until| as_of < until);
+        let judgment = if self.paused_until.is_some_and(|until| as_of >= until) {
+            PrescriptionJudgment::None
+        } else {
+            self.judgment
+        };
+        PrescriptionState {
+            level: self.level,
+            judgment,
+            paused: pause_active,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProgressUpdate {
+    pub outcome: AdvanceOutcome,
+    pub consecutive: u8,
+    /// `advance.sessions` of the level that was judged.
+    pub required: u8,
+    pub level_after: u8,
+    /// Set only on the session that graduated the level (§4.3).
+    pub graduation: Option<Graduation>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Graduation {
+    /// Moved on to this level.
+    Level(u8),
+    /// The last level was graduated; the prescription is now in maintenance.
+    Maintenance,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReferenceJudgment {
+    InsufficientData,
+    Pending,
+    Improved,
+    NoChange,
+}
+
+/// Design §5: a direction-normalized component score must improve by 0.3.
+pub const REFERENCE_IMPROVEMENT_THRESHOLD: f64 = 0.3;
+/// Design §5: changes strictly inside ±0.1 count as unchanged.
+pub const REFERENCE_NO_CHANGE_BAND: f64 = 0.1;
+/// Design §5: unchanged results must continue for five checks.
+pub const REFERENCE_NO_CHANGE_RUN: usize = 5;
+/// Design §4.3 and §5: maintenance rechecks and pauses last 14 days.
+pub const MENU_RECHECK_DAYS: i64 = 14;
+
+pub fn apply_advance_outcome(
+    state: &mut PrescriptionProgress,
+    level_count: u8,
+    required: u8,
+    outcome: AdvanceOutcome,
+    date: NaiveDate,
+) -> ProgressUpdate {
+    state.started_on.get_or_insert(date);
+    state.level = state.level.max(1).min(level_count.max(1));
+    let mut graduation = None;
+    match outcome {
+        AdvanceOutcome::Met => {
+            state.consecutive = state.consecutive.saturating_add(1);
+            if state.consecutive >= required.max(1) {
+                state.consecutive = 0;
+                if state.level < level_count.max(1) {
+                    state.level += 1;
+                    graduation = Some(Graduation::Level(state.level));
+                } else {
+                    state.judgment = PrescriptionJudgment::Maintenance;
+                    state.maintenance_due = date.checked_add_signed(chrono::Duration::days(MENU_RECHECK_DAYS));
+                    graduation = Some(Graduation::Maintenance);
+                }
+            }
+        }
+        AdvanceOutcome::NotMet => state.consecutive = 0,
+        AdvanceOutcome::CannotDetermine => {}
+    }
+    ProgressUpdate {
+        outcome,
+        consecutive: state.consecutive,
+        required: required.max(1),
+        level_after: state.level,
+        graduation,
+    }
+}
+
+/// Design §5: once a 14-day pause has expired, the prescription starts over
+/// as if it had just begun. The "three checks before the prescription"
+/// baseline is retaken from `date`, so the reference judgment reports
+/// insufficient data until three checks after the pause exist, instead of
+/// immediately re-pausing on the checks taken before the pause.
+pub fn resume_after_pause(state: &mut PrescriptionProgress, date: NaiveDate) -> bool {
+    let Some(until) = state.paused_until else {
+        return false;
+    };
+    if date < until {
+        return false;
+    }
+    state.paused_until = None;
+    if state.judgment == PrescriptionJudgment::NoChange {
+        state.judgment = PrescriptionJudgment::None;
+    }
+    state.consecutive = 0;
+    state.started_on = Some(date);
+    true
+}
+
+pub fn apply_maintenance_recheck(state: &mut PrescriptionProgress, date: NaiveDate, regressed: Option<bool>) -> AdvanceOutcome {
+    if state.judgment != PrescriptionJudgment::Maintenance || state.maintenance_due.is_none_or(|due| date < due) {
+        return AdvanceOutcome::CannotDetermine;
+    }
+    let Some(regressed) = regressed else {
+        return AdvanceOutcome::CannotDetermine;
+    };
+    state.maintenance_due = None;
+    if regressed {
+        state.judgment = PrescriptionJudgment::None;
+        state.consecutive = 0;
+        AdvanceOutcome::NotMet
+    } else {
+        AdvanceOutcome::Met
+    }
+}
+
+pub fn reference_judgment(baseline: &[f64], after: &[f64]) -> ReferenceJudgment {
+    let baseline = baseline.iter().copied().filter(|value| value.is_finite()).collect::<Vec<_>>();
+    let after = after.iter().copied().filter(|value| value.is_finite()).collect::<Vec<_>>();
+    if baseline.len() < 3 || after.len() < 3 {
+        return ReferenceJudgment::InsufficientData;
+    }
+    let baseline = median(&baseline[baseline.len() - 3..]);
+    let recent = median(&after[after.len() - 3..]);
+    if recent - baseline + f64::EPSILON >= REFERENCE_IMPROVEMENT_THRESHOLD {
+        return ReferenceJudgment::Improved;
+    }
+    if after.len() >= REFERENCE_NO_CHANGE_RUN
+        && after[after.len() - REFERENCE_NO_CHANGE_RUN..]
+            .iter()
+            .all(|value| (value - baseline).abs() < REFERENCE_NO_CHANGE_BAND)
+    {
+        return ReferenceJudgment::NoChange;
+    }
+    ReferenceJudgment::Pending
+}
+
+pub fn apply_reference_judgment(
+    state: &mut PrescriptionProgress,
+    judgment: ReferenceJudgment,
+    alternate_or_only_prescription: bool,
+    date: NaiveDate,
+) {
+    match judgment {
+        ReferenceJudgment::Improved => state.judgment = PrescriptionJudgment::Improved,
+        ReferenceJudgment::NoChange => {
+            state.judgment = PrescriptionJudgment::NoChange;
+            if alternate_or_only_prescription {
+                state.paused_until = date.checked_add_signed(chrono::Duration::days(MENU_RECHECK_DAYS));
+            }
+        }
+        ReferenceJudgment::InsufficientData | ReferenceJudgment::Pending => {}
+    }
+}
+
+fn median(values: &[f64]) -> f64 {
+    let mut values = values.to_vec();
+    values.sort_by(f64::total_cmp);
+    let middle = values.len() / 2;
+    if values.len().is_multiple_of(2) {
+        (values[middle - 1] + values[middle]) / 2.0
+    } else {
+        values[middle]
     }
 }
 
@@ -646,7 +921,8 @@ pub fn build_menu_for_languages(
     });
     let multi = plans.len() == 2;
     if plans.iter().all(|plan| !plan.sufficient) {
-        let selected = alternating_index(as_of, plans.len());
+        let selected = previous_language_alternate(&plans, as_of, history, |past| past.language.as_deref())
+            .unwrap_or_else(|| alternating_index(as_of, plans.len()));
         let plan = &plans[selected];
         return introductory_menu(
             catalog,
@@ -701,7 +977,9 @@ pub fn build_menu_for_languages(
             multi || plan.language != display,
         )?);
     }
-    let check_language = plans[alternating_index(as_of, plans.len())].language;
+    let check_index = previous_language_alternate(&plans, as_of, history, |past| past.check_language.as_deref())
+        .unwrap_or_else(|| alternating_index(as_of, plans.len()));
+    let check_language = plans[check_index].language;
     let mut check = fixed_step(catalog.fixed(MenuRole::Check)?, display, check_language, "-");
     if menu.minutes == 20 {
         check.minutes = 4;
@@ -838,7 +1116,8 @@ fn choose_primary_language(plans: &[LanguagePlan<'_>], as_of: NaiveDate, minutes
         return 0;
     }
     if minutes == 10 {
-        return alternating_index(as_of, plans.len());
+        return previous_language_alternate(plans, as_of, history, |past| past.language.as_deref())
+            .unwrap_or_else(|| alternating_index(as_of, plans.len()));
     }
     if let Some((index, _)) = plans
         .iter()
@@ -869,6 +1148,22 @@ fn choose_primary_language(plans: &[LanguagePlan<'_>], as_of: NaiveDate, minutes
                 .then_with(|| language_code(right.language).cmp(language_code(left.language)))
         })
         .map_or_else(|| alternating_index(as_of, plans.len()), |(index, _)| index)
+}
+
+fn previous_language_alternate(
+    plans: &[LanguagePlan<'_>],
+    as_of: NaiveDate,
+    history: &[PastMenu],
+    language: impl Fn(&PastMenu) -> Option<&str>,
+) -> Option<usize> {
+    let yesterday = as_of.pred_opt()?;
+    let previous = history.iter().find(|past| past.date == yesterday).and_then(language)?;
+    plans
+        .iter()
+        .enumerate()
+        .find(|(_, plan)| language_code(plan.language) != previous && plan.sufficient)
+        .map(|(index, _)| index)
+        .or_else(|| plans.iter().position(|plan| language_code(plan.language) != previous))
 }
 
 fn alternating_index(as_of: NaiveDate, count: usize) -> usize {
@@ -1048,7 +1343,7 @@ fn primary_step(
             .grade
             .as_ref()
             .ok_or_else(|| "candidate has no language grade".to_owned())?;
-        return Ok(prescription_step(
+        let mut step = prescription_step(
             &selected,
             role,
             minutes,
@@ -1059,7 +1354,19 @@ fn primary_step(
                 practice: plan.language,
                 show_label: show_language,
             },
-        ));
+        );
+        if plan
+            .source
+            .states
+            .get(&selected.0.id)
+            .is_some_and(|state| state.judgment == PrescriptionJudgment::Improved)
+        {
+            step.reason.push_str(match display {
+                Lang::En => "; improved (reference only; no control)",
+                Lang::Ja => "；改善（参考．対照なし）",
+            });
+        }
+        return Ok(step);
     }
     let selected = available_prescription(catalog, "transition.adaptive", &plan.source.states)
         .or_else(|| available_prescription(catalog, "transition.ngram", &plan.source.states))
@@ -1172,9 +1479,83 @@ pub fn evaluate_current_advance(condition: &AdvanceCondition, record: &crate::re
     }
 }
 
-fn current_metric_value(metric: MenuMetric, record: &crate::record::SessionRecord) -> Option<f64> {
+pub fn evaluate_advance_measurement(condition: &AdvanceCondition, value: Option<f64>, own_median: Option<f64>) -> AdvanceOutcome {
+    let met = match condition.rule {
+        AdvanceRule::LeOwnMedian => value.zip(own_median).map(|(value, median)| value <= median),
+        AdvanceRule::GeOwnMedian => value.zip(own_median).map(|(value, median)| value >= median),
+        AdvanceRule::GatePassed | AdvanceRule::R3Effective | AdvanceRule::TargetWithAccuracy | AdvanceRule::Removable => {
+            value.map(|value| value >= 1.0)
+        }
+        AdvanceRule::GeThreshold => value.zip(condition.threshold).map(|(value, threshold)| value >= threshold),
+        AdvanceRule::LtThreshold => value.zip(condition.threshold).map(|(value, threshold)| value < threshold),
+    };
+    match met {
+        Some(true) => AdvanceOutcome::Met,
+        Some(false) => AdvanceOutcome::NotMet,
+        None => AdvanceOutcome::CannotDetermine,
+    }
+}
+
+pub fn evaluate_advance_from_sources(
+    condition: &AdvanceCondition,
+    step_value: Option<f64>,
+    check_value: Option<f64>,
+    own_median: Option<f64>,
+) -> AdvanceOutcome {
+    let value = match condition.source {
+        AdvanceSource::Step => step_value,
+        AdvanceSource::Check => check_value,
+    };
+    evaluate_advance_measurement(condition, value, own_median)
+}
+
+pub fn grade_component_for_metric(metric: MenuMetric) -> Option<Component> {
+    Some(match metric {
+        MenuMetric::WordOnsetRatio => Component::Preview,
+        MenuMetric::WithinWordIkiCv => Component::Rhythm,
+        MenuMetric::PostErrorExcessMs => Component::Recovery,
+        MenuMetric::RolloverRate => Component::Overlap,
+        _ => return None,
+    })
+}
+
+pub fn grade_component_for_menu_component(component: MenuComponent) -> Option<Component> {
+    Some(match component {
+        MenuComponent::Speed => Component::Speed,
+        MenuComponent::Accuracy => Component::Accuracy,
+        MenuComponent::Rhythm => Component::Rhythm,
+        MenuComponent::Transition => Component::Transition,
+        MenuComponent::Preview => Component::Preview,
+        MenuComponent::Recovery => Component::Recovery,
+        MenuComponent::Overlap => Component::Overlap,
+        MenuComponent::Reach | MenuComponent::Japanese | MenuComponent::Endurance | MenuComponent::Blind => return None,
+    })
+}
+
+pub fn is_alternate_or_only_prescription(catalog: &MenuCatalog, prescription_id: &str) -> bool {
+    let Some(prescription) = catalog.prescription(prescription_id) else {
+        return false;
+    };
+    default_prescription_id(prescription.component).is_some_and(|default| default != prescription_id) || prescription.alternate == prescription_id
+}
+
+pub fn current_metric_value(metric: MenuMetric, record: &crate::record::SessionRecord) -> Option<f64> {
     match metric {
         MenuMetric::NetWpm => Some(record.header.net_wpm),
+        MenuMetric::AccuracyGatePassed => serde_json::from_str::<serde_json::Value>(&record.header.mode_params)
+            .ok()
+            .and_then(|params| params.get("score_eligible").and_then(serde_json::Value::as_bool))
+            .map(|met| if met { 1.0 } else { 0.0 }),
+        MenuMetric::PacerTargetReached => serde_json::from_str::<serde_json::Value>(&record.header.mode_params)
+            .ok()
+            .and_then(|params| params.get("pacer_target_wpm").and_then(serde_json::Value::as_f64))
+            .map(|target| {
+                if record.header.accuracy >= 0.95 && record.header.net_wpm >= target {
+                    1.0
+                } else {
+                    0.0
+                }
+            }),
         MenuMetric::EnduranceSecondHalfSlowdown => {
             let comparison = crate::practice::session_variants::compare_endurance_log(&record.log);
             (comparison.first_iki_ms > 0.0 && comparison.second_iki_ms > 0.0)
@@ -1216,7 +1597,7 @@ fn available_prescription<'a>(
         if state.paused {
             return None;
         }
-        if state.judgment == PrescriptionJudgment::Ineffective {
+        if matches!(state.judgment, PrescriptionJudgment::Ineffective | PrescriptionJudgment::NoChange) {
             id = &prescription.alternate;
             continue;
         }
@@ -1270,15 +1651,24 @@ pub fn build_from_storage(
     use crate::analysis::DiagnosisOptions;
     use crate::analysis::japanese::SpellingDecision;
     use crate::analysis::metrics::{AnalysisSettings, analyze_records};
-    use crate::analysis::progress::{ProgressOptions, ReferencePrompts, analyze_progress};
+    use crate::analysis::progress::{ProgressOptions, analyze_progress};
     use crate::analysis::summary::{SkillAxis, skill_axis_values};
-    use crate::bench::{BenchPart, generate_version};
     use crate::data::{DataCatalog, TrainingDataSource};
     use crate::engine::session::KeystrokeKind;
     use crate::error::AppError;
     use crate::layout::builtin_layout;
     use crate::layout::geometry::geometry;
     use crate::record::db;
+
+    let practice_languages = config.menu.practice_languages(display);
+    let language_key = menu_language_key(&practice_languages);
+    if let Some(run) = db::find_menu_run_for_day(path, as_of, &config.keyboard.layout, &language_key, MENU_VERSION, config.menu.minutes)? {
+        return serde_json::from_str(&run.plan_json).map_err(Into::into);
+    }
+    let history = db::load_menu_runs_before(path, as_of, &config.keyboard.layout, MENU_VERSION)?
+        .into_iter()
+        .flat_map(|run| past_menus_from_run(&run))
+        .collect::<Vec<_>>();
 
     let records = db::load_records_filtered(path, None, None)?;
     let layout = builtin_layout(&config.keyboard.layout).unwrap_or_else(|_| builtin_layout("qwerty").expect("bundled qwerty"));
@@ -1290,19 +1680,7 @@ pub fn build_from_storage(
         half_life_days: config.analysis.half_life_days,
     };
     let at = as_of.and_hms_opt(23, 59, 59).expect("valid end of day").and_utc();
-    let reference_version = |part| generate_version(part, 1, &corpus, &layout, &keyboard_geometry);
-    let references = ReferencePrompts {
-        english: reference_version(BenchPart::A)
-            .prompts
-            .into_iter()
-            .map(|prompt| crate::analysis::model::ExpectedPrompt::english(prompt.target))
-            .collect(),
-        japanese: reference_version(BenchPart::C)
-            .prompts
-            .into_iter()
-            .filter_map(|prompt| prompt.reading.map(crate::analysis::model::ExpectedPrompt::japanese))
-            .collect(),
-    };
+    let references = reference_prompts(&corpus, &layout, &keyboard_geometry);
     let progress = analyze_progress(
         &records,
         &layout,
@@ -1324,24 +1702,27 @@ pub fn build_from_storage(
         corpus.words_en(),
         corpus.words_ja(),
     );
-    let mut states = BTreeMap::new();
-    if db::load_prescriptions(path)?
+    let r3_ineffective = db::load_prescriptions(path)?
         .iter()
         .rev()
-        .find(|row| row.kind == "adaptive")
-        .is_some_and(|row| row.status == "ineffective")
-    {
-        states.insert(
-            "transition.adaptive".to_owned(),
-            PrescriptionState {
-                judgment: PrescriptionJudgment::Ineffective,
-                ..PrescriptionState::default()
-            },
-        );
-    }
+        .find(|row| progress::is_r3_adaptive_kind(&row.kind))
+        .is_some_and(|row| row.status == "ineffective");
     let mut inputs = Vec::new();
-    for practice in config.menu.practice_languages(display) {
+    for practice in practice_languages {
         let language = language_code(practice);
+        let mut states = db::load_menu_progresses(path, &config.keyboard.layout, language)?
+            .into_iter()
+            .map(|(id, progress)| (id, progress.build_state(as_of)))
+            .collect::<BTreeMap<_, _>>();
+        if r3_ineffective {
+            states.insert(
+                "transition.adaptive".to_owned(),
+                PrescriptionState {
+                    judgment: PrescriptionJudgment::Ineffective,
+                    ..PrescriptionState::default()
+                },
+            );
+        }
         let language_records = records
             .iter()
             .filter(|record| crate::analysis::model::session_language(record) == language)
@@ -1419,10 +1800,72 @@ pub fn build_from_storage(
                 reaction_median_ms,
                 last_bench_date,
             },
-            states: states.clone(),
+            states,
         });
     }
-    build_menu_for_languages(bundled_catalog().map_err(AppError::Record)?, &inputs, display, &config.menu, &[]).map_err(AppError::Record)
+    build_menu_for_languages(bundled_catalog().map_err(AppError::Record)?, &inputs, display, &config.menu, &history).map_err(AppError::Record)
+}
+
+/// Bench reference prompts used to correct WPM for difficulty (shared by the
+/// menu assembly and the H5 assistance analysis used by `blind.fade`).
+pub(crate) fn reference_prompts(
+    corpus: &crate::data::DataCatalog,
+    layout: &crate::layout::KeyboardLayout,
+    geometry: &crate::layout::geometry::KeyboardGeometry,
+) -> crate::analysis::progress::ReferencePrompts {
+    use crate::bench::{BenchPart, generate_version};
+    let reference_version = |part| generate_version(part, 1, corpus, layout, geometry);
+    crate::analysis::progress::ReferencePrompts {
+        english: reference_version(BenchPart::A)
+            .prompts
+            .into_iter()
+            .map(|prompt| crate::analysis::model::ExpectedPrompt::english(prompt.target))
+            .collect(),
+        japanese: reference_version(BenchPart::C)
+            .prompts
+            .into_iter()
+            .filter_map(|prompt| prompt.reading.map(crate::analysis::model::ExpectedPrompt::japanese))
+            .collect(),
+    }
+}
+
+fn past_menus_from_run(run: &crate::record::db::MenuRunRecord) -> Vec<PastMenu> {
+    let Ok(menu) = serde_json::from_str::<DailyMenu>(&run.plan_json) else {
+        return Vec::new();
+    };
+    let primary_a = menu.steps.iter().find(|step| step.role == MenuRole::PrimaryA);
+    let check_language = menu
+        .steps
+        .iter()
+        .find(|step| step.role == MenuRole::Check)
+        .map(|step| language_code(step.language).to_owned());
+    let mut languages = Vec::new();
+    if let Some(step) = primary_a {
+        languages.push(step.language);
+    }
+    for step in menu
+        .steps
+        .iter()
+        .filter(|step| matches!(step.role, MenuRole::PrimaryA | MenuRole::PrimaryB))
+    {
+        if !languages.contains(&step.language) {
+            languages.push(step.language);
+        }
+    }
+    languages
+        .into_iter()
+        .map(|language| PastMenu {
+            date: menu.date,
+            language: Some(language_code(language).to_owned()),
+            check_language: check_language.clone(),
+            primary_prescription_ids: menu
+                .steps
+                .iter()
+                .filter(|step| matches!(step.role, MenuRole::PrimaryA | MenuRole::PrimaryB) && step.language == language)
+                .map(|step| step.prescription_id.clone())
+                .collect(),
+        })
+        .collect()
 }
 
 pub fn render_from_storage(

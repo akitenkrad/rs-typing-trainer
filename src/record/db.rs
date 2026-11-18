@@ -1,4 +1,4 @@
-//! SQLite storage format v2 and transactional v1 migration.
+//! SQLite session and practice-menu storage with transactional migrations.
 
 use std::path::Path;
 use std::time::Duration;
@@ -18,7 +18,7 @@ use crate::error::{AppError, AppResult};
 use crate::metrics::stats::GameResult;
 use crate::record::{SessionHeader, SessionRecord};
 
-pub const SCHEMA_VERSION: i64 = 7;
+pub const SCHEMA_VERSION: i64 = 8;
 
 const V6_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS transition_model (
@@ -72,6 +72,48 @@ CREATE TABLE IF NOT EXISTS review_schedule (
   PRIMARY KEY (layout, from_key, to_key)
 );
 CREATE INDEX IF NOT EXISTS idx_review_schedule_due ON review_schedule(layout, next_due);
+"#;
+
+const V8_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS menu_runs (
+  id INTEGER PRIMARY KEY,
+  date TEXT NOT NULL,
+  layout TEXT NOT NULL,
+  lang TEXT NOT NULL,
+  catalog_version TEXT NOT NULL,
+  minutes INTEGER NOT NULL,
+  plan_json TEXT NOT NULL,
+  completed_steps INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(date, layout, lang, catalog_version, minutes, plan_json)
+);
+CREATE INDEX IF NOT EXISTS idx_menu_runs_date ON menu_runs(date DESC, id DESC);
+CREATE TABLE IF NOT EXISTS menu_steps (
+  run_id INTEGER NOT NULL REFERENCES menu_runs(id) ON DELETE CASCADE,
+  idx INTEGER NOT NULL,
+  role TEXT NOT NULL,
+  prescription_id TEXT,
+  level INTEGER,
+  session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  metric TEXT,
+  value REAL,
+  advance_met INTEGER,
+  level_after INTEGER,
+  PRIMARY KEY (run_id, idx)
+);
+CREATE INDEX IF NOT EXISTS idx_menu_steps_session ON menu_steps(session_id);
+CREATE TABLE IF NOT EXISTS skill_snapshots (
+  run_id INTEGER NOT NULL REFERENCES menu_runs(id) ON DELETE CASCADE,
+  date TEXT NOT NULL,
+  lang TEXT NOT NULL,
+  component TEXT NOT NULL,
+  raw_value REAL NOT NULL,
+  n INTEGER NOT NULL,
+  source TEXT NOT NULL,
+  corrected INTEGER NOT NULL,
+  PRIMARY KEY (run_id, lang, component, source)
+);
+CREATE INDEX IF NOT EXISTS idx_skill_snapshots_series
+  ON skill_snapshots(lang, component, date, run_id);
 "#;
 
 pub const SCHEMA: &str = r#"
@@ -180,6 +222,32 @@ pub struct SessionSummary {
     pub score_eligible: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MenuRunRecord {
+    pub id: i64,
+    pub date: chrono::NaiveDate,
+    pub layout: String,
+    pub lang: String,
+    pub catalog_version: String,
+    pub minutes: u8,
+    pub plan_json: String,
+    pub completed_steps: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MenuStepRecord {
+    pub run_id: i64,
+    pub idx: usize,
+    pub role: String,
+    pub prescription_id: Option<String>,
+    pub level: Option<u8>,
+    pub session_id: i64,
+    pub metric: Option<String>,
+    pub value: Option<f64>,
+    pub advance_met: Option<bool>,
+    pub level_after: Option<u8>,
+}
+
 pub fn save(path: &Path, record: &SessionRecord) -> AppResult<i64> {
     let mut conn = open(path)?;
     let tx = conn.transaction()?;
@@ -264,6 +332,284 @@ pub fn list(path: &Path) -> AppResult<Vec<SessionSummary>> {
     )?;
     let rows = stmt.query_map([], summary_from_row)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+/// Return the day's run for this identity, creating it when missing.
+///
+/// A run is identified by the date, layout, configured practice languages,
+/// catalog version and length (§8.2) — not by the plan text. If the plan
+/// changed before any step was recorded (for example the introductory menu
+/// became a regular menu), the stored plan is replaced; once a step has been
+/// recorded, the stored plan is kept so step indices stay meaningful.
+#[allow(clippy::too_many_arguments)]
+pub fn ensure_menu_run(
+    path: &Path,
+    date: chrono::NaiveDate,
+    layout: &str,
+    lang: &str,
+    catalog_version: &str,
+    minutes: u8,
+    plan_json: &str,
+) -> AppResult<MenuRunRecord> {
+    let mut conn = open(path)?;
+    let transaction = conn.transaction()?;
+    let day = date.format("%Y-%m-%d").to_string();
+    let existing = transaction
+        .query_row(
+            "SELECT id, date, layout, lang, catalog_version, minutes, plan_json, completed_steps
+             FROM menu_runs
+             WHERE date=?1 AND layout=?2 AND lang=?3 AND catalog_version=?4 AND minutes=?5
+             ORDER BY id DESC LIMIT 1",
+            params![day, layout, lang, catalog_version, i64::from(minutes)],
+            menu_run_from_row,
+        )
+        .optional()?;
+    let run = match existing {
+        Some(mut run) => {
+            if run.plan_json != plan_json && run.completed_steps == 0 {
+                transaction.execute("UPDATE menu_runs SET plan_json=?2 WHERE id=?1", params![run.id, plan_json])?;
+                run.plan_json = plan_json.to_owned();
+            }
+            run
+        }
+        None => {
+            transaction.execute(
+                "INSERT INTO menu_runs
+                 (date, layout, lang, catalog_version, minutes, plan_json, completed_steps)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)",
+                params![day, layout, lang, catalog_version, i64::from(minutes), plan_json],
+            )?;
+            MenuRunRecord {
+                id: transaction.last_insert_rowid(),
+                date,
+                layout: layout.to_owned(),
+                lang: lang.to_owned(),
+                catalog_version: catalog_version.to_owned(),
+                minutes,
+                plan_json: plan_json.to_owned(),
+                completed_steps: 0,
+            }
+        }
+    };
+    transaction.commit()?;
+    Ok(run)
+}
+
+pub fn load_menu_run(path: &Path, id: i64) -> AppResult<Option<MenuRunRecord>> {
+    let conn = open(path)?;
+    conn.query_row(
+        "SELECT id, date, layout, lang, catalog_version, minutes, plan_json, completed_steps
+         FROM menu_runs WHERE id=?1",
+        [id],
+        menu_run_from_row,
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
+pub fn find_menu_run_for_day(
+    path: &Path,
+    date: chrono::NaiveDate,
+    layout: &str,
+    lang: &str,
+    catalog_version: &str,
+    minutes: u8,
+) -> AppResult<Option<MenuRunRecord>> {
+    let conn = open(path)?;
+    conn.query_row(
+        "SELECT id, date, layout, lang, catalog_version, minutes, plan_json, completed_steps
+         FROM menu_runs
+         WHERE date=?1 AND layout=?2 AND lang=?3 AND catalog_version=?4 AND minutes=?5
+         ORDER BY id DESC LIMIT 1",
+        params![date.format("%Y-%m-%d").to_string(), layout, lang, catalog_version, i64::from(minutes)],
+        menu_run_from_row,
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
+pub fn load_menu_runs_before(path: &Path, before: chrono::NaiveDate, layout: &str, catalog_version: &str) -> AppResult<Vec<MenuRunRecord>> {
+    let conn = open(path)?;
+    let mut statement = conn.prepare(
+        "SELECT id, date, layout, lang, catalog_version, minutes, plan_json, completed_steps
+         FROM menu_runs
+         WHERE date < ?1 AND layout=?2 AND catalog_version=?3
+         ORDER BY date DESC, id DESC",
+    )?;
+    statement
+        .query_map(params![before.format("%Y-%m-%d").to_string(), layout, catalog_version], menu_run_from_row)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(Into::into)
+}
+
+pub fn record_menu_step(path: &Path, step: &MenuStepRecord) -> AppResult<()> {
+    let mut conn = open(path)?;
+    let transaction = conn.transaction()?;
+    write_menu_step(&transaction, step)?;
+    transaction.commit()?;
+    Ok(())
+}
+
+fn write_menu_step(transaction: &Transaction<'_>, step: &MenuStepRecord) -> rusqlite::Result<()> {
+    transaction.execute(
+        "INSERT INTO menu_steps
+         (run_id, idx, role, prescription_id, level, session_id, metric, value, advance_met, level_after)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+         ON CONFLICT(run_id, idx) DO UPDATE SET
+           role=excluded.role,
+           prescription_id=excluded.prescription_id,
+           level=excluded.level,
+           session_id=excluded.session_id,
+           metric=excluded.metric,
+           value=excluded.value,
+           advance_met=excluded.advance_met,
+           level_after=excluded.level_after",
+        params![
+            step.run_id,
+            i64::try_from(step.idx).unwrap_or(i64::MAX),
+            step.role,
+            step.prescription_id,
+            step.level.map(i64::from),
+            step.session_id,
+            step.metric,
+            step.value,
+            step.advance_met.map(i64::from),
+            step.level_after.map(i64::from),
+        ],
+    )?;
+    transaction.execute(
+        "UPDATE menu_runs
+         SET completed_steps=(SELECT COUNT(*) FROM menu_steps WHERE run_id=?1)
+         WHERE id=?1",
+        [step.run_id],
+    )?;
+    Ok(())
+}
+
+fn write_menu_step_advance(transaction: &Transaction<'_>, advance: &MenuStepAdvance) -> rusqlite::Result<()> {
+    transaction.execute(
+        "UPDATE menu_steps SET metric=?3, value=?4, advance_met=?5, level_after=?6
+         WHERE run_id=?1 AND idx=?2",
+        params![
+            advance.run_id,
+            i64::try_from(advance.idx).unwrap_or(i64::MAX),
+            advance.metric,
+            advance.value,
+            advance.advance_met.map(i64::from),
+            advance.level_after.map(i64::from)
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn completed_menu_steps(path: &Path, run_id: i64) -> AppResult<Vec<usize>> {
+    let conn = open(path)?;
+    let mut statement = conn.prepare("SELECT idx FROM menu_steps WHERE run_id=?1 ORDER BY idx")?;
+    let rows = statement
+        .query_map([run_id], |row| row.get::<_, i64>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows.into_iter().filter_map(|idx| usize::try_from(idx).ok()).collect())
+}
+
+pub fn load_menu_steps(path: &Path, run_id: i64) -> AppResult<Vec<MenuStepRecord>> {
+    let conn = open(path)?;
+    let mut statement = conn.prepare(
+        "SELECT run_id, idx, role, prescription_id, level, session_id, metric, value, advance_met, level_after
+         FROM menu_steps WHERE run_id=?1 ORDER BY idx",
+    )?;
+    statement
+        .query_map([run_id], |row| {
+            Ok(MenuStepRecord {
+                run_id: row.get(0)?,
+                idx: row.get::<_, i64>(1)?.max(0) as usize,
+                role: row.get(2)?,
+                prescription_id: row.get(3)?,
+                level: row.get::<_, Option<i64>>(4)?.map(|value| value.clamp(0, i64::from(u8::MAX)) as u8),
+                session_id: row.get(5)?,
+                metric: row.get(6)?,
+                value: row.get(7)?,
+                advance_met: row.get::<_, Option<i64>>(8)?.map(|value| value != 0),
+                level_after: row.get::<_, Option<i64>>(9)?.map(|value| value.clamp(0, i64::from(u8::MAX)) as u8),
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(Into::into)
+}
+
+/// Judgment columns of an already recorded menu step (§8.2 `menu_steps`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct MenuStepAdvance {
+    pub run_id: i64,
+    pub idx: usize,
+    pub metric: Option<String>,
+    pub value: Option<f64>,
+    pub advance_met: Option<bool>,
+    pub level_after: Option<u8>,
+}
+
+/// What to write to `menu_steps` together with a prescription state.
+#[derive(Clone, Debug, PartialEq)]
+pub enum MenuStepWrite {
+    Nothing,
+    Insert(MenuStepRecord),
+    Advance(MenuStepAdvance),
+}
+
+/// A check step recorded in an earlier or the given run, with the run date.
+#[derive(Clone, Debug)]
+pub struct MenuCheckRecord {
+    pub run_id: i64,
+    pub date: chrono::NaiveDate,
+    pub record: SessionRecord,
+}
+
+/// Check-step sessions of `language` from runs up to and including `up_to_run_id`,
+/// oldest first.
+pub fn load_menu_check_records(path: &Path, language: &str, up_to_run_id: i64) -> AppResult<Vec<MenuCheckRecord>> {
+    let conn = open(path)?;
+    let rows = {
+        let mut statement = conn.prepare(
+            "SELECT menu_steps.session_id, menu_runs.id, menu_runs.date
+             FROM menu_steps
+             JOIN menu_runs ON menu_runs.id=menu_steps.run_id
+             WHERE menu_steps.role='check' AND menu_steps.run_id <= ?1
+             ORDER BY menu_runs.date, menu_steps.run_id",
+        )?;
+        statement
+            .query_map([up_to_run_id], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    let mut records = Vec::new();
+    for (session_id, run_id, date) in rows {
+        let Ok(date) = chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d") else {
+            continue;
+        };
+        if let Some(record) = load_record_from(&conn, session_id)?
+            && crate::analysis::model::session_language(&record) == language
+        {
+            records.push(MenuCheckRecord { run_id, date, record });
+        }
+    }
+    Ok(records)
+}
+
+fn menu_run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MenuRunRecord> {
+    let date: String = row.get(1)?;
+    let minutes = row.get::<_, i64>(5)?.clamp(0, i64::from(u8::MAX)) as u8;
+    let completed_steps = row.get::<_, i64>(7)?.max(0) as usize;
+    Ok(MenuRunRecord {
+        id: row.get(0)?,
+        date: chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d")
+            .map_err(|error| rusqlite::Error::FromSqlConversionFailure(1, rusqlite::types::Type::Text, Box::new(error)))?,
+        layout: row.get(2)?,
+        lang: row.get(3)?,
+        catalog_version: row.get(4)?,
+        minutes,
+        plan_json: row.get(6)?,
+        completed_steps,
+    })
 }
 
 pub fn ranked_sessions(path: &Path) -> AppResult<Vec<SessionSummary>> {
@@ -702,6 +1048,86 @@ fn load_meta_json<T: serde::de::DeserializeOwned>(path: &Path, key: &str) -> App
     value.map(|bytes| serde_json::from_slice(&bytes).map_err(Into::into)).transpose()
 }
 
+fn menu_progress_key(layout: &str, lang: &str, prescription_id: &str) -> String {
+    format!("menu.state.{layout}.{lang}.{prescription_id}")
+}
+
+pub fn load_menu_progress(
+    path: &Path,
+    layout: &str,
+    lang: &str,
+    prescription_id: &str,
+) -> AppResult<Option<crate::practice::menu::PrescriptionProgress>> {
+    load_meta_json(path, &menu_progress_key(layout, lang, prescription_id))
+}
+
+pub fn load_menu_progresses(
+    path: &Path,
+    layout: &str,
+    lang: &str,
+) -> AppResult<std::collections::BTreeMap<String, crate::practice::menu::PrescriptionProgress>> {
+    let conn = open(path)?;
+    let prefix = format!("menu.state.{layout}.{lang}.");
+    let mut statement = conn.prepare("SELECT key, value FROM meta WHERE key LIKE ?1 ORDER BY key")?;
+    let rows = statement
+        .query_map([format!("{prefix}%")], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+    rows.into_iter()
+        .map(|(key, value)| {
+            let prescription_id = key
+                .strip_prefix(&prefix)
+                .ok_or_else(|| AppError::Record(format!("invalid menu state key {key:?}")))?
+                .to_owned();
+            let state = serde_json::from_slice(&value)?;
+            Ok((prescription_id, state))
+        })
+        .collect()
+}
+
+pub fn update_menu_progress<R>(
+    path: &Path,
+    layout: &str,
+    lang: &str,
+    prescription_id: &str,
+    update: impl FnOnce(&mut crate::practice::menu::PrescriptionProgress) -> R,
+) -> AppResult<R> {
+    update_menu_progress_and_step(path, layout, lang, prescription_id, |state| (update(state), MenuStepWrite::Nothing))
+}
+
+/// Read, update and write one prescription state and write the matching
+/// `menu_steps` row in a single transaction, so a failed step write never
+/// leaves the state advanced on its own (the state cannot be rebuilt from
+/// the keystroke log).
+pub fn update_menu_progress_and_step<R>(
+    path: &Path,
+    layout: &str,
+    lang: &str,
+    prescription_id: &str,
+    update: impl FnOnce(&mut crate::practice::menu::PrescriptionProgress) -> (R, MenuStepWrite),
+) -> AppResult<R> {
+    let mut conn = open(path)?;
+    let transaction = conn.transaction()?;
+    let key = menu_progress_key(layout, lang, prescription_id);
+    let bytes = transaction
+        .query_row("SELECT value FROM meta WHERE key=?1", [&key], |row| row.get::<_, Vec<u8>>(0))
+        .optional()?;
+    let mut state = bytes.map(|value| serde_json::from_slice(&value)).transpose()?.unwrap_or_default();
+    let (result, step) = update(&mut state);
+    let value = serde_json::to_vec(&state)?;
+    transaction.execute(
+        "INSERT INTO meta (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        params![key, value],
+    )?;
+    match &step {
+        MenuStepWrite::Nothing => {}
+        MenuStepWrite::Insert(step) => write_menu_step(&transaction, step)?,
+        MenuStepWrite::Advance(advance) => write_menu_step_advance(&transaction, advance)?,
+    }
+    transaction.commit()?;
+    Ok(result)
+}
+
 pub fn save_adaptive_difficulty(path: &Path, state: &crate::analysis::prescription::DifficultyState) -> AppResult<()> {
     save_meta_json(path, "adaptive_difficulty", state)
 }
@@ -1004,6 +1430,9 @@ fn initialize_or_migrate(conn: &mut Connection) -> AppResult<()> {
         if version < 7 {
             migrate_v7(&tx)?;
         }
+        if version < 8 {
+            migrate_v8(&tx)?;
+        }
         tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
     tx.commit()?;
@@ -1018,6 +1447,11 @@ fn migrate_v6(tx: &Transaction<'_>) -> AppResult<()> {
 fn migrate_v7(tx: &Transaction<'_>) -> AppResult<()> {
     tx.execute_batch(V7_SCHEMA)?;
     ensure_item_kind(tx)?;
+    Ok(())
+}
+
+fn migrate_v8(tx: &Transaction<'_>) -> AppResult<()> {
+    tx.execute_batch(V8_SCHEMA)?;
     Ok(())
 }
 

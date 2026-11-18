@@ -64,7 +64,7 @@ fn review_schedule_roundtrips_and_v6_migrates_without_losing_prescriptions() {
     let connection = rusqlite::Connection::open(path).unwrap();
     assert_eq!(
         connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(),
-        7
+        8
     );
     let has_kind = connection
         .prepare("PRAGMA table_info(items)")
@@ -84,7 +84,7 @@ fn opening_v7_database_repairs_missing_item_kind_column() {
     connection.execute("ALTER TABLE items DROP COLUMN kind", []).unwrap();
     assert_eq!(
         connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(),
-        7
+        8
     );
     drop(connection);
 

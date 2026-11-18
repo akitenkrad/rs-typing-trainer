@@ -765,14 +765,98 @@ fn render_result_hint(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, l
 
 fn menu_result_line(app: &App, lang: Lang, width: usize) -> Option<String> {
     let step = app.daily_menu.as_ref()?.steps.get(app.menu_active_step?)?;
-    step.advance_condition.as_ref()?;
-    let outcome = app.menu_step_outcome.unwrap_or(crate::practice::menu::AdvanceOutcome::CannotDetermine);
+    if step.advance_condition.is_none() {
+        return menu_check_judgments_line(app, lang, width);
+    }
+    let status = if let Some(mut progress) = app.menu_step_progress {
+        // The app keeps `menu_step_outcome` equal to the recorded outcome.
+        progress.outcome = app.menu_step_outcome.unwrap_or(progress.outcome);
+        menu_progress_label(progress, lang)
+    } else if let Some(deferral) = app.menu_step_deferral {
+        menu_deferral_label(deferral, lang)
+    } else {
+        app.menu_step_outcome
+            .unwrap_or(crate::practice::menu::AdvanceOutcome::CannotDetermine)
+            .label(lang)
+            .to_owned()
+    };
+    let reference = menu_reference_suffix(app.menu_step_reference, lang);
     let (prefix, suffix) = match lang {
-        Lang::En => ("Graduation condition: ", format!(" — This session: {}", outcome.label(lang))),
-        Lang::Ja => ("卒業の条件: ", format!(" — この回: {}", outcome.label(lang))),
+        Lang::En => ("Graduation condition: ", format!(" — This session: {status}{reference}")),
+        Lang::Ja => ("卒業の条件: ", format!(" — この回: {status}{reference}")),
     };
     let available = width.saturating_sub(UnicodeWidthStr::width(prefix) + UnicodeWidthStr::width(suffix.as_str()));
     Some(format!("{prefix}{}{suffix}", truncate_display(&step.advance, available)))
+}
+
+/// The check step itself has no graduation condition; it shows the
+/// prescriptions that were judged with it (§4.3 `advance.source = "check"`).
+fn menu_check_judgments_line(app: &App, lang: Lang, width: usize) -> Option<String> {
+    let parts = app
+        .menu_step_others
+        .iter()
+        .filter_map(|judgment| {
+            let status = judgment.progress.map(|progress| menu_progress_label(progress, lang));
+            let reference = menu_reference_suffix(judgment.reference, lang);
+            (status.is_some() || !reference.is_empty()).then(|| {
+                format!("{} {}{reference}", judgment.title, status.unwrap_or_default())
+                    .trim_end()
+                    .to_owned()
+            })
+        })
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        return None;
+    }
+    let (prefix, separator) = match lang {
+        Lang::En => ("Judged with this check: ", "; "),
+        Lang::Ja => ("この確認で判定: ", "，"),
+    };
+    let available = width.saturating_sub(UnicodeWidthStr::width(prefix));
+    Some(format!("{prefix}{}", truncate_display(&parts.join(separator), available)))
+}
+
+fn menu_progress_label(progress: crate::practice::menu::ProgressUpdate, lang: Lang) -> String {
+    use crate::practice::menu::Graduation;
+
+    match (progress.graduation, lang) {
+        (Some(Graduation::Level(level)), Lang::En) => format!("graduated → level {level}"),
+        (Some(Graduation::Level(level)), Lang::Ja) => format!("卒業 → レベル {level}"),
+        (Some(Graduation::Maintenance), Lang::En) => "graduated → maintenance".to_owned(),
+        (Some(Graduation::Maintenance), Lang::Ja) => "卒業 → 維持".to_owned(),
+        (None, _) => format!("{} {}/{}", progress.outcome.label(lang), progress.consecutive, progress.required),
+    }
+}
+
+fn menu_deferral_label(deferral: crate::practice::menu::progress::JudgmentDeferral, lang: Lang) -> String {
+    use crate::practice::menu::progress::JudgmentDeferral;
+
+    match (deferral, lang) {
+        (JudgmentDeferral::AwaitingCheck, Lang::En) => "judged after the check step".to_owned(),
+        (JudgmentDeferral::AwaitingCheck, Lang::Ja) => "確認段の後で判定".to_owned(),
+        (JudgmentDeferral::CheckLanguage(check), Lang::En) => format!(
+            "today's check is in {}, judged next time",
+            match check {
+                Lang::En => "English",
+                Lang::Ja => "Japanese",
+            }
+        ),
+        (JudgmentDeferral::CheckLanguage(check), Lang::Ja) => format!(
+            "今日の確認は{}なので判定は次回",
+            match check {
+                Lang::En => "英語",
+                Lang::Ja => "日本語",
+            }
+        ),
+    }
+}
+
+fn menu_reference_suffix(reference: Option<crate::practice::menu::ReferenceJudgment>, lang: Lang) -> &'static str {
+    match (reference, lang) {
+        (Some(crate::practice::menu::ReferenceJudgment::Improved), Lang::En) => "; improved (reference only; no control)",
+        (Some(crate::practice::menu::ReferenceJudgment::Improved), Lang::Ja) => "；改善（参考．対照なし）",
+        _ => "",
+    }
 }
 
 fn truncate_display(value: &str, width: usize) -> String {

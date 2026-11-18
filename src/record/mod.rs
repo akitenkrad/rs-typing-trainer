@@ -167,8 +167,9 @@ impl SessionRecord {
 
     /// Add the in-memory practice-menu context without changing the session
     /// schema. Older readers ignore these extra JSON keys.
-    pub fn set_menu_context(&mut self, prescription_id: &str, step: usize) {
+    pub fn set_menu_context(&mut self, run_id: i64, prescription_id: &str, step: usize) {
         let mut params = serde_json::from_str::<serde_json::Value>(&self.header.mode_params).unwrap_or_else(|_| serde_json::json!({}));
+        params["menu_run_id"] = serde_json::json!(run_id);
         params["menu_prescription_id"] = serde_json::Value::String(prescription_id.to_owned());
         params["menu_step"] = serde_json::json!(step);
         self.header.mode_params = params.to_string();

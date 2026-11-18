@@ -246,6 +246,7 @@ fn menu_runs_steps_in_order_restores_settings_and_keeps_completion_marks() {
     let params: serde_json::Value = serde_json::from_str(&app.result_record.as_ref().unwrap().header.mode_params).unwrap();
     assert_eq!(params["menu_prescription_id"], "fixed.warmup");
     assert_eq!(params["menu_step"], 1);
+    assert!(params["menu_run_id"].as_i64().is_some());
     assert!(
         serde_json::from_value::<SessionModeParams>(params).is_ok(),
         "H5 reader must accept the added keys"
@@ -267,6 +268,37 @@ fn menu_runs_steps_in_order_restores_settings_and_keeps_completion_marks() {
     assert_eq!(app.config.session.preview_items, 2);
     assert_eq!(app.config.adaptive.drill_ratio, 0.8);
     assert_eq!(app.menu_completed.iter().copied().collect::<Vec<_>>(), vec![0]);
+}
+
+#[test]
+fn completed_menu_steps_survive_reopening_and_next_day_rebuilds_the_plan() {
+    let home = tempfile::TempDir::new().unwrap();
+    let path = home.path().join("sessions.db");
+    let mut config = base_config();
+    config.storage.db_path = Some(path);
+    let date = chrono::NaiveDate::from_ymd_opt(2026, 11, 18).unwrap();
+    let now = Instant::now();
+
+    {
+        let mut first = rs_typing_trainer::app::App::new_at(config.clone(), home.path().to_path_buf(), date);
+        open_menu(&mut first, now);
+        finish_selected_step(&mut first, now + Duration::from_secs(1));
+        assert!(first.menu_completed.contains(&0));
+    }
+
+    let mut reopened = rs_typing_trainer::app::App::new_at(config, home.path().to_path_buf(), date);
+    open_menu(&mut reopened, now + Duration::from_secs(130));
+    assert!(reopened.menu_completed.contains(&0));
+    assert_eq!(reopened.daily_menu.as_ref().unwrap().date, date);
+
+    let tomorrow = date.succ_opt().unwrap();
+    reopened
+        .on_tick_at_date(Duration::ZERO, now + Duration::from_secs(131), tomorrow)
+        .unwrap();
+    reopened.handle_key_at(key(KeyCode::Esc), now + Duration::from_secs(132));
+    open_menu(&mut reopened, now + Duration::from_secs(133));
+    assert_eq!(reopened.daily_menu.as_ref().unwrap().date, tomorrow);
+    assert!(reopened.menu_completed.is_empty());
 }
 
 #[test]
@@ -324,6 +356,18 @@ fn menu_result_adds_the_graduation_condition_and_current_outcome_line() {
     assert!(text.contains("Graduation condition:"), "{text}");
     assert!(text.contains("This session: cannot determine"), "{text}");
     assert!(text.contains("[Enter] Next step"), "{text}");
+
+    app.daily_menu.as_mut().unwrap().steps[1].advance_condition.as_mut().unwrap().sessions = 3;
+    app.menu_step_outcome = Some(AdvanceOutcome::Met);
+    app.menu_step_progress = Some(rs_typing_trainer::practice::menu::ProgressUpdate {
+        outcome: AdvanceOutcome::Met,
+        consecutive: 2,
+        required: 3,
+        level_after: 1,
+        graduation: None,
+    });
+    let text = render(&app, 80, 24).join("\n");
+    assert!(text.contains("This session: met 2/3"), "{text}");
 }
 
 #[test]
@@ -343,4 +387,186 @@ fn menu_result_localizes_all_three_current_outcomes() {
         let text = render(&app, 80, 24).join("\n");
         assert!(text.contains(expected), "missing {expected:?}:\n{text}");
     }
+}
+
+fn catalog_step(id: &str, role: rs_typing_trainer::practice::menu::MenuRole) -> rs_typing_trainer::practice::menu::MenuStep {
+    let prescription = bundled_catalog().unwrap().prescription(id).unwrap();
+    let level = &prescription.levels[0];
+    rs_typing_trainer::practice::menu::MenuStep {
+        role,
+        language: rs_typing_trainer::i18n::Lang::En,
+        prescription_id: id.to_owned(),
+        title: prescription.title.text(rs_typing_trainer::i18n::Lang::En).to_owned(),
+        level: Some(1),
+        mode: level.mode.clone(),
+        minutes: level.minutes,
+        reason: "-".to_owned(),
+        focus: level.focus.text(rs_typing_trainer::i18n::Lang::En).to_owned(),
+        advance: level.advance.note.text(rs_typing_trainer::i18n::Lang::En).to_owned(),
+        advance_condition: Some(level.advance.clone()),
+        evidence: None,
+        evidence_note: None,
+        settings: level.settings.clone(),
+    }
+}
+
+fn play_step(app: &mut rs_typing_trainer::app::App, index: usize, now: Instant) {
+    app.menu_selected = index;
+    finish_selected_step(app, now);
+}
+
+fn back_to_menu(app: &mut rs_typing_trainer::app::App, now: Instant) {
+    app.handle_key_at(key(KeyCode::Esc), now);
+    assert_eq!(app.screen, Screen::Menu);
+}
+
+#[test]
+fn step_sourced_conditions_are_judged_by_the_step_and_check_sourced_ones_by_the_check() {
+    use rs_typing_trainer::practice::menu::MenuRole;
+    use rs_typing_trainer::practice::menu::progress::JudgmentDeferral;
+
+    let date = chrono::NaiveDate::from_ymd_opt(2026, 11, 18).unwrap();
+    let mut app = test_app_at(base_config(), date);
+    let path = app.config.storage.db_path.clone().unwrap();
+    let now = Instant::now();
+    open_menu(&mut app, now);
+    {
+        let menu = app.daily_menu.as_mut().unwrap();
+        let check = menu.steps.iter().find(|step| step.role == MenuRole::Check).unwrap().clone();
+        let mut check = check;
+        check.language = rs_typing_trainer::i18n::Lang::En;
+        menu.steps = vec![
+            catalog_step("accuracy.gate", MenuRole::PrimaryA),
+            catalog_step("preview.wide", MenuRole::PrimaryB),
+            check,
+        ];
+    }
+
+    // accuracy.gate: advance.source = "step" → judged when its own step ends.
+    play_step(&mut app, 0, now + Duration::from_secs(1));
+    let gate = app.menu_step_progress.expect("judged by its own step");
+    assert_ne!(gate.outcome, AdvanceOutcome::CannotDetermine);
+    assert_eq!(gate.required, 3);
+    assert_eq!(app.menu_step_deferral, None);
+    let text = render(&app, 80, 24).join("\n");
+    assert!(text.contains(&format!("{}/3", gate.consecutive)), "{text}");
+    let run = app.menu_run_id.unwrap();
+    assert_eq!(
+        rs_typing_trainer::record::db::load_menu_steps(&path, run).unwrap()[0].advance_met,
+        Some(gate.outcome == AdvanceOutcome::Met)
+    );
+    back_to_menu(&mut app, now + Duration::from_secs(400));
+
+    // preview.wide: advance.source = "check" → waits for the check step.
+    play_step(&mut app, 1, now + Duration::from_secs(401));
+    assert_eq!(app.menu_step_progress, None);
+    assert_eq!(app.menu_step_deferral, Some(JudgmentDeferral::AwaitingCheck));
+    let text = render(&app, 80, 24).join("\n");
+    assert!(text.contains("judged after the check step"), "{text}");
+    assert_eq!(
+        rs_typing_trainer::record::db::load_menu_progress(&path, "qwerty", "en", "preview.wide")
+            .unwrap()
+            .unwrap()
+            .pair_judged_run,
+        None
+    );
+    back_to_menu(&mut app, now + Duration::from_secs(800));
+
+    play_step(&mut app, 2, now + Duration::from_secs(801));
+    let judged = app
+        .menu_step_others
+        .iter()
+        .find(|judgment| judgment.prescription_id == "preview.wide")
+        .expect("the check step judges the check-sourced prescription");
+    assert!(judged.progress.is_some());
+    assert!(
+        app.menu_step_others
+            .iter()
+            .filter(|judgment| judgment.prescription_id == "accuracy.gate")
+            .all(|judgment| judgment.progress.is_none()),
+        "a step-sourced condition is not judged again by the check"
+    );
+    let text = render(&app, 80, 24).join("\n");
+    assert!(text.contains("Judged with this check:"), "{text}");
+    assert_eq!(
+        rs_typing_trainer::record::db::load_menu_progress(&path, "qwerty", "en", "preview.wide")
+            .unwrap()
+            .unwrap()
+            .pair_judged_run,
+        Some(run)
+    );
+}
+
+#[test]
+fn two_language_introductory_menu_keeps_done_marks_and_one_run_after_reopening() {
+    use rs_typing_trainer::i18n::Lang;
+
+    let home = tempfile::TempDir::new().unwrap();
+    let path = home.path().join("sessions.db");
+    let mut config = base_config();
+    config.storage.db_path = Some(path.clone());
+    config.menu.languages = Some(vec![Lang::En, Lang::Ja]);
+    config.menu.minutes = 10;
+    let date = chrono::NaiveDate::from_ymd_opt(2026, 11, 18).unwrap();
+    let now = Instant::now();
+    {
+        let mut first = rs_typing_trainer::app::App::new_at(config.clone(), home.path().to_path_buf(), date);
+        open_menu(&mut first, now);
+        assert!(first.daily_menu.as_ref().unwrap().introductory);
+        finish_selected_step(&mut first, now + Duration::from_secs(1));
+    }
+    let mut reopened = rs_typing_trainer::app::App::new_at(config, home.path().to_path_buf(), date);
+    open_menu(&mut reopened, now + Duration::from_secs(200));
+    assert!(reopened.menu_completed.contains(&0), "done mark lost after reopening");
+    play_step(&mut reopened, 1, now + Duration::from_secs(201));
+
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    let runs = connection
+        .prepare("SELECT lang FROM menu_runs")
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(runs, vec!["en,ja".to_owned()]);
+}
+
+#[test]
+fn graduation_and_deferred_judgments_are_spelled_out_on_the_result() {
+    use rs_typing_trainer::practice::menu::progress::JudgmentDeferral;
+    use rs_typing_trainer::practice::menu::{Graduation, ProgressUpdate};
+
+    let mut config = base_config();
+    config.general.lang = rs_typing_trainer::i18n::Lang::Ja;
+    let mut app = test_app(config);
+    let now = Instant::now();
+    open_menu(&mut app, now);
+    app.handle_key(key(KeyCode::Down));
+    finish_selected_step(&mut app, now + Duration::from_secs(1));
+
+    let update = |graduation| ProgressUpdate {
+        outcome: AdvanceOutcome::Met,
+        consecutive: 0,
+        required: 3,
+        level_after: 2,
+        graduation,
+    };
+    app.menu_step_outcome = Some(AdvanceOutcome::Met);
+    app.menu_step_progress = Some(update(Some(Graduation::Level(2))));
+    let text = compact(&render(&app, 80, 24));
+    assert!(text.contains("卒業→レベル2"), "{text}");
+    assert!(!text.contains("0/3"), "{text}");
+
+    app.menu_step_progress = Some(update(Some(Graduation::Maintenance)));
+    let text = compact(&render(&app, 80, 24));
+    assert!(text.contains("卒業→維持"), "{text}");
+
+    app.menu_step_progress = None;
+    app.menu_step_deferral = Some(JudgmentDeferral::CheckLanguage(rs_typing_trainer::i18n::Lang::Ja));
+    let text = compact(&render(&app, 100, 24));
+    assert!(text.contains("今日の確認は日本語なので判定は次回"), "{text}");
+}
+
+fn compact(rows: &[String]) -> String {
+    rows.join("").chars().filter(|character| !character.is_whitespace()).collect()
 }

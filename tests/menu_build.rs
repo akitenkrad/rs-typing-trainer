@@ -129,11 +129,13 @@ fn a_component_used_as_primary_on_both_recent_days_drops_one_place() {
         PastMenu {
             date: case.as_of.pred_opt().unwrap(),
             language: Some("en".to_owned()),
+            check_language: Some("en".to_owned()),
             primary_prescription_ids: vec!["preview.wide".to_owned()],
         },
         PastMenu {
             date: case.as_of - chrono::Duration::days(2),
             language: Some("en".to_owned()),
+            check_language: Some("ja".to_owned()),
             primary_prescription_ids: vec!["preview.wide".to_owned()],
         },
     ];
@@ -188,6 +190,25 @@ fn ineffective_transition_adaptive_uses_ngram_alternate() {
     .unwrap();
 
     assert_eq!(primary_id(&menu, MenuRole::PrimaryA), "transition.ngram");
+}
+
+#[test]
+fn reference_improvement_is_labeled_as_uncontrolled_in_the_menu_reason() {
+    let mut case = input(97.0, Component::Preview);
+    case.language = "ja".to_owned();
+    case.grade.as_mut().unwrap().language = "ja".to_owned();
+    let mut states = BTreeMap::new();
+    states.insert(
+        "preview.wide".to_owned(),
+        PrescriptionState {
+            judgment: PrescriptionJudgment::Improved,
+            ..PrescriptionState::default()
+        },
+    );
+
+    let menu = build_menu(bundled_catalog().unwrap(), &case, &MenuConfig::default(), &[], &states).unwrap();
+    let primary = menu.steps.iter().find(|step| step.role == MenuRole::PrimaryA).unwrap();
+    assert!(primary.reason.contains("改善（参考．対照なし）"), "{}", primary.reason);
 }
 
 #[test]
@@ -503,4 +524,46 @@ fn two_language_check_step_alternates_language_by_date() {
     let tomorrow = build_menu_for_languages(bundled_catalog().unwrap(), &tomorrow_inputs, Lang::En, &MenuConfig::default(), &[]).unwrap();
     let check = |menu: &rs_typing_trainer::practice::menu::DailyMenu| menu.steps.iter().find(|step| step.role == MenuRole::Check).unwrap().language;
     assert_ne!(check(&today), check(&tomorrow));
+}
+
+#[test]
+fn two_language_daily_rotation_uses_yesterdays_record_instead_of_calendar_parity() {
+    let first = language_input("en", 97.0, Component::Speed);
+    let second = language_input("ja", 97.0, Component::Preview);
+    let config = MenuConfig {
+        minutes: 10,
+        ..MenuConfig::default()
+    };
+    let without_history = build_menu_for_languages(bundled_catalog().unwrap(), &[first.clone(), second.clone()], Lang::En, &config, &[]).unwrap();
+    let prior_a = without_history
+        .steps
+        .iter()
+        .find(|step| step.role == MenuRole::PrimaryA)
+        .unwrap()
+        .language;
+    let prior_check = without_history.steps.iter().find(|step| step.role == MenuRole::Check).unwrap().language;
+    let history = [PastMenu {
+        date: first.input.as_of.pred_opt().unwrap(),
+        language: Some(
+            match prior_a {
+                Lang::En => "en",
+                Lang::Ja => "ja",
+            }
+            .to_owned(),
+        ),
+        check_language: Some(
+            match prior_check {
+                Lang::En => "en",
+                Lang::Ja => "ja",
+            }
+            .to_owned(),
+        ),
+        primary_prescription_ids: Vec::new(),
+    }];
+
+    let with_history = build_menu_for_languages(bundled_catalog().unwrap(), &[first, second], Lang::En, &config, &history).unwrap();
+    let current_a = with_history.steps.iter().find(|step| step.role == MenuRole::PrimaryA).unwrap().language;
+    let current_check = with_history.steps.iter().find(|step| step.role == MenuRole::Check).unwrap().language;
+    assert_ne!(current_a, prior_a);
+    assert_ne!(current_check, prior_check);
 }

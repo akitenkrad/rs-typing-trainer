@@ -296,8 +296,13 @@ pub struct App {
     pub menu_error: Option<String>,
     pub menu_selected: usize,
     pub menu_completed: BTreeSet<usize>,
+    pub menu_run_id: Option<i64>,
     pub menu_active_step: Option<usize>,
     pub menu_step_outcome: Option<crate::practice::menu::AdvanceOutcome>,
+    pub menu_step_progress: Option<crate::practice::menu::ProgressUpdate>,
+    pub menu_step_reference: Option<crate::practice::menu::ReferenceJudgment>,
+    pub menu_step_others: Vec<crate::practice::menu::progress::StepJudgment>,
+    pub menu_step_deferral: Option<crate::practice::menu::progress::JudgmentDeferral>,
     analysis_as_of: chrono::NaiveDate,
     bench_run: Option<BenchRun>,
     ui_now: Instant,
@@ -480,8 +485,13 @@ impl App {
             menu_error: None,
             menu_selected: 0,
             menu_completed: BTreeSet::new(),
+            menu_run_id: None,
             menu_active_step: None,
             menu_step_outcome: None,
+            menu_step_progress: None,
+            menu_step_reference: None,
+            menu_step_others: Vec::new(),
+            menu_step_deferral: None,
             analysis_as_of: date,
             bench_run: None,
             ui_now: now,
@@ -787,7 +797,30 @@ impl App {
             self.config.general.lang,
             self.analysis_as_of,
         ) {
-            Ok(menu) => {
+            Ok(mut menu) => {
+                let language_key = crate::practice::menu::menu_run_language_key(&self.config, self.config.general.lang);
+                let existing = db::find_menu_run_for_day(
+                    &self.db_path(),
+                    menu.date,
+                    &self.config.keyboard.layout,
+                    &language_key,
+                    &menu.catalog_version,
+                    menu.requested_minutes,
+                )
+                .ok()
+                .flatten();
+                if let Some(run) = &existing
+                    && let Ok(stored) = serde_json::from_str::<crate::practice::menu::DailyMenu>(&run.plan_json)
+                {
+                    menu = stored;
+                }
+                self.menu_run_id = existing.as_ref().map(|run| run.id);
+                self.menu_completed = existing
+                    .and_then(|run| db::completed_menu_steps(&self.db_path(), run.id).ok())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|index| index.checked_sub(1))
+                    .collect();
                 self.daily_menu = Some(menu);
                 self.menu_error = None;
                 self.menu_selected = self
@@ -796,6 +829,8 @@ impl App {
             }
             Err(error) => {
                 self.daily_menu = None;
+                self.menu_run_id = None;
+                self.menu_completed.clear();
                 self.menu_error = Some(error.to_string());
             }
         }
@@ -804,7 +839,7 @@ impl App {
     fn open_menu(&mut self) {
         self.refresh_daily_menu();
         self.menu_active_step = None;
-        self.menu_step_outcome = None;
+        self.clear_menu_step_result();
         self.menu_original_config = None;
         self.screen = Screen::Menu;
     }
@@ -938,7 +973,7 @@ impl App {
             KeyCode::Enter | KeyCode::Char(' ') => self.begin_menu_step(self.menu_selected),
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
                 self.menu_active_step = None;
-                self.menu_step_outcome = None;
+                self.clear_menu_step_result();
                 self.menu_original_config = None;
                 self.screen = Screen::Title;
             }
@@ -946,7 +981,7 @@ impl App {
         }
         if matches!(action, InputAction::Abort) && key.code != KeyCode::Esc {
             self.menu_active_step = None;
-            self.menu_step_outcome = None;
+            self.clear_menu_step_result();
             self.menu_original_config = None;
             self.screen = Screen::Title;
         }
@@ -961,6 +996,46 @@ impl App {
     }
 
     fn begin_menu_step(&mut self, index: usize) {
+        if self.menu_run_id.is_none() {
+            let Some(menu) = self.daily_menu.as_ref() else { return };
+            let plan = match serde_json::to_string(menu) {
+                Ok(plan) => plan,
+                Err(error) => {
+                    self.menu_error = Some(error.to_string());
+                    return;
+                }
+            };
+            let language_key = crate::practice::menu::menu_run_language_key(&self.config, self.config.general.lang);
+            match db::ensure_menu_run(
+                &self.db_path(),
+                menu.date,
+                &self.config.keyboard.layout,
+                &language_key,
+                &menu.catalog_version,
+                menu.requested_minutes,
+                &plan,
+            ) {
+                Ok(run) => {
+                    // The day's run already holds recorded steps of another
+                    // plan: keep using that plan so step indices stay valid.
+                    if run.plan_json != plan
+                        && let Ok(stored) = serde_json::from_str::<crate::practice::menu::DailyMenu>(&run.plan_json)
+                    {
+                        self.menu_completed = db::completed_menu_steps(&self.db_path(), run.id)
+                            .unwrap_or_default()
+                            .into_iter()
+                            .filter_map(|index| index.checked_sub(1))
+                            .collect();
+                        self.daily_menu = Some(stored);
+                    }
+                    self.menu_run_id = Some(run.id);
+                }
+                Err(error) => {
+                    self.menu_error = Some(error.to_string());
+                    return;
+                }
+            }
+        }
         let Some(step) = self.daily_menu.as_ref().and_then(|menu| menu.steps.get(index)).cloned() else {
             return;
         };
@@ -976,7 +1051,7 @@ impl App {
                 self.config = config;
                 self.menu_active_step = Some(index);
                 self.menu_selected = index;
-                self.menu_step_outcome = None;
+                self.clear_menu_step_result();
                 self.input_blocked_until = None;
                 self.abort_confirm_until = None;
                 self.screen = Screen::MenuFocus { remaining: 2.0 };
@@ -995,7 +1070,7 @@ impl App {
         self.game = None;
         self.restore_menu_config();
         self.menu_active_step = None;
-        self.menu_step_outcome = None;
+        self.clear_menu_step_result();
         self.abort_confirm_until = None;
         self.input_blocked_until = None;
         self.screen = Screen::Menu;
@@ -1020,7 +1095,7 @@ impl App {
             self.begin_menu_step(next);
         } else {
             self.menu_active_step = None;
-            self.menu_step_outcome = None;
+            self.clear_menu_step_result();
             self.screen = Screen::Menu;
         }
     }
@@ -1819,7 +1894,7 @@ impl App {
             KeyCode::Esc => match self.result_origin {
                 ResultOrigin::JustPlayed if self.menu_active_step.is_some() => {
                     self.menu_active_step = None;
-                    self.menu_step_outcome = None;
+                    self.clear_menu_step_result();
                     self.screen = Screen::Menu;
                 }
                 ResultOrigin::JustPlayed if self.bench_run.is_some() => {
@@ -1836,7 +1911,7 @@ impl App {
             match self.result_origin {
                 ResultOrigin::JustPlayed if self.menu_active_step.is_some() => {
                     self.menu_active_step = None;
-                    self.menu_step_outcome = None;
+                    self.clear_menu_step_result();
                     self.screen = Screen::Menu;
                 }
                 ResultOrigin::JustPlayed if self.bench_run.is_some() => {
@@ -2884,10 +2959,13 @@ impl App {
                 .as_ref()
                 .and_then(|menu| menu.steps.get(index))
                 .cloned()
-                .map(|step| (index, step))
+                .zip(self.menu_run_id)
+                .map(|(step, run_id)| (index, step, run_id))
         });
-        if let Some((index, step)) = &menu_context {
-            record.set_menu_context(&step.prescription_id, index + 1);
+        if let Some((index, step, run_id)) = &menu_context {
+            record.set_menu_context(*run_id, &step.prescription_id, index + 1);
+            // Provisional outcome from this session alone; replaced by the
+            // stored judgment once the step is recorded below.
             self.menu_step_outcome = Some(
                 step.advance_condition
                     .as_ref()
@@ -2914,11 +2992,6 @@ impl App {
         }
         if self.config.mode.kind == ModeKind::Burst {
             self.burst_series.push(record.header.net_wpm);
-        }
-        if let Some((index, step)) = &menu_context
-            && (step.mode != "burst" || self.burst_series.complete())
-        {
-            self.menu_completed.insert(*index);
         }
         record.header.release_events = self.release_events_supported;
         self.gate_failed = !crate::practice::gate::is_eligible(self.config.gate.min_accuracy, record.header.accuracy);
@@ -3034,6 +3107,13 @@ impl App {
                         finished_at: &record.header.finished_at,
                     });
                 }
+                // After R3 has evaluated this session, so a verdict closed by
+                // this very session can be counted.
+                if let Some((index, step, run_id)) = &menu_context
+                    && (step.mode != "burst" || self.burst_series.complete())
+                {
+                    self.record_menu_step_completion(*run_id, *index, &record);
+                }
             }
             Err(e) => {
                 self.last_save_id = None;
@@ -3057,6 +3137,41 @@ impl App {
         self.screen = Screen::Result;
         self.abort_confirm_until = None;
         self.begin_result_input_delay(now);
+    }
+
+    fn record_menu_step_completion(&mut self, run_id: i64, index: usize, record: &SessionRecord) {
+        let db_path = self.db_path();
+        let home = self.home_dir.clone();
+        let config = self.config.clone();
+        let layout = self.practice_layout().clone();
+        let context = crate::practice::menu::progress::JudgeContext {
+            db_path: &db_path,
+            home: &home,
+            config: &config,
+            layout: &layout,
+            as_of: self.analysis_as_of,
+        };
+        match crate::practice::menu::progress::record_step_completion(&context, run_id, index, record) {
+            Ok(report) => {
+                self.menu_completed.insert(index);
+                if let Some(progress) = report.own.as_ref().and_then(|own| own.progress) {
+                    self.menu_step_outcome = Some(progress.outcome);
+                }
+                self.menu_step_progress = report.own.as_ref().and_then(|own| own.progress);
+                self.menu_step_reference = report.own.as_ref().and_then(|own| own.reference);
+                self.menu_step_others = report.others;
+                self.menu_step_deferral = report.deferred;
+            }
+            Err(error) => self.last_save_error = Some(error.to_string()),
+        }
+    }
+
+    fn clear_menu_step_result(&mut self) {
+        self.menu_step_outcome = None;
+        self.menu_step_progress = None;
+        self.menu_step_reference = None;
+        self.menu_step_others.clear();
+        self.menu_step_deferral = None;
     }
 
     fn refresh_result_coaching(&mut self, record: &SessionRecord) {
