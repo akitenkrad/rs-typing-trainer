@@ -11,6 +11,7 @@ use rs_typing_trainer::engine::session::Session;
 use rs_typing_trainer::graphics::{CellPixels, GraphicsDetection, GraphicsMode, GraphicsReason};
 use rs_typing_trainer::i18n::Lang;
 use rs_typing_trainer::metrics::stats::GameResult;
+use rs_typing_trainer::practice::menu::AdvanceOutcome;
 use rs_typing_trainer::record::SessionRecord;
 use rs_typing_trainer::ui;
 
@@ -160,6 +161,21 @@ fn result_is_non_overlapping_at_80_by_24_with_and_without_images() {
             "{graphics:?}: {text}"
         );
     }
+}
+
+#[test]
+fn menu_result_without_a_graduation_condition_keeps_only_the_navigation_hint() {
+    let mut app = result_app(GraphicsMode::Off);
+    app.menu_active_step = Some(0);
+    app.menu_step_outcome = Some(AdvanceOutcome::CannotDetermine);
+
+    let rendered = rows(&render(&app, 80, 24));
+    let text = rendered.join("\n");
+    assert!(!text.contains("Graduation condition:"), "{text}");
+    assert!(!text.contains("This session:"), "{text}");
+    assert!(text.contains("[Enter] Next step"), "{text}");
+    assert!(text.contains("[Esc] Menu"), "{text}");
+    assert_eq!(rendered.iter().filter(|row| row.contains("[Enter] Next step")).count(), 1, "{text}");
 }
 
 #[test]

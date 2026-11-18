@@ -86,6 +86,76 @@ fn cancelling_settings_restores_the_in_memory_values() {
 }
 
 #[test]
+fn settings_screen_cycles_saves_and_cancels_menu_languages() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("config.toml");
+    fs::write(&path, "[menu]\nminutes = 15\n").unwrap();
+    let config = Config::from_path(&path).unwrap();
+    let mut app = test_app(config);
+    app.config_path = Some(path.clone());
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
+    for _ in 0..8 {
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    }
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    assert_eq!(app.config.menu.languages, Some(vec![rs_typing_trainer::i18n::Lang::En]));
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert_eq!(app.config.menu.languages, None);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
+    for _ in 0..8 {
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    }
+    for _ in 0..3 {
+        app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    }
+    assert_eq!(
+        app.config.menu.languages,
+        Some(vec![rs_typing_trainer::i18n::Lang::En, rs_typing_trainer::i18n::Lang::Ja])
+    );
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    let updated = fs::read_to_string(&path).unwrap();
+    assert!(updated.contains("languages = [\"en\", \"ja\"]"), "{updated}");
+    assert!(updated.contains("minutes = 15"), "{updated}");
+}
+
+#[test]
+fn saving_settings_does_not_add_default_menu_languages_and_default_removes_an_existing_key() {
+    let dir = TempDir::new().unwrap();
+    let absent = dir.path().join("absent.toml");
+    fs::write(&absent, "[menu]\nminutes = 10\n").unwrap();
+    rs_typing_trainer::config::save_settings(&absent, &Config::from_path(&absent).unwrap()).unwrap();
+    let saved = fs::read_to_string(&absent).unwrap();
+    assert!(!saved.contains("languages"), "{saved}");
+    assert!(saved.contains("minutes = 10"), "{saved}");
+
+    let existing = dir.path().join("existing.toml");
+    fs::write(&existing, "[menu]\nminutes = 20\nlanguages = [\"ja\"] # remove me\n").unwrap();
+    let mut config = Config::from_path(&existing).unwrap();
+    config.menu.languages = None;
+    rs_typing_trainer::config::save_settings(&existing, &config).unwrap();
+    let saved = fs::read_to_string(&existing).unwrap();
+    assert!(!saved.contains("languages"), "{saved}");
+    assert!(saved.contains("minutes = 20"), "{saved}");
+}
+
+#[test]
+fn saving_menu_languages_preserves_its_inline_comment() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("config.toml");
+    fs::write(&path, "[menu]\nlanguages = [\"ja\"] # keep language note\n").unwrap();
+    let mut config = Config::from_path(&path).unwrap();
+    config.menu.languages = Some(vec![rs_typing_trainer::i18n::Lang::En]);
+
+    rs_typing_trainer::config::save_settings(&path, &config).unwrap();
+
+    let saved = fs::read_to_string(&path).unwrap();
+    assert!(saved.contains("languages = [\"en\"] # keep language note"), "{saved}");
+}
+
+#[test]
 fn settings_values_share_one_column() {
     let mut app = test_app(Config::default());
     app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
@@ -100,7 +170,7 @@ fn settings_values_share_one_column() {
         .map(|(index, _)| index as u16 % buffer.area.width)
         .collect::<Vec<_>>();
 
-    assert_eq!(value_columns.len(), 10);
+    assert_eq!(value_columns.len(), 11);
     assert!(value_columns.windows(2).all(|pair| pair[0] == pair[1]), "{value_columns:?}");
     let arrow_columns = buffer
         .content()
@@ -123,6 +193,7 @@ fn every_setting_has_a_bilingual_description_with_options_and_a_default() {
         ("Large text (large)", "大きな文字（large）"),
         ("Terminal images", "端末画像"),
         ("interface language", "画面の表示言語"),
+        ("Languages practiced by Today's Menu", "今日のメニューで練習する言語"),
         ("mistyped character", "誤入力した文字"),
         ("Post-session coaching", "練習後の気づき"),
     ];
@@ -135,6 +206,7 @@ fn every_setting_has_a_bilingual_description_with_options_and_a_default() {
         ["large", "normal", "16", "12"].as_slice(),
         ["auto", "kitty", "sixel", "iterm2", "off"].as_slice(),
         ["English", "Japanese"].as_slice(),
+        ["Sameasdisplay", "English", "Japanese", "+"].as_slice(),
         ["stop", "advance"].as_slice(),
         ["summary", "detailed"].as_slice(),
     ];
@@ -157,9 +229,9 @@ fn every_setting_has_a_bilingual_description_with_options_and_a_default() {
                     !symbol.trim().is_empty()
                 })
             };
-            assert!(description_row_has_text(12), "setting {index}, {lang:?} has no description");
+            assert!(description_row_has_text(13), "setting {index}, {lang:?} has no description");
             assert!(
-                description_row_has_text(13),
+                description_row_has_text(14),
                 "setting {index}, {lang:?} needs at least two description lines"
             );
             let rendered = terminal
@@ -304,7 +376,7 @@ fn big_font_setting_cycles_builtins_and_preserves_a_configured_path() {
     app.config_path = Some(path.clone());
 
     app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
-    for _ in 0..10 {
+    for _ in 0..11 {
         app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
     }
     app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
@@ -355,7 +427,7 @@ fn feedback_defaults_to_summary_and_settings_cycles_saves_and_cancels_it() {
     app.config_path = Some(path.clone());
 
     app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
-    for _ in 0..9 {
+    for _ in 0..10 {
         app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
     }
     app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
@@ -364,7 +436,7 @@ fn feedback_defaults_to_summary_and_settings_cycles_saves_and_cancels_it() {
     assert_eq!(app.config.display.feedback, "summary");
 
     app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
-    for _ in 0..9 {
+    for _ in 0..10 {
         app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
     }
     app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));

@@ -8,6 +8,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui_image::Image;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::{App, ResultOrigin};
 use crate::bench::BenchPart;
@@ -107,6 +108,16 @@ pub fn render(frame: &mut Frame, app: &App) {
         }
     }
     render_text_result(frame, app, result, &theme, content, lang);
+}
+
+fn result_mode_is(app: &App, mode: crate::config::ModeKind) -> bool {
+    if app.result_origin == ResultOrigin::JustPlayed {
+        app.result_record
+            .as_ref()
+            .map_or(app.config.mode.kind == mode, |record| record.header.mode == mode.as_str())
+    } else {
+        app.config.mode.kind == mode
+    }
 }
 
 fn render_compact_image_result(frame: &mut Frame, app: &App, result: &GameResult, theme: &Theme, area: Rect, lang: Lang) -> bool {
@@ -522,7 +533,7 @@ fn render_observations(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, 
         frame.render_widget(Paragraph::new(lines), left_inset(inner));
         return;
     }
-    if app.config.mode.kind == crate::config::ModeKind::Adaptive && app.result_origin == ResultOrigin::JustPlayed {
+    if result_mode_is(app, crate::config::ModeKind::Adaptive) && app.result_origin == ResultOrigin::JustPlayed {
         render_adaptive_result(frame, app, theme, left_inset(inner), lang);
     } else if app.result_insights.is_empty() {
         frame.render_widget(
@@ -567,7 +578,7 @@ fn result_notice_lines(app: &App, theme: &Theme, lang: Lang) -> Vec<Line<'static
             Style::default().fg(theme.correct).add_modifier(Modifier::BOLD),
         )));
     }
-    if app.config.mode.kind == crate::config::ModeKind::Rhythm
+    if result_mode_is(app, crate::config::ModeKind::Rhythm)
         && let Some(deviation) = app.rhythm_deviation_ms
     {
         lines.push(Line::from(match lang {
@@ -575,7 +586,7 @@ fn result_notice_lines(app: &App, theme: &Theme, lang: Lang) -> Vec<Line<'static
             Lang::Ja => format!("拍からのずれの中央値: {deviation:.1} ms"),
         }));
     }
-    if app.config.mode.kind == crate::config::ModeKind::Burst {
+    if result_mode_is(app, crate::config::ModeKind::Burst) {
         lines.push(Line::from(match lang {
             Lang::En => format!("Burst: {} / 3    best: {:.1} WPM", app.burst_series.run_count(), app.burst_series.best()),
             Lang::Ja => format!(
@@ -585,7 +596,7 @@ fn result_notice_lines(app: &App, theme: &Theme, lang: Lang) -> Vec<Line<'static
             ),
         }));
     }
-    if app.config.mode.kind == crate::config::ModeKind::Endurance
+    if result_mode_is(app, crate::config::ModeKind::Endurance)
         && let Some(comparison) = app.endurance_comparison
     {
         lines.push(Line::from(match lang {
@@ -680,7 +691,7 @@ fn render_reaction_and_insights(frame: &mut Frame, app: &App, result: &GameResul
             Span::styled(format!(" {count}"), Style::default().fg(theme.muted)),
         ]));
     }
-    if app.config.mode.kind == crate::config::ModeKind::Adaptive && app.result_origin == ResultOrigin::JustPlayed && area.width < 140 {
+    if result_mode_is(app, crate::config::ModeKind::Adaptive) && app.result_origin == ResultOrigin::JustPlayed && area.width < 140 {
         let rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(5), Constraint::Min(0)])
@@ -737,9 +748,50 @@ fn save_line(app: &App, result: &GameResult, theme: &Theme) -> Line<'static> {
 
 fn render_result_hint(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, lang: Lang) {
     match app.result_origin {
+        ResultOrigin::JustPlayed if app.menu_active_step.is_some() => {
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(1), Constraint::Length(1)])
+                .split(area);
+            if let Some(line) = menu_result_line(app, lang, usize::from(rows[0].width.saturating_sub(4))) {
+                frame.render_widget(Paragraph::new(line).style(Style::default().fg(theme.warning)), left_inset(rows[0]));
+            }
+            render_hint(frame, app, theme, rows[1], lang);
+        }
         ResultOrigin::JustPlayed => render_hint(frame, app, theme, area, lang),
         ResultOrigin::History => render_hint_history(frame, app, theme, area, lang),
     }
+}
+
+fn menu_result_line(app: &App, lang: Lang, width: usize) -> Option<String> {
+    let step = app.daily_menu.as_ref()?.steps.get(app.menu_active_step?)?;
+    step.advance_condition.as_ref()?;
+    let outcome = app.menu_step_outcome.unwrap_or(crate::practice::menu::AdvanceOutcome::CannotDetermine);
+    let (prefix, suffix) = match lang {
+        Lang::En => ("Graduation condition: ", format!(" — This session: {}", outcome.label(lang))),
+        Lang::Ja => ("卒業の条件: ", format!(" — この回: {}", outcome.label(lang))),
+    };
+    let available = width.saturating_sub(UnicodeWidthStr::width(prefix) + UnicodeWidthStr::width(suffix.as_str()));
+    Some(format!("{prefix}{}{suffix}", truncate_display(&step.advance, available)))
+}
+
+fn truncate_display(value: &str, width: usize) -> String {
+    if UnicodeWidthStr::width(value) <= width {
+        return value.to_owned();
+    }
+    let mut output = String::new();
+    let target = width.saturating_sub(1);
+    let mut used = 0;
+    for character in value.chars() {
+        let character_width = character.width().unwrap_or(0);
+        if used + character_width > target {
+            break;
+        }
+        output.push(character);
+        used += character_width;
+    }
+    output.push('…');
+    output
 }
 
 fn render_history_conditions(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, lang: Lang) {
@@ -1044,7 +1096,7 @@ fn render_secondary_box(frame: &mut Frame, app: &App, r: &GameResult, theme: &Th
             Style::default().fg(theme.correct).add_modifier(Modifier::BOLD),
         )));
     }
-    if app.config.mode.kind == crate::config::ModeKind::Rhythm
+    if result_mode_is(app, crate::config::ModeKind::Rhythm)
         && app.result_origin == ResultOrigin::JustPlayed
         && let Some(deviation) = app.rhythm_deviation_ms
     {
@@ -1053,7 +1105,7 @@ fn render_secondary_box(frame: &mut Frame, app: &App, r: &GameResult, theme: &Th
             Lang::Ja => format!("拍からのずれの中央値: {deviation:.1} ms"),
         }));
     }
-    if app.config.mode.kind == crate::config::ModeKind::Burst && app.result_origin == ResultOrigin::JustPlayed {
+    if result_mode_is(app, crate::config::ModeKind::Burst) && app.result_origin == ResultOrigin::JustPlayed {
         lines.push(Line::from(match lang {
             Lang::En => format!("Burst: {} / 3    best: {:.1} WPM", app.burst_series.run_count(), app.burst_series.best()),
             Lang::Ja => format!(
@@ -1063,7 +1115,7 @@ fn render_secondary_box(frame: &mut Frame, app: &App, r: &GameResult, theme: &Th
             ),
         }));
     }
-    if app.config.mode.kind == crate::config::ModeKind::Endurance
+    if result_mode_is(app, crate::config::ModeKind::Endurance)
         && app.result_origin == ResultOrigin::JustPlayed
         && let Some(comparison) = app.endurance_comparison
     {
@@ -1160,10 +1212,15 @@ fn render_mistype_heatmap(frame: &mut Frame, r: &GameResult, theme: &Theme, area
 
 fn render_hint(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, lang: Lang) {
     let remaining = app.result_input_delay_remaining();
-    let hint = remaining.map_or_else(
-        || Msg::ResultHint.text(lang).to_owned(),
-        |remaining| format!("{}  … {:.1}s", Msg::ResultHint.text(lang), remaining.as_secs_f32()),
-    );
+    let base = if app.menu_active_step.is_some() {
+        match lang {
+            Lang::En => "[Enter] Next step    [Esc] Menu",
+            Lang::Ja => "[Enter] 次の段    [Esc] メニュー",
+        }
+    } else {
+        Msg::ResultHint.text(lang)
+    };
+    let hint = remaining.map_or_else(|| base.to_owned(), |remaining| format!("{base}  … {:.1}s", remaining.as_secs_f32()));
     let color = if remaining.is_some() { theme.muted } else { theme.accent };
     let p = Paragraph::new(hint).style(Style::default().fg(color));
     frame.render_widget(p, left_inset(area));

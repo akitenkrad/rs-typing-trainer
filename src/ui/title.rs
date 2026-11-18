@@ -156,24 +156,14 @@ pub fn render(frame: &mut Frame, app: &App) {
             Style::default().fg(theme.warning),
         )));
     }
-    if app.recommend_preview {
-        info_lines.push(Line::from(Span::styled(
-            match lang {
-                crate::i18n::Lang::En => "Practice with more preview items is recommended.",
-                crate::i18n::Lang::Ja => "先読みを増やした練習がおすすめです",
-            },
-            Style::default().fg(theme.warning),
-        )));
-    }
-    if app.recommend_rhythm {
-        info_lines.push(Line::from(Span::styled(
-            match lang {
-                crate::i18n::Lang::En => "Rhythm practice is recommended.",
-                crate::i18n::Lang::Ja => "リズム練習がおすすめです",
-            },
-            Style::default().fg(theme.warning),
-        )));
-    }
+    let introductory = app.daily_menu.as_ref().is_some_and(|menu| menu.introductory);
+    let menu_line = match (lang, introductory) {
+        (crate::i18n::Lang::En, true) => format!("Today's menu ({} min) — M to open (introductory: more data needed)", cfg.menu.minutes),
+        (crate::i18n::Lang::En, false) => format!("Today's menu ({} min) — M to open", cfg.menu.minutes),
+        (crate::i18n::Lang::Ja, true) => format!("今日のメニュー（{} 分）— M で開く（データ不足のため入門メニュー）", cfg.menu.minutes),
+        (crate::i18n::Lang::Ja, false) => format!("今日のメニュー（{} 分）— M で開く", cfg.menu.minutes),
+    };
+    info_lines.push(Line::from(Span::styled(menu_line, Style::default().fg(theme.warning))));
     let info = Paragraph::new(info_lines)
         .wrap(Wrap { trim: false })
         .style(Style::default().fg(theme.muted));

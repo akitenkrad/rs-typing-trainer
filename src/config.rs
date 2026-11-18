@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use toml_edit::{DocumentMut, Formatted, Item, Value};
+use toml_edit::{Array, DocumentMut, Formatted, Item, Value};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::error::{AppError, AppResult, ConfigError};
@@ -391,10 +391,18 @@ pub struct EnduranceConfig {
     pub minutes: u64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MenuConfig {
     #[serde(default = "default_menu_minutes")]
     pub minutes: u8,
+    #[serde(default)]
+    pub languages: Option<Vec<Lang>>,
+}
+
+impl MenuConfig {
+    pub fn practice_languages(&self, display: Lang) -> Vec<Lang> {
+        self.languages.clone().unwrap_or_else(|| vec![display])
+    }
 }
 
 impl Default for AnalysisConfig {
@@ -440,6 +448,7 @@ impl Default for MenuConfig {
     fn default() -> Self {
         Self {
             minutes: default_menu_minutes(),
+            languages: None,
         }
     }
 }
@@ -1026,6 +1035,14 @@ impl Config {
                 value: self.menu.minutes.to_string(),
             });
         }
+        if let Some(languages) = &self.menu.languages
+            && (languages.is_empty() || languages.len() > 2 || (languages.len() == 2 && languages[0] == languages[1]))
+        {
+            return Err(ConfigError::UnknownKeyboardSetting {
+                field: "menu.languages",
+                value: format!("{languages:?}"),
+            });
+        }
         Ok(())
     }
 
@@ -1051,7 +1068,11 @@ pub fn save_keyboard_layout(path: &Path, layout: &str) -> AppResult<()> {
 /// rest of the document.
 pub fn save_settings(path: &Path, config: &Config) -> AppResult<()> {
     let raw = if path.exists() { std::fs::read_to_string(path)? } else { String::new() };
-    let mut document = document_with_sections(&raw, &["keyboard", "display", "general", "session"])?;
+    let mut sections = vec!["keyboard", "display", "general", "session"];
+    if config.menu.languages.is_some() {
+        sections.push("menu");
+    }
+    let mut document = document_with_sections(&raw, &sections)?;
     for (key, value) in [
         ("layout", config.keyboard.layout.as_str()),
         ("input_layout", config.keyboard.input_layout.as_str()),
@@ -1086,6 +1107,18 @@ pub fn save_settings(path: &Path, config: &Config) -> AppResult<()> {
             ErrorMode::Advance => "advance",
         },
     );
+    if let Some(languages) = &config.menu.languages {
+        let mut array = Array::new();
+        for language in languages {
+            array.push(match language {
+                Lang::En => "en",
+                Lang::Ja => "ja",
+            });
+        }
+        set_array_preserving_decor(&mut document["menu"]["languages"], array);
+    } else if let Some(menu) = document.get_mut("menu").and_then(Item::as_table_mut) {
+        menu.remove("languages");
+    }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -1205,6 +1238,14 @@ pub(crate) fn set_string_preserving_decor(item: &mut Item, value: &str) {
 fn set_integer_preserving_decor(item: &mut Item, value: i64) {
     let decor = item.as_value().map(|old| old.decor().clone());
     *item = toml_edit::value(value);
+    if let (Some(decor), Some(new)) = (decor, item.as_value_mut()) {
+        *new.decor_mut() = decor;
+    }
+}
+
+fn set_array_preserving_decor(item: &mut Item, array: Array) {
+    let decor = item.as_value().map(|old| old.decor().clone());
+    *item = Item::Value(Value::Array(array));
     if let (Some(decor), Some(new)) = (decor, item.as_value_mut()) {
         *new.decor_mut() = decor;
     }

@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use rs_typing_trainer::config::{Config, ErrorMode, KeyFilter, ModeKind, save_mode_controls};
 use rs_typing_trainer::graphics::GraphicsPreference;
+use rs_typing_trainer::i18n::Lang;
 use tempfile::TempDir;
 
 #[test]
@@ -121,6 +122,33 @@ db_path = "/tmp/test-sessions.db"
 #[test]
 fn auto_difficulty_defaults_to_enabled() {
     assert!(Config::default().practice.auto_difficulty);
+}
+
+#[test]
+fn menu_languages_default_to_the_display_language_and_accept_one_or_two_languages() {
+    let english = Config::from_toml("[general]\nlang = \"en\"\n").unwrap();
+    assert_eq!(english.menu.practice_languages(english.general.lang), vec![Lang::En]);
+
+    let japanese = Config::from_toml("[general]\nlang = \"ja\"\n").unwrap();
+    assert_eq!(japanese.menu.practice_languages(japanese.general.lang), vec![Lang::Ja]);
+
+    let one = Config::from_toml("[menu]\nlanguages = [\"ja\"]\n").unwrap();
+    assert_eq!(one.menu.practice_languages(Lang::En), vec![Lang::Ja]);
+
+    let two = Config::from_toml("[menu]\nlanguages = [\"en\", \"ja\"]\n").unwrap();
+    assert_eq!(two.menu.practice_languages(Lang::Ja), vec![Lang::En, Lang::Ja]);
+}
+
+#[test]
+fn menu_languages_reject_empty_duplicate_unknown_and_more_than_two_values() {
+    for raw in [
+        "[menu]\nlanguages = []\n",
+        "[menu]\nlanguages = [\"en\", \"en\"]\n",
+        "[menu]\nlanguages = [\"fr\"]\n",
+        "[menu]\nlanguages = [\"en\", \"ja\", \"en\"]\n",
+    ] {
+        assert!(Config::from_toml(raw).is_err(), "accepted invalid config: {raw}");
+    }
 }
 
 #[test]

@@ -58,6 +58,8 @@ const ABORT_CONFIRMATION_DURATION: Duration = Duration::from_secs(2);
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Screen {
     Title,
+    Menu,
+    MenuFocus { remaining: f32 },
     ModeSelect,
     KeyPicker,
     Countdown { remaining: f32 },
@@ -290,12 +292,25 @@ pub struct App {
     pub recovery_metrics: RecoveryMetrics,
     pub recommend_preview: bool,
     pub recommend_rhythm: bool,
+    pub daily_menu: Option<crate::practice::menu::DailyMenu>,
+    pub menu_error: Option<String>,
+    pub menu_selected: usize,
+    pub menu_completed: BTreeSet<usize>,
+    pub menu_active_step: Option<usize>,
+    pub menu_step_outcome: Option<crate::practice::menu::AdvanceOutcome>,
     analysis_as_of: chrono::NaiveDate,
     bench_run: Option<BenchRun>,
     ui_now: Instant,
     input_blocked_until: Option<Instant>,
     abort_confirm_until: Option<Instant>,
-    settings_original: Option<(KeyboardConfig, crate::config::DisplayConfig, Lang, crate::config::ErrorMode)>,
+    settings_original: Option<(
+        KeyboardConfig,
+        crate::config::DisplayConfig,
+        Lang,
+        crate::config::ErrorMode,
+        crate::config::MenuConfig,
+    )>,
+    menu_original_config: Option<Config>,
 }
 
 pub struct GameState {
@@ -358,6 +373,7 @@ impl App {
     pub fn new_at(config: Config, home_dir: PathBuf, date: chrono::NaiveDate) -> Self {
         let mut app = Self::new_without_storage(config, home_dir, date);
         app.refresh_recommendations();
+        app.refresh_daily_menu();
         app
     }
 
@@ -460,12 +476,19 @@ impl App {
             recovery_metrics: RecoveryMetrics::default(),
             recommend_preview: false,
             recommend_rhythm: false,
+            daily_menu: None,
+            menu_error: None,
+            menu_selected: 0,
+            menu_completed: BTreeSet::new(),
+            menu_active_step: None,
+            menu_step_outcome: None,
             analysis_as_of: date,
             bench_run: None,
             ui_now: now,
             input_blocked_until: None,
             abort_confirm_until: None,
             settings_original: None,
+            menu_original_config: None,
         }
     }
 
@@ -756,6 +779,36 @@ impl App {
             .is_some_and(|latest| crate::practice::rhythm::recommend_rhythm(*latest, &rhythm_scores));
     }
 
+    fn refresh_daily_menu(&mut self) {
+        match crate::practice::menu::build_from_storage(
+            &self.db_path(),
+            &self.home_dir,
+            &self.config,
+            self.config.general.lang,
+            self.analysis_as_of,
+        ) {
+            Ok(menu) => {
+                self.daily_menu = Some(menu);
+                self.menu_error = None;
+                self.menu_selected = self
+                    .menu_selected
+                    .min(self.daily_menu.as_ref().map_or(0, |menu| menu.steps.len().saturating_sub(1)));
+            }
+            Err(error) => {
+                self.daily_menu = None;
+                self.menu_error = Some(error.to_string());
+            }
+        }
+    }
+
+    fn open_menu(&mut self) {
+        self.refresh_daily_menu();
+        self.menu_active_step = None;
+        self.menu_step_outcome = None;
+        self.menu_original_config = None;
+        self.screen = Screen::Menu;
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent) {
         self.handle_key_at(key, Instant::now());
     }
@@ -786,10 +839,14 @@ impl App {
         }
         match self.screen {
             Screen::Title => self.handle_title_key(key, action),
+            Screen::Menu => self.handle_menu_key(key, action),
+            Screen::MenuFocus { .. } => self.handle_menu_focus_key(key),
             Screen::ModeSelect => self.handle_mode_select_key(key, action),
             Screen::KeyPicker => self.handle_key_picker_key(key, action),
             Screen::Countdown { .. } => {
-                if matches!(action, InputAction::Abort) && self.confirm_abort(now) {
+                if matches!(action, InputAction::Abort) && self.menu_active_step.is_some() {
+                    self.abort_menu_step();
+                } else if matches!(action, InputAction::Abort) && self.confirm_abort(now) {
                     if self.bench_run.is_some() {
                         self.abort_benchmark();
                     } else {
@@ -845,6 +902,7 @@ impl App {
                 self.screen = Screen::BenchSelect;
             }
             KeyCode::Char('a') | KeyCode::Char('A') => self.open_analysis(),
+            KeyCode::Char('m') | KeyCode::Char('M') => self.open_menu(),
             KeyCode::Char('s') | KeyCode::Char('S') => {
                 self.settings_selected = 0;
                 self.settings_save_error = None;
@@ -853,6 +911,7 @@ impl App {
                     self.config.display.clone(),
                     self.config.general.lang,
                     self.config.session.error_mode,
+                    self.config.menu.clone(),
                 ));
                 self.screen = Screen::Settings;
             }
@@ -869,6 +928,101 @@ impl App {
         self.mode_selected = mode_index(self.config.mode.kind);
         self.refresh_mode_grade();
         self.screen = Screen::ModeSelect;
+    }
+
+    fn handle_menu_key(&mut self, key: KeyEvent, action: InputAction) {
+        let last = self.daily_menu.as_ref().map_or(0, |menu| menu.steps.len().saturating_sub(1));
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => self.menu_selected = self.menu_selected.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') => self.menu_selected = (self.menu_selected + 1).min(last),
+            KeyCode::Enter | KeyCode::Char(' ') => self.begin_menu_step(self.menu_selected),
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                self.menu_active_step = None;
+                self.menu_step_outcome = None;
+                self.menu_original_config = None;
+                self.screen = Screen::Title;
+            }
+            _ => {}
+        }
+        if matches!(action, InputAction::Abort) && key.code != KeyCode::Esc {
+            self.menu_active_step = None;
+            self.menu_step_outcome = None;
+            self.menu_original_config = None;
+            self.screen = Screen::Title;
+        }
+    }
+
+    fn handle_menu_focus_key(&mut self, key: KeyEvent) {
+        if key.code == KeyCode::Esc {
+            self.abort_menu_step();
+        } else {
+            self.start_countdown();
+        }
+    }
+
+    fn begin_menu_step(&mut self, index: usize) {
+        let Some(step) = self.daily_menu.as_ref().and_then(|menu| menu.steps.get(index)).cloned() else {
+            return;
+        };
+        let base = self.config.clone();
+        match crate::practice::menu::config_for_menu_step(&base, &step) {
+            Ok(mut config) => {
+                let new_step = self.menu_active_step != Some(index);
+                if new_step && config.mode.kind == ModeKind::Burst {
+                    self.burst_series = BurstSeries::default();
+                }
+                config.session.duration_seconds = u64::from(step.minutes) * 60;
+                self.menu_original_config = Some(base);
+                self.config = config;
+                self.menu_active_step = Some(index);
+                self.menu_selected = index;
+                self.menu_step_outcome = None;
+                self.input_blocked_until = None;
+                self.abort_confirm_until = None;
+                self.screen = Screen::MenuFocus { remaining: 2.0 };
+            }
+            Err(error) => self.menu_error = Some(error),
+        }
+    }
+
+    fn restore_menu_config(&mut self) {
+        if let Some(config) = self.menu_original_config.take() {
+            self.config = config;
+        }
+    }
+
+    fn abort_menu_step(&mut self) {
+        self.game = None;
+        self.restore_menu_config();
+        self.menu_active_step = None;
+        self.menu_step_outcome = None;
+        self.abort_confirm_until = None;
+        self.input_blocked_until = None;
+        self.screen = Screen::Menu;
+    }
+
+    fn continue_menu(&mut self) {
+        let Some(current) = self.menu_active_step else {
+            self.screen = Screen::Menu;
+            return;
+        };
+        let burst_incomplete = self
+            .daily_menu
+            .as_ref()
+            .and_then(|menu| menu.steps.get(current))
+            .is_some_and(|step| step.mode == "burst" && !self.burst_series.complete());
+        if burst_incomplete {
+            self.begin_menu_step(current);
+            return;
+        }
+        let next = current + 1;
+        if self.daily_menu.as_ref().is_some_and(|menu| next < menu.steps.len()) {
+            self.begin_menu_step(next);
+        } else {
+            self.menu_active_step = None;
+            self.menu_step_outcome = None;
+            self.screen = Screen::Menu;
+        }
     }
 
     fn refresh_mode_grade(&mut self) {
@@ -906,6 +1060,7 @@ impl App {
                     self.config.display.clone(),
                     self.config.general.lang,
                     self.config.session.error_mode,
+                    self.config.menu.clone(),
                 ));
                 self.screen = Screen::Settings;
             }
@@ -1518,7 +1673,7 @@ impl App {
                 self.settings_selected = self.settings_selected.saturating_sub(1);
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.settings_selected = (self.settings_selected + 1).min(10);
+                self.settings_selected = (self.settings_selected + 1).min(11);
             }
             KeyCode::Left | KeyCode::Char('h') => self.cycle_setting(-1),
             KeyCode::Right | KeyCode::Char('l') => self.cycle_setting(1),
@@ -1546,11 +1701,12 @@ impl App {
     }
 
     fn cancel_settings(&mut self) {
-        if let Some((keyboard, display, language, error_mode)) = self.settings_original.take() {
+        if let Some((keyboard, display, language, error_mode, menu)) = self.settings_original.take() {
             self.config.keyboard = keyboard;
             self.config.display = display;
             self.config.general.lang = language;
             self.config.session.error_mode = error_mode;
+            self.config.menu = menu;
         }
         self.settings_save_error = None;
         self.screen = Screen::Title;
@@ -1604,21 +1760,31 @@ impl App {
                 };
             }
             8 => {
+                let options = [None, Some(vec![Lang::En]), Some(vec![Lang::Ja]), Some(vec![Lang::En, Lang::Ja])];
+                let current = options.iter().position(|value| *value == self.config.menu.languages).unwrap_or(0);
+                let next = if direction.is_positive() {
+                    (current + 1) % options.len()
+                } else {
+                    (current + options.len() - 1) % options.len()
+                };
+                self.config.menu.languages = options[next].clone();
+            }
+            9 => {
                 self.config.session.error_mode = match self.config.session.error_mode {
                     crate::config::ErrorMode::Stop => crate::config::ErrorMode::Advance,
                     crate::config::ErrorMode::Advance => crate::config::ErrorMode::Stop,
                 };
             }
-            9 => cycle_string(
+            10 => cycle_string(
                 &mut self.config.display.feedback,
                 &["summary".to_owned(), "detailed".to_owned()],
                 direction,
             ),
-            10 => {
+            11 => {
                 let configured_path = self
                     .settings_original
                     .as_ref()
-                    .map(|(_, display, _, _)| display.big_font.as_str())
+                    .map(|(_, display, _, _, _)| display.big_font.as_str())
                     .filter(|value| !matches!(*value, "biz-ud-gothic" | "shinonome"));
                 let mut options = vec!["biz-ud-gothic".to_owned(), "shinonome".to_owned()];
                 if let Some(path) = configured_path {
@@ -1640,6 +1806,7 @@ impl App {
     fn handle_result_key(&mut self, key: KeyEvent, action: InputAction, now: Instant) {
         match key.code {
             KeyCode::Char(' ') | KeyCode::Enter => match self.result_origin {
+                ResultOrigin::JustPlayed if self.menu_active_step.is_some() => self.continue_menu(),
                 ResultOrigin::JustPlayed if self.bench_run.is_some() => self.continue_benchmark(now),
                 ResultOrigin::JustPlayed if self.config.mode.kind == ModeKind::Burst && self.burst_series.complete() => {
                     self.screen = Screen::Title;
@@ -1650,6 +1817,11 @@ impl App {
             KeyCode::Char('h') | KeyCode::Char('H') if self.bench_run.is_none() => self.open_history(),
             KeyCode::Char('q') | KeyCode::Char('Q') if self.bench_run.is_none() => self.should_quit = true,
             KeyCode::Esc => match self.result_origin {
+                ResultOrigin::JustPlayed if self.menu_active_step.is_some() => {
+                    self.menu_active_step = None;
+                    self.menu_step_outcome = None;
+                    self.screen = Screen::Menu;
+                }
                 ResultOrigin::JustPlayed if self.bench_run.is_some() => {
                     if self.confirm_abort(now) {
                         self.abort_benchmark();
@@ -1662,6 +1834,11 @@ impl App {
         }
         if matches!(action, InputAction::Abort) && key.code != KeyCode::Esc {
             match self.result_origin {
+                ResultOrigin::JustPlayed if self.menu_active_step.is_some() => {
+                    self.menu_active_step = None;
+                    self.menu_step_outcome = None;
+                    self.screen = Screen::Menu;
+                }
                 ResultOrigin::JustPlayed if self.bench_run.is_some() => {
                     if self.confirm_abort(now) {
                         self.abort_benchmark();
@@ -1845,7 +2022,12 @@ impl App {
         }
         match action {
             InputAction::Abort => {
-                if self.confirm_abort(now) {
+                if self.menu_active_step.is_some() {
+                    if let Some(game) = self.game.as_mut() {
+                        game.session.abort(now.saturating_duration_since(game.started_at));
+                    }
+                    self.abort_menu_step();
+                } else if self.confirm_abort(now) {
                     if let Some(game) = self.game.as_mut() {
                         game.session.abort(now.saturating_duration_since(game.started_at));
                     }
@@ -2256,6 +2438,21 @@ impl App {
         } else {
             self.unlock_state = None;
         }
+        let japanese_menu_step = self
+            .menu_active_step
+            .and_then(|index| self.daily_menu.as_ref().and_then(|menu| menu.steps.get(index)))
+            .is_some_and(|step| step.language == Lang::Ja);
+        if japanese_menu_step
+            && matches!(
+                self.config.mode.kind,
+                ModeKind::Words | ModeKind::Ngram | ModeKind::Unlock | ModeKind::Rhythm | ModeKind::Burst
+            )
+        {
+            // These modes use the English word pool by default. Keep their
+            // gameplay behavior, but feed the generator Japanese word prompts
+            // for a Japanese menu step.
+            generator_config.kind = ModeKind::Romaji;
+        }
         let pacer_supported = matches!(
             self.config.mode.kind,
             ModeKind::Words | ModeKind::Sentence | ModeKind::Phrase | ModeKind::Adaptive
@@ -2454,7 +2651,9 @@ impl App {
         } else {
             self.config.session.error_mode
         };
-        let session_duration = if self.config.mode.kind == ModeKind::Endurance {
+        let session_duration = if self.menu_active_step.is_some() {
+            self.config.session.duration()
+        } else if self.config.mode.kind == ModeKind::Endurance {
             Duration::from_secs(self.config.endurance.minutes * 60)
         } else {
             self.config.session.duration()
@@ -2508,6 +2707,14 @@ impl App {
         self.analysis_as_of = date;
         self.elapsed_total += dt;
         match self.screen {
+            Screen::MenuFocus { remaining } => {
+                let new_remaining = remaining - dt.as_secs_f32();
+                if new_remaining <= 0.0 {
+                    self.start_countdown();
+                } else {
+                    self.screen = Screen::MenuFocus { remaining: new_remaining };
+                }
+            }
             Screen::Countdown { remaining } => {
                 let new_remaining = remaining - dt.as_secs_f32();
                 if new_remaining <= 0.0 {
@@ -2672,6 +2879,23 @@ impl App {
         let mut result = GameResult::from_log(&self.config, &log);
         let mut record = SessionRecord::from_log(&self.config, log, started_wall);
         record.set_ghost_opponent(ghost_opponent);
+        let menu_context = self.menu_active_step.and_then(|index| {
+            self.daily_menu
+                .as_ref()
+                .and_then(|menu| menu.steps.get(index))
+                .cloned()
+                .map(|step| (index, step))
+        });
+        if let Some((index, step)) = &menu_context {
+            record.set_menu_context(&step.prescription_id, index + 1);
+            self.menu_step_outcome = Some(
+                step.advance_condition
+                    .as_ref()
+                    .map_or(crate::practice::menu::AdvanceOutcome::CannotDetermine, |condition| {
+                        crate::practice::menu::evaluate_current_advance(condition, &record)
+                    }),
+            );
+        }
         self.recovery_metrics = crate::practice::recovery::recovery_metrics(&record.log);
         if self.config.mode.kind == ModeKind::Rhythm
             && let Some(bpm) = self.rhythm_bpm
@@ -2690,6 +2914,11 @@ impl App {
         }
         if self.config.mode.kind == ModeKind::Burst {
             self.burst_series.push(record.header.net_wpm);
+        }
+        if let Some((index, step)) = &menu_context
+            && (step.mode != "burst" || self.burst_series.complete())
+        {
+            self.menu_completed.insert(*index);
         }
         record.header.release_events = self.release_events_supported;
         self.gate_failed = !crate::practice::gate::is_eligible(self.config.gate.min_accuracy, record.header.accuracy);
@@ -2824,6 +3053,7 @@ impl App {
         self.last_result = Some(result);
         self.legacy_wpm = None;
         self.result_origin = ResultOrigin::JustPlayed;
+        self.restore_menu_config();
         self.screen = Screen::Result;
         self.abort_confirm_until = None;
         self.begin_result_input_delay(now);

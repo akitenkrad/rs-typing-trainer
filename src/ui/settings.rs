@@ -29,7 +29,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(0),
-            Constraint::Length(11),
+            Constraint::Length(12),
             Constraint::Length(0),
             Constraint::Length(4),
             Constraint::Length(1),
@@ -51,6 +51,10 @@ pub fn render(frame: &mut Frame, app: &App) {
         (Msg::SettingPromptStyle, prompt_style_label(&app.config.display.prompt_style, lang)),
         (Msg::SettingGraphics, graphics_preference_label(app.config.display.graphics)),
         (Msg::SettingLanguage, language),
+        (
+            Msg::SettingMenuLanguages,
+            menu_languages_label(app.config.menu.languages.as_deref(), lang),
+        ),
         (
             Msg::SettingErrorMode,
             match app.config.session.error_mode {
@@ -78,7 +82,7 @@ pub fn render(frame: &mut Frame, app: &App) {
                     Style::default().fg(if selected { theme.accent } else { theme.fg }),
                 ),
                 Span::styled(
-                    if index == 10 {
+                    if index == 11 {
                         format!("‹ {value} ›")
                     } else {
                         format!("< {value} >")
@@ -97,7 +101,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             .style(Style::default().fg(theme.muted)),
         left_inset(chunks[3]),
     );
-    if app.settings_selected == 10 {
+    if app.settings_selected == 11 {
         render_font_sample(frame, app, &theme, left_inset(chunks[5]));
     }
     frame.render_widget(
@@ -167,24 +171,41 @@ fn setting_description(index: usize, lang: Lang) -> &'static str {
             "画面の表示言語．English（英語）か Japanese（日本語）を選べます．adaptive や sentence で練習する言語とは別です．既定: English．"
         }
         (8, Lang::En) => {
-            "How a mistyped character is handled. stop keeps the cursor in place until the correct key is typed. advance accepts the error and moves forward; Backspace can move back. Default: stop."
+            "Languages practiced by Today's Menu. Choose Same as display (default), English, Japanese, or English + Japanese. The choice applies only to the menu; the interface language stays separate. Default: Same as display."
         }
         (8, Lang::Ja) => {
-            "誤入力した文字の扱い．stop は正しいキーを打つまでその位置で止まります．advance は誤入力を記録して先へ進み，Backspace で戻れます．既定: stop．"
+            "今日のメニューで練習する言語．表示言語と同じ（Same as display，既定）/ English / 日本語（Japanese）/ English + 日本語（English + Japanese）から選べます．画面の表示言語とは別です．既定: 表示言語と同じ．"
         }
         (9, Lang::En) => {
-            "Post-session coaching. summary shows the single clearest observation. detailed shows up to three observations. Nothing is shown when the evidence is insufficient. Default: summary."
+            "How a mistyped character is handled. stop keeps the cursor in place until the correct key is typed. advance accepts the error and moves forward; Backspace can move back. Default: stop."
         }
         (9, Lang::Ja) => {
-            "練習後の気づき．summary は最も目立つ内容を 1 行，detailed は最大 3 行を示します．根拠が足りないときは表示しません．既定: summary．"
+            "誤入力した文字の扱い．stop は正しいキーを打つまでその位置で止まります．advance は誤入力を記録して先へ進み，Backspace で戻れます．既定: stop．"
         }
         (10, Lang::En) => {
-            "Large-text font. biz-ud-gothic: bundled outline font. shinonome: crisp integer-scaled bitmap. A configured TTF / OTF / TTC path is also listed. Sample: あア亜Aa. Without terminal images, Shinonome block text is used. Default: biz-ud-gothic."
+            "Post-session coaching. summary shows the single clearest observation. detailed shows up to three observations. Nothing is shown when the evidence is insufficient. Default: summary."
         }
         (10, Lang::Ja) => {
+            "練習後の気づき．summary は最も目立つ内容を 1 行，detailed は最大 3 行を示します．根拠が足りないときは表示しません．既定: summary．"
+        }
+        (11, Lang::En) => {
+            "Large-text font. biz-ud-gothic: bundled outline font. shinonome: crisp integer-scaled bitmap. A configured TTF / OTF / TTC path is also listed. Sample: あア亜Aa. Without terminal images, Shinonome block text is used. Default: biz-ud-gothic."
+        }
+        (11, Lang::Ja) => {
             "大きな文字の書体．biz-ud-gothic: 同梱の輪郭書体．shinonome: 整数倍のドット字形．設定ファイルに TTF / OTF / TTC のパスがあれば候補に加わります．見本: あア亜Aa．画像を描けない端末では東雲のブロック文字で描きます．既定: biz-ud-gothic．"
         }
         _ => "",
+    }
+}
+
+fn menu_languages_label(languages: Option<&[Lang]>, lang: Lang) -> &'static str {
+    match (languages, lang) {
+        (None, Lang::En) => "Same as display",
+        (None, Lang::Ja) => "表示言語と同じ",
+        (Some([Lang::En]), _) => "English",
+        (Some([Lang::Ja]), _) => "日本語",
+        (Some([Lang::En, Lang::Ja]) | Some([Lang::Ja, Lang::En]), _) => "English + 日本語",
+        _ => "—",
     }
 }
 

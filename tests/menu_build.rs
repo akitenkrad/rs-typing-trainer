@@ -7,8 +7,10 @@ use rs_typing_trainer::analysis::errors::ErrorKind;
 use rs_typing_trainer::analysis::grades::{Component, ComponentGrade, GradeSource, GradeStatus, LanguageGrade, Level, OverallGrade};
 use rs_typing_trainer::cli::Cli;
 use rs_typing_trainer::config::{Config, MenuConfig};
+use rs_typing_trainer::i18n::Lang;
 use rs_typing_trainer::practice::menu::{
-    MenuBuildInput, MenuRole, PastMenu, PrescriptionJudgment, PrescriptionState, build_menu, bundled_catalog, config_for_step,
+    MenuBuildInput, MenuLanguageInput, MenuRole, PastMenu, PrescriptionJudgment, PrescriptionState, build_menu, build_menu_for_languages,
+    bundled_catalog, config_for_step,
 };
 use tempfile::TempDir;
 
@@ -68,6 +70,16 @@ fn input(accuracy: f64, weakest: Component) -> MenuBuildInput {
     }
 }
 
+fn language_input(language: &str, accuracy: f64, weakest: Component) -> MenuLanguageInput {
+    let mut input = input(accuracy, weakest);
+    input.language = language.to_owned();
+    input.grade.as_mut().unwrap().language = language.to_owned();
+    MenuLanguageInput {
+        input,
+        states: BTreeMap::new(),
+    }
+}
+
 fn primary_id(menu: &rs_typing_trainer::practice::menu::DailyMenu, role: MenuRole) -> &str {
     &menu.steps.iter().find(|step| step.role == role).unwrap().prescription_id
 }
@@ -116,10 +128,12 @@ fn a_component_used_as_primary_on_both_recent_days_drops_one_place() {
     let history = [
         PastMenu {
             date: case.as_of.pred_opt().unwrap(),
+            language: Some("en".to_owned()),
             primary_prescription_ids: vec!["preview.wide".to_owned()],
         },
         PastMenu {
             date: case.as_of - chrono::Duration::days(2),
+            language: Some("en".to_owned()),
             primary_prescription_ids: vec!["preview.wide".to_owned()],
         },
     ];
@@ -179,10 +193,30 @@ fn ineffective_transition_adaptive_uses_ngram_alternate() {
 #[test]
 fn menu_minutes_control_primary_b_and_phase_durations() {
     let case = input(97.0, Component::Preview);
-    let ten = build_menu(bundled_catalog().unwrap(), &case, &MenuConfig { minutes: 10 }, &[], &BTreeMap::new()).unwrap();
+    let ten = build_menu(
+        bundled_catalog().unwrap(),
+        &case,
+        &MenuConfig {
+            minutes: 10,
+            ..MenuConfig::default()
+        },
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
     assert!(!ten.steps.iter().any(|step| step.role == MenuRole::PrimaryB));
 
-    let twenty = build_menu(bundled_catalog().unwrap(), &case, &MenuConfig { minutes: 20 }, &[], &BTreeMap::new()).unwrap();
+    let twenty = build_menu(
+        bundled_catalog().unwrap(),
+        &case,
+        &MenuConfig {
+            minutes: 20,
+            ..MenuConfig::default()
+        },
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
     assert_eq!(twenty.steps.iter().find(|step| step.role == MenuRole::PrimaryA).unwrap().minutes, 7);
     assert_eq!(twenty.steps.iter().find(|step| step.role == MenuRole::Check).unwrap().minutes, 4);
 }
@@ -252,6 +286,21 @@ fn stats_menu_outputs_text_and_machine_readable_json_using_only_a_temporary_db()
     assert_eq!(value["requested_minutes"], 10);
     assert!(value["introductory"].as_bool().unwrap());
     assert!(value["steps"].as_array().unwrap().iter().all(|step| step.get("reason").is_some()));
+
+    std::fs::write(
+        &config_path,
+        format!(
+            "[storage]\ndb_path = {:?}\n[menu]\nminutes = 10\nlanguages = [\"ja\"]\n",
+            db_path.to_str().unwrap()
+        ),
+    )
+    .unwrap();
+    let separated = run(&["--lang", "en"]);
+    assert!(separated.status.success(), "{}", String::from_utf8_lossy(&separated.stderr));
+    let separated = String::from_utf8(separated.stdout).unwrap();
+    assert!(separated.contains("Today's practice menu"), "{separated}");
+    assert!(separated.contains("Language: JA"), "{separated}");
+    assert!(!separated.contains("今日の練習メニュー"), "{separated}");
 }
 
 #[test]
@@ -276,4 +325,182 @@ fn step_settings_are_in_memory_overrides_and_preserve_unrelated_configuration() 
     assert_eq!(overridden.session.preview_items, 3);
     assert_eq!(overridden.mode.kind, rs_typing_trainer::config::ModeKind::Sentence);
     assert_eq!(overridden.menu.minutes, 10, "unrelated menu configuration must be preserved");
+}
+
+#[test]
+fn menu_reasons_use_grade_precision_without_a_space_before_an_empty_unit() {
+    let mut rhythm_case = input(97.0, Component::Rhythm);
+    rhythm_case.language = "ja".to_owned();
+    let rhythm = rhythm_case
+        .grade
+        .as_mut()
+        .unwrap()
+        .components
+        .iter_mut()
+        .find(|row| row.component == Component::Rhythm)
+        .unwrap();
+    rhythm.value = 0.719;
+    rhythm.unit.clear();
+
+    let rhythm_menu = build_menu(bundled_catalog().unwrap(), &rhythm_case, &MenuConfig::default(), &[], &BTreeMap::new()).unwrap();
+    let rhythm_reason = &rhythm_menu.steps.iter().find(|step| step.role == MenuRole::PrimaryA).unwrap().reason;
+    assert!(rhythm_reason.starts_with("リズム C (0.72)"), "{rhythm_reason}");
+    assert!(!rhythm_reason.contains("0.72 "), "{rhythm_reason}");
+
+    let mut speed_case = input(97.0, Component::Speed);
+    speed_case.language = "ja".to_owned();
+    let speed = speed_case
+        .grade
+        .as_mut()
+        .unwrap()
+        .components
+        .iter_mut()
+        .find(|row| row.component == Component::Speed)
+        .unwrap();
+    speed.value = 49.9;
+    speed.unit = "WPM".to_owned();
+
+    let speed_menu = build_menu(bundled_catalog().unwrap(), &speed_case, &MenuConfig::default(), &[], &BTreeMap::new()).unwrap();
+    let speed_reason = &speed_menu.steps.iter().find(|step| step.role == MenuRole::PrimaryA).unwrap().reason;
+    assert!(speed_reason.starts_with("速さ C (49.9 WPM)"), "{speed_reason}");
+}
+
+#[test]
+fn two_languages_prioritize_low_english_accuracy_and_take_b_from_japanese() {
+    let mut english = language_input("en", 93.0, Component::Speed);
+    english
+        .input
+        .grade
+        .as_mut()
+        .unwrap()
+        .components
+        .iter_mut()
+        .find(|row| row.component == Component::Accuracy)
+        .unwrap()
+        .grade = Level::D;
+    let japanese = language_input("ja", 97.0, Component::Preview);
+
+    let menu = build_menu_for_languages(bundled_catalog().unwrap(), &[english, japanese], Lang::En, &MenuConfig::default(), &[]).unwrap();
+
+    let a = menu.steps.iter().find(|step| step.role == MenuRole::PrimaryA).unwrap();
+    let b = menu.steps.iter().find(|step| step.role == MenuRole::PrimaryB).unwrap();
+    assert_eq!(a.language, Lang::En);
+    assert!(a.prescription_id.starts_with("accuracy."), "{}", a.prescription_id);
+    assert_eq!(b.language, Lang::Ja);
+    assert_eq!(b.prescription_id, "preview.wide");
+}
+
+#[test]
+fn two_languages_choose_largest_overall_gain_for_a_and_other_language_for_b() {
+    let mut english = language_input("en", 97.0, Component::Speed);
+    english
+        .input
+        .grade
+        .as_mut()
+        .unwrap()
+        .components
+        .iter_mut()
+        .find(|row| row.component == Component::Speed)
+        .unwrap()
+        .score = 0.0;
+    let mut japanese = language_input("ja", 97.0, Component::Preview);
+    japanese
+        .input
+        .grade
+        .as_mut()
+        .unwrap()
+        .components
+        .iter_mut()
+        .find(|row| row.component == Component::Preview)
+        .unwrap()
+        .score = 2.0;
+
+    let menu = build_menu_for_languages(bundled_catalog().unwrap(), &[english, japanese], Lang::Ja, &MenuConfig::default(), &[]).unwrap();
+
+    let a = menu.steps.iter().find(|step| step.role == MenuRole::PrimaryA).unwrap();
+    let b = menu.steps.iter().find(|step| step.role == MenuRole::PrimaryB).unwrap();
+    assert_eq!((a.language, a.prescription_id.as_str()), (Lang::En, "speed.pacer"));
+    assert_eq!((b.language, b.prescription_id.as_str()), (Lang::Ja, "preview.wide"));
+}
+
+#[test]
+fn ten_minute_two_language_menu_omits_b_and_alternates_a_language_by_date() {
+    let first = language_input("en", 97.0, Component::Speed);
+    let second = language_input("ja", 97.0, Component::Preview);
+    let config = MenuConfig {
+        minutes: 10,
+        ..MenuConfig::default()
+    };
+    let today = build_menu_for_languages(bundled_catalog().unwrap(), &[first.clone(), second.clone()], Lang::En, &config, &[]).unwrap();
+    let mut tomorrow_inputs = [first, second];
+    for input in &mut tomorrow_inputs {
+        input.input.as_of = input.input.as_of.succ_opt().unwrap();
+    }
+    let tomorrow = build_menu_for_languages(bundled_catalog().unwrap(), &tomorrow_inputs, Lang::En, &config, &[]).unwrap();
+
+    let today_a = today.steps.iter().find(|step| step.role == MenuRole::PrimaryA).unwrap();
+    let tomorrow_a = tomorrow.steps.iter().find(|step| step.role == MenuRole::PrimaryA).unwrap();
+    assert_ne!(today_a.language, tomorrow_a.language);
+    assert!(!today.steps.iter().any(|step| step.role == MenuRole::PrimaryB));
+    assert!(!tomorrow.steps.iter().any(|step| step.role == MenuRole::PrimaryB));
+}
+
+#[test]
+fn insufficient_language_uses_introductory_b_and_both_insufficient_alternate_language() {
+    let english = language_input("en", 97.0, Component::Speed);
+    let mut japanese = language_input("ja", 97.0, Component::Preview);
+    japanese.input.logged_keystrokes = 1_999;
+    let mixed = build_menu_for_languages(
+        bundled_catalog().unwrap(),
+        &[english.clone(), japanese.clone()],
+        Lang::En,
+        &MenuConfig::default(),
+        &[],
+    )
+    .unwrap();
+    let b = mixed.steps.iter().find(|step| step.role == MenuRole::PrimaryB).unwrap();
+    assert_eq!(b.language, Lang::Ja);
+    assert_eq!(b.prescription_id, "transition.adaptive");
+    assert!(b.reason.contains("JA"), "{}", b.reason);
+
+    let mut english_missing = english;
+    english_missing.input.logged_keystrokes = 1_999;
+    let today = build_menu_for_languages(
+        bundled_catalog().unwrap(),
+        &[english_missing.clone(), japanese.clone()],
+        Lang::En,
+        &MenuConfig::default(),
+        &[],
+    )
+    .unwrap();
+    let mut tomorrow_inputs = [english_missing, japanese];
+    for input in &mut tomorrow_inputs {
+        input.input.as_of = input.input.as_of.succ_opt().unwrap();
+    }
+    let tomorrow = build_menu_for_languages(bundled_catalog().unwrap(), &tomorrow_inputs, Lang::En, &MenuConfig::default(), &[]).unwrap();
+    assert!(today.introductory && tomorrow.introductory);
+    assert_ne!(today.steps[0].language, tomorrow.steps[0].language);
+    assert!(today.steps.iter().all(|step| step.language == today.steps[0].language));
+    assert!(tomorrow.steps.iter().all(|step| step.language == tomorrow.steps[0].language));
+}
+
+#[test]
+fn two_language_check_step_alternates_language_by_date() {
+    let first = language_input("en", 97.0, Component::Speed);
+    let second = language_input("ja", 97.0, Component::Preview);
+    let today = build_menu_for_languages(
+        bundled_catalog().unwrap(),
+        &[first.clone(), second.clone()],
+        Lang::En,
+        &MenuConfig::default(),
+        &[],
+    )
+    .unwrap();
+    let mut tomorrow_inputs = [first, second];
+    for input in &mut tomorrow_inputs {
+        input.input.as_of = input.input.as_of.succ_opt().unwrap();
+    }
+    let tomorrow = build_menu_for_languages(bundled_catalog().unwrap(), &tomorrow_inputs, Lang::En, &MenuConfig::default(), &[]).unwrap();
+    let check = |menu: &rs_typing_trainer::practice::menu::DailyMenu| menu.steps.iter().find(|step| step.role == MenuRole::Check).unwrap().language;
+    assert_ne!(check(&today), check(&tomorrow));
 }

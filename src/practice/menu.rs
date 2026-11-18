@@ -447,7 +447,16 @@ pub fn config_for_step(base: &Config, mode: &str, settings: &BTreeMap<String, to
     }
     let raw = toml::to_string(&value).map_err(|error| error.to_string())?;
     let mut config = Config::from_toml(&raw).map_err(|error| error.to_string())?;
-    config.menu = base.menu;
+    config.menu = base.menu.clone();
+    Ok(config)
+}
+
+pub fn config_for_menu_step(base: &Config, step: &MenuStep) -> Result<Config, String> {
+    let mut config = config_for_step(base, &step.mode, &step.settings)?;
+    let language = language_code(step.language).to_owned();
+    config.adaptive.lang.clone_from(&language);
+    config.mode.sentence.lang.clone_from(&language);
+    config.mode.phrase.lang = language;
     Ok(config)
 }
 
@@ -494,7 +503,14 @@ pub struct MenuBuildInput {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PastMenu {
     pub date: NaiveDate,
+    pub language: Option<String>,
     pub primary_prescription_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MenuLanguageInput {
+    pub input: MenuBuildInput,
+    pub states: BTreeMap<String, PrescriptionState>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -525,6 +541,7 @@ impl Default for PrescriptionState {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MenuStep {
     pub role: MenuRole,
+    pub language: Lang,
     pub prescription_id: String,
     pub title: String,
     pub level: Option<u8>,
@@ -533,6 +550,8 @@ pub struct MenuStep {
     pub reason: String,
     pub focus: String,
     pub advance: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub advance_condition: Option<AdvanceCondition>,
     pub evidence: Option<String>,
     pub evidence_note: Option<String>,
     pub settings: BTreeMap<String, toml::Value>,
@@ -556,34 +575,182 @@ pub fn build_menu(
     history: &[PastMenu],
     states: &BTreeMap<String, PrescriptionState>,
 ) -> Result<DailyMenu, String> {
+    let display = parse_language(&input.language)?;
+    build_menu_for_languages(
+        catalog,
+        &[MenuLanguageInput {
+            input: input.clone(),
+            states: states.clone(),
+        }],
+        display,
+        menu,
+        history,
+    )
+}
+
+#[derive(Clone, Debug)]
+struct CandidateChoice {
+    prescription_id: String,
+    component: MenuComponent,
+    overall_gain: f64,
+}
+
+#[derive(Clone, Copy)]
+struct StepLanguage {
+    display: Lang,
+    practice: Lang,
+    show_label: bool,
+}
+
+struct LanguagePlan<'a> {
+    source: &'a MenuLanguageInput,
+    language: Lang,
+    sufficient: bool,
+    candidates: Vec<CandidateChoice>,
+    low_accuracy: Option<(Level, f64)>,
+}
+
+pub fn build_menu_for_languages(
+    catalog: &MenuCatalog,
+    inputs: &[MenuLanguageInput],
+    display: Lang,
+    menu: &MenuConfig,
+    history: &[PastMenu],
+) -> Result<DailyMenu, String> {
     if !matches!(menu.minutes, 10 | 15 | 20) {
         return Err("menu minutes must be 10, 15, or 20".to_owned());
     }
-    let lang = if input.language == "ja" { Lang::Ja } else { Lang::En };
-    let sufficient = input.grade.as_ref().and_then(|grade| grade.overall.as_ref()).is_some() && input.logged_keystrokes >= MIN_MENU_KEYSTROKES;
-    let bench_recommended = input
-        .last_bench_date
-        .is_none_or(|date| input.as_of.signed_duration_since(date).num_days() >= BENCH_REMINDER_DAYS);
-    if !sufficient {
-        return introductory_menu(catalog, input, menu, lang, states, bench_recommended);
+    if inputs.is_empty() || inputs.len() > 2 {
+        return Err("a menu requires one or two language inputs".to_owned());
+    }
+    let as_of = inputs[0].input.as_of;
+    if inputs.iter().any(|input| input.input.as_of != as_of) {
+        return Err("all language inputs must use the same date".to_owned());
+    }
+    let mut plans = inputs
+        .iter()
+        .map(|source| build_language_plan(catalog, source, history))
+        .collect::<Result<Vec<_>, _>>()?;
+    plans.sort_by_key(|plan| match plan.language {
+        Lang::En => 0,
+        Lang::Ja => 1,
+    });
+    if plans.windows(2).any(|pair| pair[0].language == pair[1].language) {
+        return Err("menu language inputs must not contain duplicates".to_owned());
+    }
+    let bench_recommended = plans.iter().any(|plan| {
+        plan.source
+            .input
+            .last_bench_date
+            .is_none_or(|date| as_of.signed_duration_since(date).num_days() >= BENCH_REMINDER_DAYS)
+    });
+    let multi = plans.len() == 2;
+    if plans.iter().all(|plan| !plan.sufficient) {
+        let selected = alternating_index(as_of, plans.len());
+        let plan = &plans[selected];
+        return introductory_menu(
+            catalog,
+            &plan.source.input,
+            menu,
+            StepLanguage {
+                display,
+                practice: plan.language,
+                show_label: multi || plan.language != display,
+            },
+            &plan.source.states,
+            bench_recommended,
+        );
     }
 
+    let a_index = choose_primary_language(&plans, as_of, menu.minutes, history);
+    let a_plan = &plans[a_index];
+    let b_plan = if menu.minutes == 10 {
+        None
+    } else if plans.len() == 2 {
+        Some(&plans[1 - a_index])
+    } else {
+        Some(a_plan)
+    };
+    let a_candidate = a_plan.candidates.first();
+    let b_candidate = b_plan.and_then(|plan| {
+        if plans.len() == 1 {
+            plan.candidates.get(1)
+        } else {
+            plan.candidates.first()
+        }
+    });
+
+    let mut steps = vec![fixed_step(catalog.fixed(MenuRole::Warmup)?, display, a_plan.language, "-")];
+    steps.push(primary_step(
+        catalog,
+        a_plan,
+        a_candidate,
+        MenuRole::PrimaryA,
+        primary_minutes(menu.minutes),
+        display,
+        multi || a_plan.language != display,
+    )?);
+    if let Some(plan) = b_plan {
+        steps.push(primary_step(
+            catalog,
+            plan,
+            b_candidate,
+            MenuRole::PrimaryB,
+            4,
+            display,
+            multi || plan.language != display,
+        )?);
+    }
+    let check_language = plans[alternating_index(as_of, plans.len())].language;
+    let mut check = fixed_step(catalog.fixed(MenuRole::Check)?, display, check_language, "-");
+    if menu.minutes == 20 {
+        check.minutes = 4;
+    }
+    steps.push(check);
+    let finish_language = b_plan.map_or(a_plan.language, |plan| plan.language);
+    steps.push(fixed_step(catalog.fixed(MenuRole::Finish)?, display, finish_language, "-"));
+    Ok(DailyMenu {
+        date: as_of,
+        language: language_code(a_plan.language).to_owned(),
+        catalog_version: catalog.version.clone(),
+        requested_minutes: menu.minutes,
+        introductory: false,
+        bench_recommended,
+        steps,
+    })
+}
+
+fn build_language_plan<'a>(catalog: &MenuCatalog, source: &'a MenuLanguageInput, history: &[PastMenu]) -> Result<LanguagePlan<'a>, String> {
+    let input = &source.input;
+    let language = parse_language(&input.language)?;
+    let sufficient = input.grade.as_ref().and_then(|grade| grade.overall.as_ref()).is_some() && input.logged_keystrokes >= MIN_MENU_KEYSTROKES;
+    if !sufficient {
+        return Ok(LanguagePlan {
+            source,
+            language,
+            sufficient,
+            candidates: Vec::new(),
+            low_accuracy: None,
+        });
+    }
     let grade = input.grade.as_ref().expect("sufficiency checked grade");
+    let opportunities = ranked_components(&grade.components);
     let mut candidates = ranked_components(&grade.components)
         .into_iter()
         .map(|row| MenuComponent::from_grade(row.component))
         .collect::<Vec<_>>();
-    let low_accuracy = grade
-        .components
-        .iter()
-        .find(|row| row.component == Component::Accuracy)
-        .is_some_and(|row| row.value < ACCURACY_PRIORITY_PERCENT);
-    let forced_accuracy_id = low_accuracy.then_some(if input.most_common_error == Some(ErrorKind::Anticipation) {
-        "accuracy.anticipation"
-    } else {
-        "accuracy.gate"
-    });
-    if low_accuracy {
+    let accuracy = grade.components.iter().find(|row| row.component == Component::Accuracy);
+    let low_accuracy = accuracy
+        .filter(|row| row.grade <= Level::D || row.value < ACCURACY_PRIORITY_PERCENT)
+        .map(|row| (row.grade, row.value));
+    let forced_accuracy_id = low_accuracy
+        .is_some()
+        .then_some(if input.most_common_error == Some(ErrorKind::Anticipation) {
+            "accuracy.anticipation"
+        } else {
+            "accuracy.gate"
+        });
+    if low_accuracy.is_some() {
         candidates.retain(|component| *component != MenuComponent::Accuracy);
     }
 
@@ -591,7 +758,7 @@ pub fn build_menu(
         && candidates
             .iter()
             .take(2)
-            .all(|component| component_is_maintenance(catalog, *component, states));
+            .all(|component| component_is_maintenance(catalog, *component, &source.states));
     let weakest_grade_percentile = grade.components.iter().map(|row| row.score * 12.5).min_by(f64::total_cmp);
     if top_candidates_maintenance && input.endurance_break_recommended {
         candidates.insert(0, MenuComponent::Endurance);
@@ -615,63 +782,109 @@ pub fn build_menu(
         candidates.insert(0, MenuComponent::Reach);
     }
 
-    let repeated = repeated_components(catalog, input.as_of, history);
+    let language_history = history
+        .iter()
+        .filter(|past| past.language.as_deref().is_none_or(|value| value == input.language))
+        .cloned()
+        .collect::<Vec<_>>();
+    let repeated = repeated_components(catalog, input.as_of, &language_history);
     for component in MenuComponent::from_grade_components() {
-        if repeated.contains(&component) || component_is_maintenance(catalog, component, states) {
+        if repeated.contains(&component) || component_is_maintenance(catalog, component, &source.states) {
             demote_once(&mut candidates, component);
         }
     }
 
-    let mut selected = Vec::<(&MenuPrescription, &PrescriptionLevel, u8, MenuComponent)>::new();
+    let mut selected = Vec::<CandidateChoice>::new();
     if let Some(id) = forced_accuracy_id
-        && let Some(row) = available_prescription(catalog, id, states)
+        && let Some(row) = available_prescription(catalog, id, &source.states)
     {
-        selected.push(row);
+        selected.push(CandidateChoice {
+            prescription_id: row.0.id.clone(),
+            component: row.3,
+            overall_gain: f64::INFINITY,
+        });
     }
     for component in candidates {
         if selected.len() >= 2 {
             break;
         }
         let Some(id) = default_prescription_id(component) else { continue };
-        let Some(row) = available_prescription(catalog, id, states) else {
+        let Some(row) = available_prescription(catalog, id, &source.states) else {
             continue;
         };
-        if selected.iter().all(|selected| selected.0.component != row.0.component) {
-            selected.push(row);
+        if selected.iter().all(|selected| selected.component != row.0.component) {
+            let overall_gain = opportunities
+                .iter()
+                .find(|opportunity| MenuComponent::from_grade(opportunity.component) == component)
+                .map_or(1.0, |opportunity| opportunity.overall_gain);
+            selected.push(CandidateChoice {
+                prescription_id: row.0.id.clone(),
+                component: row.3,
+                overall_gain,
+            });
         }
     }
-
-    let mut steps = vec![fixed_step(catalog.fixed(MenuRole::Warmup)?, lang, "-")];
-    if let Some(selected) = selected.first() {
-        steps.push(prescription_step(
-            selected,
-            MenuRole::PrimaryA,
-            primary_minutes(menu.minutes),
-            grade,
-            input,
-            lang,
-        ));
-    }
-    if menu.minutes != 10
-        && let Some(selected) = selected.get(1)
-    {
-        steps.push(prescription_step(selected, MenuRole::PrimaryB, 4, grade, input, lang));
-    }
-    let mut check = fixed_step(catalog.fixed(MenuRole::Check)?, lang, "-");
-    if menu.minutes == 20 {
-        check.minutes = 4;
-    }
-    steps.push(check);
-    steps.push(fixed_step(catalog.fixed(MenuRole::Finish)?, lang, "-"));
-    Ok(DailyMenu {
-        date: input.as_of,
-        language: input.language.clone(),
-        catalog_version: catalog.version.clone(),
-        requested_minutes: menu.minutes,
-        introductory: false,
-        bench_recommended,
-        steps,
+    Ok(LanguagePlan {
+        source,
+        language,
+        sufficient,
+        candidates: selected,
+        low_accuracy,
     })
+}
+
+fn choose_primary_language(plans: &[LanguagePlan<'_>], as_of: NaiveDate, minutes: u8, history: &[PastMenu]) -> usize {
+    if plans.len() == 1 {
+        return 0;
+    }
+    if minutes == 10 {
+        return alternating_index(as_of, plans.len());
+    }
+    if let Some((index, _)) = plans
+        .iter()
+        .enumerate()
+        .filter_map(|(index, plan)| plan.low_accuracy.map(|accuracy| (index, accuracy)))
+        .min_by(|left, right| left.1.0.cmp(&right.1.0).then_with(|| left.1.1.total_cmp(&right.1.1)))
+    {
+        return index;
+    }
+    let yesterday_language = history
+        .iter()
+        .find(|past| past.date == as_of.pred_opt().unwrap_or(as_of))
+        .and_then(|past| past.language.as_deref());
+    plans
+        .iter()
+        .enumerate()
+        .filter(|(_, plan)| plan.sufficient)
+        .max_by(|(_, left), (_, right)| {
+            left.candidates
+                .first()
+                .map_or(f64::NEG_INFINITY, |candidate| candidate.overall_gain)
+                .total_cmp(&right.candidates.first().map_or(f64::NEG_INFINITY, |candidate| candidate.overall_gain))
+                .then_with(|| {
+                    let left_fresh = yesterday_language != Some(language_code(left.language));
+                    let right_fresh = yesterday_language != Some(language_code(right.language));
+                    left_fresh.cmp(&right_fresh)
+                })
+                .then_with(|| language_code(right.language).cmp(language_code(left.language)))
+        })
+        .map_or_else(|| alternating_index(as_of, plans.len()), |(index, _)| index)
+}
+
+fn alternating_index(as_of: NaiveDate, count: usize) -> usize {
+    let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).expect("valid epoch");
+    as_of.signed_duration_since(epoch).num_days().rem_euclid(count as i64) as usize
+}
+
+fn parse_language(language: &str) -> Result<Lang, String> {
+    Lang::from_str(language).ok_or_else(|| format!("unknown menu language {language:?}"))
+}
+
+fn language_code(language: Lang) -> &'static str {
+    match language {
+        Lang::En => "en",
+        Lang::Ja => "ja",
+    }
 }
 
 impl MenuComponent {
@@ -692,41 +905,50 @@ fn introductory_menu(
     catalog: &MenuCatalog,
     input: &MenuBuildInput,
     menu: &MenuConfig,
-    lang: Lang,
+    language: StepLanguage,
     states: &BTreeMap<String, PrescriptionState>,
     bench_recommended: bool,
 ) -> Result<DailyMenu, String> {
+    let StepLanguage {
+        display,
+        practice,
+        show_label,
+    } = language;
+    let intro_reason = match display {
+        Lang::En => "Introductory menu: fewer than 2,000 logged keystrokes or no overall grade",
+        Lang::Ja => "入門メニュー: 打鍵ログ 2,000 未満または総合なし",
+    };
     let mut steps = vec![fixed_step(
         catalog.fixed(MenuRole::Warmup)?,
-        lang,
-        match lang {
-            Lang::En => "Introductory menu: fewer than 2,000 logged keystrokes or no overall grade",
-            Lang::Ja => "入門メニュー: 打鍵ログ 2,000 未満または総合なし",
-        },
+        display,
+        practice,
+        &reason_with_language(intro_reason, practice, display, show_label),
     )];
     let selected = available_prescription(catalog, "transition.adaptive", states)
         .or_else(|| available_prescription(catalog, "transition.ngram", states))
         .ok_or_else(|| "no introductory transition prescription is available".to_owned())?;
-    let reason = match lang {
+    let reason = match display {
         Lang::En => "Introductory routine: practice weak transitions while collecting baseline data",
         Lang::Ja => "入門ルーチン: 基準データを集めながら弱い遷移を練習",
     };
+    let reason = reason_with_language(reason, practice, display, show_label);
     steps.push(prescription_step_with_reason(
         &selected,
         MenuRole::PrimaryA,
         menu.minutes.saturating_sub(7),
-        lang,
-        reason,
+        display,
+        practice,
+        &reason,
     ));
-    let mut check = fixed_step(catalog.fixed(MenuRole::Check)?, lang, reason);
+    let mut check = fixed_step(catalog.fixed(MenuRole::Check)?, display, practice, &reason);
     check.minutes = 3;
     steps.push(check);
-    let mut finish = fixed_step(catalog.fixed(MenuRole::Finish)?, lang, reason);
+    let mut finish = fixed_step(catalog.fixed(MenuRole::Finish)?, display, practice, &reason);
     finish.minutes = 2;
     steps.push(finish);
     Ok(DailyMenu {
         date: input.as_of,
-        language: input.language.clone(),
+        language: language_code(practice).to_owned(),
         catalog_version: catalog.version.clone(),
         requested_minutes: menu.minutes,
         introductory: true,
@@ -743,17 +965,19 @@ fn primary_minutes(minutes: u8) -> u8 {
     }
 }
 
-fn fixed_step(step: &FixedStep, lang: Lang, reason: &str) -> MenuStep {
+fn fixed_step(step: &FixedStep, display: Lang, practice: Lang, reason: &str) -> MenuStep {
     MenuStep {
         role: step.role,
+        language: practice,
         prescription_id: step.id.clone(),
-        title: step.title.text(lang).to_owned(),
+        title: step.title.text(display).to_owned(),
         level: None,
         mode: step.mode.clone(),
         minutes: step.minutes,
         reason: reason.to_owned(),
-        focus: step.focus.text(lang).to_owned(),
+        focus: step.focus.text(display).to_owned(),
         advance: "-".to_owned(),
+        advance_condition: None,
         evidence: None,
         evidence_note: None,
         settings: step.settings.clone(),
@@ -766,35 +990,99 @@ fn prescription_step(
     minutes: u8,
     grade: &LanguageGrade,
     input: &MenuBuildInput,
-    lang: Lang,
+    language: StepLanguage,
 ) -> MenuStep {
+    let StepLanguage {
+        display,
+        practice,
+        show_label,
+    } = language;
     let component = selected.3;
-    let reason = grade_reason(component, grade, input, lang);
-    prescription_step_with_reason(selected, role, minutes, lang, &reason)
+    let reason = grade_reason(component, grade, input, display);
+    let reason = reason_with_language(&reason, practice, display, show_label);
+    prescription_step_with_reason(selected, role, minutes, display, practice, &reason)
 }
 
 fn prescription_step_with_reason(
     selected: &(&MenuPrescription, &PrescriptionLevel, u8, MenuComponent),
     role: MenuRole,
     minutes: u8,
-    lang: Lang,
+    display: Lang,
+    practice: Lang,
     reason: &str,
 ) -> MenuStep {
     let (prescription, level, level_number, _) = selected;
     MenuStep {
         role,
+        language: practice,
         prescription_id: prescription.id.clone(),
-        title: prescription.title.text(lang).to_owned(),
+        title: prescription.title.text(display).to_owned(),
         level: Some(*level_number),
         mode: level.mode.clone(),
         minutes,
         reason: reason.to_owned(),
-        focus: level.focus.text(lang).to_owned(),
-        advance: level.advance.note.text(lang).to_owned(),
-        evidence: Some(prescription.evidence.label(lang).to_owned()),
-        evidence_note: Some(prescription.evidence_note.text(lang).to_owned()),
+        focus: level.focus.text(display).to_owned(),
+        advance: level.advance.note.text(display).to_owned(),
+        advance_condition: Some(level.advance.clone()),
+        evidence: Some(prescription.evidence.label(display).to_owned()),
+        evidence_note: Some(prescription.evidence_note.text(display).to_owned()),
         settings: level.settings.clone(),
     }
+}
+
+fn primary_step(
+    catalog: &MenuCatalog,
+    plan: &LanguagePlan<'_>,
+    candidate: Option<&CandidateChoice>,
+    role: MenuRole,
+    minutes: u8,
+    display: Lang,
+    show_language: bool,
+) -> Result<MenuStep, String> {
+    if let Some(candidate) = candidate {
+        let selected = available_prescription(catalog, &candidate.prescription_id, &plan.source.states)
+            .ok_or_else(|| format!("prescription {:?} became unavailable", candidate.prescription_id))?;
+        let grade = plan
+            .source
+            .input
+            .grade
+            .as_ref()
+            .ok_or_else(|| "candidate has no language grade".to_owned())?;
+        return Ok(prescription_step(
+            &selected,
+            role,
+            minutes,
+            grade,
+            &plan.source.input,
+            StepLanguage {
+                display,
+                practice: plan.language,
+                show_label: show_language,
+            },
+        ));
+    }
+    let selected = available_prescription(catalog, "transition.adaptive", &plan.source.states)
+        .or_else(|| available_prescription(catalog, "transition.ngram", &plan.source.states))
+        .ok_or_else(|| "no introductory transition prescription is available".to_owned())?;
+    let reason = match display {
+        Lang::En => "Introductory routine: practice weak transitions while collecting baseline data",
+        Lang::Ja => "入門ルーチン: 基準データを集めながら弱い遷移を練習",
+    };
+    let reason = reason_with_language(reason, plan.language, display, show_language);
+    Ok(prescription_step_with_reason(&selected, role, minutes, display, plan.language, &reason))
+}
+
+fn reason_with_language(reason: &str, practice: Lang, display: Lang, show_language: bool) -> String {
+    if !show_language {
+        return reason.to_owned();
+    }
+    let label = match (practice, display) {
+        (Lang::En, Lang::En) => "EN",
+        (Lang::Ja, Lang::En) => "JA",
+        (Lang::En, Lang::Ja) => "英",
+        (Lang::Ja, Lang::Ja) => "日",
+    };
+    format!("{label}: {reason}")
 }
 
 fn grade_reason(component: MenuComponent, grade: &LanguageGrade, input: &MenuBuildInput, lang: Lang) -> String {
@@ -806,7 +1094,8 @@ fn grade_reason(component: MenuComponent, grade: &LanguageGrade, input: &MenuBui
         };
     }
     let mut reason = if let Some(row) = row {
-        format!("{} {} ({:.3} {})", component.label(lang), row.grade.as_str(), row.value, row.unit)
+        let value = format_grade_measure(row.component, row.value, &row.unit);
+        format!("{} {} ({value})", component.label(lang), row.grade.as_str())
     } else {
         match component {
             MenuComponent::Reach => format!("{} {:.1} percentile", component.label(lang), input.reach_percentile.unwrap_or_default()),
@@ -824,6 +1113,75 @@ fn grade_reason(component: MenuComponent, grade: &LanguageGrade, input: &MenuBui
         }
     }
     reason
+}
+
+fn format_grade_measure(component: Component, value: f64, unit: &str) -> String {
+    let number = match component {
+        Component::Rhythm | Component::Preview => format!("{value:.2}"),
+        Component::Recovery => format!("{value:.0}"),
+        _ => format!("{value:.1}"),
+    };
+    if unit.is_empty() { number } else { format!("{number} {unit}") }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AdvanceOutcome {
+    Met,
+    NotMet,
+    CannotDetermine,
+}
+
+impl AdvanceOutcome {
+    pub fn label(self, lang: Lang) -> &'static str {
+        match (self, lang) {
+            (Self::Met, Lang::En) => "met",
+            (Self::Met, Lang::Ja) => "満たした",
+            (Self::NotMet, Lang::En) => "not met",
+            (Self::NotMet, Lang::Ja) => "満たさない",
+            (Self::CannotDetermine, Lang::En) => "cannot determine",
+            (Self::CannotDetermine, Lang::Ja) => "判定できない",
+        }
+    }
+}
+
+/// Evaluate only the current session. Rules that require a personal median,
+/// multiple sessions, or R3 controls deliberately remain indeterminate in M3.
+pub fn evaluate_current_advance(condition: &AdvanceCondition, record: &crate::record::SessionRecord) -> AdvanceOutcome {
+    let params = serde_json::from_str::<serde_json::Value>(&record.header.mode_params).unwrap_or_default();
+    let met = match condition.rule {
+        AdvanceRule::GatePassed => params.get("score_eligible").and_then(serde_json::Value::as_bool),
+        AdvanceRule::TargetWithAccuracy => params
+            .get("pacer_target_wpm")
+            .and_then(serde_json::Value::as_f64)
+            .map(|target| record.header.accuracy >= 0.95 && record.header.net_wpm >= target),
+        AdvanceRule::GeThreshold | AdvanceRule::LtThreshold => {
+            current_metric_value(condition.metric, record)
+                .zip(condition.threshold)
+                .map(|(value, threshold)| match condition.rule {
+                    AdvanceRule::GeThreshold => value >= threshold,
+                    AdvanceRule::LtThreshold => value < threshold,
+                    _ => unreachable!(),
+                })
+        }
+        AdvanceRule::LeOwnMedian | AdvanceRule::GeOwnMedian | AdvanceRule::R3Effective | AdvanceRule::Removable => None,
+    };
+    match met {
+        Some(true) => AdvanceOutcome::Met,
+        Some(false) => AdvanceOutcome::NotMet,
+        None => AdvanceOutcome::CannotDetermine,
+    }
+}
+
+fn current_metric_value(metric: MenuMetric, record: &crate::record::SessionRecord) -> Option<f64> {
+    match metric {
+        MenuMetric::NetWpm => Some(record.header.net_wpm),
+        MenuMetric::EnduranceSecondHalfSlowdown => {
+            let comparison = crate::practice::session_variants::compare_endurance_log(&record.log);
+            (comparison.first_iki_ms > 0.0 && comparison.second_iki_ms > 0.0)
+                .then_some((comparison.second_iki_ms - comparison.first_iki_ms) / comparison.first_iki_ms)
+        }
+        _ => None,
+    }
 }
 
 fn default_prescription_id(component: MenuComponent) -> Option<&'static str> {
@@ -902,14 +1260,13 @@ fn demote_once(candidates: &mut [MenuComponent], component: MenuComponent) {
     }
 }
 
-pub fn render_from_storage(
+pub fn build_from_storage(
     path: &std::path::Path,
     home: &std::path::Path,
     config: &Config,
-    lang: Lang,
-    json: bool,
+    display: Lang,
     as_of: NaiveDate,
-) -> crate::error::AppResult<String> {
+) -> crate::error::AppResult<DailyMenu> {
     use crate::analysis::DiagnosisOptions;
     use crate::analysis::japanese::SpellingDecision;
     use crate::analysis::metrics::{AnalysisSettings, analyze_records};
@@ -967,72 +1324,6 @@ pub fn render_from_storage(
         corpus.words_en(),
         corpus.words_ja(),
     );
-    let language = match lang {
-        Lang::En => "en",
-        Lang::Ja => "ja",
-    };
-    let language_records = records
-        .iter()
-        .filter(|record| crate::analysis::model::session_language(record) == language)
-        .cloned()
-        .collect::<Vec<_>>();
-    let diagnosis = crate::analysis::diagnose(
-        &language_records,
-        &layout,
-        &keyboard_geometry,
-        DiagnosisOptions {
-            model,
-            min_transition_n: config.analysis.min_transition_n,
-            spelling_suggestions: config.analysis.spelling_suggestions,
-        },
-        at,
-        corpus.words_ja(),
-    );
-    let logged_keystrokes = language_records
-        .iter()
-        .filter(|record| record.header.metrics_version > 0)
-        .flat_map(|record| &record.log.keystrokes)
-        .filter(|key| key.kind == KeystrokeKind::Char)
-        .count() as u64;
-    let maximum_error_count = diagnosis.errors.kinds.iter().map(|row| row.n).max().unwrap_or_default();
-    let most_common_error = (maximum_error_count > 0)
-        .then(|| {
-            diagnosis
-                .errors
-                .kinds
-                .iter()
-                .find(|row| row.n == maximum_error_count && row.kind == ErrorKind::Anticipation)
-                .map(|row| row.kind)
-                .or_else(|| diagnosis.errors.kinds.iter().find(|row| row.n == maximum_error_count).map(|row| row.kind))
-        })
-        .flatten();
-    let axes = skill_axis_values(&records, &layout, config);
-    let reach_percentile = axes
-        .iter()
-        .find(|value| value.axis == SkillAxis::Reach)
-        .and_then(|value| value.percentile);
-    let japanese_percentile = axes
-        .iter()
-        .find(|value| value.axis == SkillAxis::Japanese)
-        .and_then(|value| value.percentile);
-    let has_spelling_suggestion = diagnosis.japanese.spelling.iter().any(|row| row.decision == SpellingDecision::Suggested);
-    let endurance_break_recommended = language_records
-        .iter()
-        .rev()
-        .find(|record| record.header.mode == "endurance")
-        .is_some_and(|record| crate::practice::session_variants::compare_endurance_log(&record.log).warn);
-    let details = analyze_records(&language_records, &layout, &keyboard_geometry, model);
-    let reaction_median_ms = (details.reaction_median_ms > 0.0).then_some(details.reaction_median_ms);
-    let reaction_ms = language_records.last().and_then(|record| {
-        let details = analyze_records(std::slice::from_ref(record), &layout, &keyboard_geometry, model);
-        (details.reaction_median_ms > 0.0).then_some(details.reaction_median_ms)
-    });
-    let last_bench_date = language_records
-        .iter()
-        .rev()
-        .find(|record| record.header.bench_id.is_some())
-        .and_then(|record| chrono::DateTime::parse_from_rfc3339(&record.header.started_at).ok())
-        .map(|time| time.date_naive());
     let mut states = BTreeMap::new();
     if db::load_prescriptions(path)?
         .iter()
@@ -1048,21 +1339,101 @@ pub fn render_from_storage(
             },
         );
     }
-    let input = MenuBuildInput {
-        as_of,
-        language: language.to_owned(),
-        grade: grades.languages.into_iter().find(|grade| grade.language == language),
-        logged_keystrokes,
-        most_common_error,
-        reach_percentile,
-        japanese_percentile,
-        has_spelling_suggestion,
-        endurance_break_recommended,
-        reaction_ms,
-        reaction_median_ms,
-        last_bench_date,
-    };
-    let menu = build_menu(bundled_catalog().map_err(AppError::Record)?, &input, &config.menu, &[], &states).map_err(AppError::Record)?;
+    let mut inputs = Vec::new();
+    for practice in config.menu.practice_languages(display) {
+        let language = language_code(practice);
+        let language_records = records
+            .iter()
+            .filter(|record| crate::analysis::model::session_language(record) == language)
+            .cloned()
+            .collect::<Vec<_>>();
+        let diagnosis = crate::analysis::diagnose(
+            &language_records,
+            &layout,
+            &keyboard_geometry,
+            DiagnosisOptions {
+                model,
+                min_transition_n: config.analysis.min_transition_n,
+                spelling_suggestions: config.analysis.spelling_suggestions,
+            },
+            at,
+            corpus.words_ja(),
+        );
+        let axes = skill_axis_values(&language_records, &layout, config);
+        let reach_percentile = axes
+            .iter()
+            .find(|value| value.axis == SkillAxis::Reach)
+            .and_then(|value| value.percentile);
+        let japanese_percentile = axes
+            .iter()
+            .find(|value| value.axis == SkillAxis::Japanese)
+            .and_then(|value| value.percentile);
+        let logged_keystrokes = language_records
+            .iter()
+            .filter(|record| record.header.metrics_version > 0)
+            .flat_map(|record| &record.log.keystrokes)
+            .filter(|key| key.kind == KeystrokeKind::Char)
+            .count() as u64;
+        let maximum_error_count = diagnosis.errors.kinds.iter().map(|row| row.n).max().unwrap_or_default();
+        let most_common_error = (maximum_error_count > 0)
+            .then(|| {
+                diagnosis
+                    .errors
+                    .kinds
+                    .iter()
+                    .find(|row| row.n == maximum_error_count && row.kind == ErrorKind::Anticipation)
+                    .map(|row| row.kind)
+                    .or_else(|| diagnosis.errors.kinds.iter().find(|row| row.n == maximum_error_count).map(|row| row.kind))
+            })
+            .flatten();
+        let has_spelling_suggestion = diagnosis.japanese.spelling.iter().any(|row| row.decision == SpellingDecision::Suggested);
+        let endurance_break_recommended = language_records
+            .iter()
+            .rev()
+            .find(|record| record.header.mode == "endurance")
+            .is_some_and(|record| crate::practice::session_variants::compare_endurance_log(&record.log).warn);
+        let details = analyze_records(&language_records, &layout, &keyboard_geometry, model);
+        let reaction_median_ms = (details.reaction_median_ms > 0.0).then_some(details.reaction_median_ms);
+        let reaction_ms = language_records.last().and_then(|record| {
+            let details = analyze_records(std::slice::from_ref(record), &layout, &keyboard_geometry, model);
+            (details.reaction_median_ms > 0.0).then_some(details.reaction_median_ms)
+        });
+        let last_bench_date = language_records
+            .iter()
+            .rev()
+            .find(|record| record.header.bench_id.is_some())
+            .and_then(|record| chrono::DateTime::parse_from_rfc3339(&record.header.started_at).ok())
+            .map(|time| time.date_naive());
+        inputs.push(MenuLanguageInput {
+            input: MenuBuildInput {
+                as_of,
+                language: language.to_owned(),
+                grade: grades.languages.iter().find(|grade| grade.language == language).cloned(),
+                logged_keystrokes,
+                most_common_error,
+                reach_percentile,
+                japanese_percentile,
+                has_spelling_suggestion,
+                endurance_break_recommended,
+                reaction_ms,
+                reaction_median_ms,
+                last_bench_date,
+            },
+            states: states.clone(),
+        });
+    }
+    build_menu_for_languages(bundled_catalog().map_err(AppError::Record)?, &inputs, display, &config.menu, &[]).map_err(AppError::Record)
+}
+
+pub fn render_from_storage(
+    path: &std::path::Path,
+    home: &std::path::Path,
+    config: &Config,
+    lang: Lang,
+    json: bool,
+    as_of: NaiveDate,
+) -> crate::error::AppResult<String> {
+    let menu = build_from_storage(path, home, config, lang, as_of)?;
     if json {
         let mut output = serde_json::to_string_pretty(&menu)?;
         output.push('\n');
@@ -1096,6 +1467,7 @@ fn render_text(menu: &DailyMenu, lang: Lang) -> String {
         match lang {
             Lang::En => {
                 let _ = writeln!(output, "\nStep: {} {}", index + 1, role_label(step.role, lang));
+                let _ = writeln!(output, "Language: {}", language_row_label(step.language, lang));
                 let _ = writeln!(output, "Prescription ID: {}", step.prescription_id);
                 let _ = writeln!(output, "Title: {}", step.title);
                 let _ = writeln!(output, "Level: {level}");
@@ -1108,6 +1480,7 @@ fn render_text(menu: &DailyMenu, lang: Lang) -> String {
             }
             Lang::Ja => {
                 let _ = writeln!(output, "\n段: {} {}", index + 1, role_label(step.role, lang));
+                let _ = writeln!(output, "言語: {}", language_row_label(step.language, lang));
                 let _ = writeln!(output, "処方 ID: {}", step.prescription_id);
                 let _ = writeln!(output, "題: {}", step.title);
                 let _ = writeln!(output, "レベル: {level}");
@@ -1121,6 +1494,15 @@ fn render_text(menu: &DailyMenu, lang: Lang) -> String {
         }
     }
     output
+}
+
+fn language_row_label(practice: Lang, display: Lang) -> &'static str {
+    match (practice, display) {
+        (Lang::En, Lang::En) => "EN",
+        (Lang::Ja, Lang::En) => "JA",
+        (Lang::En, Lang::Ja) => "英",
+        (Lang::Ja, Lang::Ja) => "日",
+    }
 }
 
 fn role_label(role: MenuRole, lang: Lang) -> &'static str {

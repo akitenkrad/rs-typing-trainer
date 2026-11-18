@@ -201,7 +201,7 @@ fn title_shows_database_copy_notice_in_both_languages() {
 }
 
 #[test]
-fn title_fits_all_optional_notices_at_80_by_24() {
+fn title_replaces_the_old_recommendations_with_one_introductory_menu_line_at_80_by_24() {
     let mut app = test_app(Config::default());
     app.storage_notice = true;
     app.recommend_preview = true;
@@ -217,8 +217,24 @@ fn title_fits_all_optional_notices_at_80_by_24() {
         .join("");
 
     assert!(rendered.to_lowercase().contains("copied"), "{rendered}");
-    assert!(rendered.contains("preview"), "{rendered}");
-    assert!(rendered.contains("Rhythm"), "{rendered}");
+    assert!(rendered.contains("Today's menu (15 min)"), "{rendered}");
+    assert!(rendered.contains("M to open"), "{rendered}");
+    assert!(rendered.contains("introductory"), "{rendered}");
+    assert!(!rendered.contains("preview items"), "{rendered}");
+    assert!(!rendered.contains("Rhythm practice"), "{rendered}");
+}
+
+#[test]
+fn title_menu_line_uses_configured_minutes_and_localizes_japanese() {
+    let mut config = Config::default();
+    config.general.lang = Lang::Ja;
+    config.menu.minutes = 20;
+    let rendered = render_title_with_config(config);
+    let compact = without_whitespace(&rendered);
+
+    assert!(compact.contains(&without_whitespace("今日のメニュー（20 分）")), "{rendered}");
+    assert!(compact.contains(&without_whitespace("M で開く")), "{rendered}");
+    assert!(compact.contains(&without_whitespace("入門メニュー")), "{rendered}");
 }
 
 #[test]
@@ -243,6 +259,7 @@ fn title_menu_keeps_all_shortcuts() {
         (KeyCode::Char(' '), Some(Screen::ModeSelect)),
         (KeyCode::Char('b'), Some(Screen::BenchSelect)),
         (KeyCode::Char('a'), Some(Screen::Analysis)),
+        (KeyCode::Char('m'), Some(Screen::Menu)),
         (KeyCode::Char('h'), Some(Screen::History)),
         (KeyCode::Char('s'), Some(Screen::Settings)),
     ] {
