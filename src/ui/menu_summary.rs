@@ -239,8 +239,8 @@ fn practice_language_label(language: Lang, lang: Lang) -> &'static str {
     match (language, lang) {
         (Lang::En, Lang::En) => "EN",
         (Lang::Ja, Lang::En) => "JA",
-        (Lang::En, Lang::Ja) => "英",
-        (Lang::Ja, Lang::Ja) => "日",
+        (Lang::En, Lang::Ja) => "英語",
+        (Lang::Ja, Lang::Ja) => "日本語",
     }
 }
 
@@ -665,13 +665,20 @@ struct UpperWidths {
     graduation: usize,
 }
 
+fn language_width(lang: Lang) -> usize {
+    match lang {
+        Lang::En => 2,
+        Lang::Ja => 6,
+    }
+}
+
 fn upper_widths(lang: Lang, width: usize) -> UpperWidths {
     let (role, value, previous, graduation) = match lang {
         Lang::En => (11, 9, 8, 12),
         Lang::Ja => (16, 10, 8, 12),
     };
-    // 2-cell language column and five one-cell separators.
-    let fixed = role + 2 + value + previous + graduation + 5;
+    // Language column («EN» / «日本語») and five one-cell separators.
+    let fixed = role + language_width(lang) + value + previous + graduation + 5;
     UpperWidths {
         role,
         title: width.saturating_sub(fixed).clamp(4, 32),
@@ -691,7 +698,7 @@ fn upper_lines(data: &MenuSummaryData, lang: Lang, theme: &Theme, width: usize) 
         format!(
             "{} {} {} {} {} {}",
             pad(header[0], widths.role),
-            pad(header[1], 2),
+            pad(header[1], language_width(lang)),
             pad(header[2], widths.title),
             pad(header[3], widths.value),
             pad(header[4], widths.previous),
@@ -708,7 +715,7 @@ fn upper_lines(data: &MenuSummaryData, lang: Lang, theme: &Theme, width: usize) 
         let mut spans = vec![
             Span::raw(format!("{} ", pad(&role, widths.role))),
             Span::styled(
-                format!("{} ", pad(practice_language_label(step.language, lang), 2)),
+                format!("{} ", pad(practice_language_label(step.language, lang), language_width(lang))),
                 Style::default().fg(theme.muted),
             ),
             Span::raw(format!("{} ", pad(&title, widths.title))),
@@ -776,7 +783,7 @@ fn middle_lines(
         format!(
             "{} {} {} {} {} {} {}",
             pad(header[0], name_width),
-            pad(header[1], 2),
+            pad(header[1], language_width(lang)),
             pad(header[2], value_width),
             pad(header[3], difference_width),
             pad(header[4], median_width),

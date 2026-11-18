@@ -155,7 +155,7 @@ fn menu_rows_show_practice_language_and_display_language_stays_independent() {
 
     let text = render(&app, 80, 24).join("\n");
     assert!(text.contains("TODAY'S MENU"), "{text}");
-    assert!(text.contains(" JA Warm-up"), "{text}");
+    assert!(text.contains("1 Warm-up — Warm-up · 2 min · JA"), "{text}");
     assert!(!text.contains("今日のメニュー"), "{text}");
     assert_eq!(app.daily_menu.as_ref().unwrap().steps[0].language, rs_typing_trainer::i18n::Lang::Ja);
     assert!(app.daily_menu.as_ref().unwrap().steps[0].reason.starts_with("JA:"));
@@ -191,9 +191,9 @@ fn japanese_interface_can_show_an_english_practice_menu() {
     let text = render(&app, 80, 24).join("\n");
     let compact = text.chars().filter(|character| !character.is_whitespace()).collect::<String>();
     assert!(compact.contains("今日のメニュー"), "{text}");
-    assert!(compact.contains("英ウォームアップ"), "{text}");
+    assert!(compact.contains("1ウォームアップ—ウォームアップ・2分・英語"), "{text}");
     assert!(!text.contains("TODAY'S MENU"), "{text}");
-    assert!(app.daily_menu.as_ref().unwrap().steps[0].reason.starts_with("英:"));
+    assert!(app.daily_menu.as_ref().unwrap().steps[0].reason.starts_with("英語:"));
 }
 
 #[test]

@@ -1864,8 +1864,8 @@ fn reason_with_language(reason: &str, practice: Lang, display: Lang, show_langua
     let label = match (practice, display) {
         (Lang::En, Lang::En) => "EN",
         (Lang::Ja, Lang::En) => "JA",
-        (Lang::En, Lang::Ja) => "英",
-        (Lang::Ja, Lang::Ja) => "日",
+        (Lang::En, Lang::Ja) => "英語",
+        (Lang::Ja, Lang::Ja) => "日本語",
     };
     format!("{label}: {reason}")
 }

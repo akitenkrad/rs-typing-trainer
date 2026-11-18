@@ -182,7 +182,7 @@ When no practice language has enough data, the menu is: warm-up (2 min), `transi
 
 ### Two practice languages
 
-`[menu] languages` chooses the practice languages; without it the menu follows the interface language. With English and Japanese, one menu mixes both languages without changing its length. Each step is typed in one language, and the step row shows it (`EN`/`JA`, or `英`/`日` in the Japanese interface).
+`[menu] languages` chooses the practice languages; without it the menu follows the interface language. With English and Japanese, one menu mixes both languages without changing its length. Each step is typed in one language, and the end of the step row shows it (`EN`/`JA`, or `英語`/`日本語` in the Japanese interface).
 
 - Candidates, the accuracy-first rule, the overall-gain ranking, the two-day demotion, levels, judgments and skill records are all kept per language.
 - Primary A: the language whose accuracy is D or lower (the lower one when both are). Otherwise the language whose first candidate has the larger overall gain; on a tie, the language not used for primary A yesterday, then English.

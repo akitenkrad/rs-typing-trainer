@@ -149,15 +149,17 @@ fn step_line(index: usize, step: &MenuStep, completion: &str, lang: Lang) -> Str
     let language = match (step.language, lang) {
         (Lang::En, Lang::En) => "EN",
         (Lang::Ja, Lang::En) => "JA",
-        (Lang::En, Lang::Ja) => "英",
-        (Lang::Ja, Lang::Ja) => "日",
+        (Lang::En, Lang::Ja) => "英語",
+        (Lang::Ja, Lang::Ja) => "日本語",
     };
-    let prefix = format!("[{completion}] {} {language} {} — {}", index + 1, role_label(step.role, lang), step.title);
+    // The practice language goes last: right after the step number, a bare
+    // "日" read as "day 1, day 2" instead of "Japanese".
+    let prefix = format!("[{completion}] {} {} — {}", index + 1, role_label(step.role, lang), step.title);
     match (lang, step.level) {
-        (Lang::En, Some(level)) => format!("{prefix} · Lv {level} · {} min", step.minutes),
-        (Lang::En, None) => format!("{prefix} · {} min", step.minutes),
-        (Lang::Ja, Some(level)) => format!("{prefix}・レベル {level}・{} 分", step.minutes),
-        (Lang::Ja, None) => format!("{prefix}・{} 分", step.minutes),
+        (Lang::En, Some(level)) => format!("{prefix} · Lv {level} · {} min · {language}", step.minutes),
+        (Lang::En, None) => format!("{prefix} · {} min · {language}", step.minutes),
+        (Lang::Ja, Some(level)) => format!("{prefix}・レベル {level}・{} 分・{language}", step.minutes),
+        (Lang::Ja, None) => format!("{prefix}・{} 分・{language}", step.minutes),
     }
 }
 
