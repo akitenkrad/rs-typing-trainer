@@ -96,7 +96,7 @@ blind = false
 
 ## Look-ahead practice
 
-Use `[` and `]` on the mode screen to choose zero through three preview items. `mode.sentence.hide_typed = true` removes the completed prefix so attention stays ahead of the current position. When the reaction axis falls below the user's own lower quartile, the title suggests increasing look-ahead. The range and recommendation threshold are initial values.
+Use `[` and `]` on the mode screen to choose zero through three preview items. `mode.sentence.hide_typed = true` removes the completed prefix so attention stays ahead of the current position. The range is an initial value. Whether to suggest more look-ahead is decided by the [practice menu](#practice-menu) from the grades, not by the title screen.
 
 ```toml
 [session]
@@ -108,7 +108,7 @@ hide_typed = false
 
 ## Rhythm practice
 
-`rhythm` flashes one beat per intended keystroke and scores median absolute deviation from the nearest beat together with accuracy. When `bpm` is omitted, the initial rate is 90% of the rate converted from the user's median IKI. A practice-menu step of `rhythm.metronome` uses its level's ratio instead (see [Practice menu](#practice-menu)). `bell = true` also emits the terminal bell, which may be silent in some terminals. The title recommends this mode only when the rhythm axis is below the user's own lower quartile; imposing a metronome is not generally useful for an already skilled typist.
+`rhythm` flashes one beat per intended keystroke and scores median absolute deviation from the nearest beat together with accuracy. When `bpm` is omitted, the initial rate is 90% of the rate converted from the user's median IKI. A practice-menu step of `rhythm.metronome` uses its level's ratio instead (see [Practice menu](#practice-menu)). `bell = true` also emits the terminal bell, which may be silent in some terminals. Imposing a metronome is not generally useful for an already skilled typist, so whether to suggest it is decided by the [practice menu](#practice-menu) from the rhythm grade, not by the title screen.
 
 ```toml
 [rhythm]
