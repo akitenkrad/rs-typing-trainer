@@ -603,3 +603,314 @@ fn recheck_maintenance(ctx: &JudgeContext<'_>, run_id: i64, language: &'static s
     }
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Readers for the menu summary screen (§7.1, upper and lower sections)
+// ---------------------------------------------------------------------------
+
+/// One planned step of a run as the summary screen shows it (§7.1 upper
+/// section). Every value comes from `menu_steps` and the prescription state;
+/// nothing is recomputed from keystrokes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StepSummary {
+    /// Zero-based index in the run's plan.
+    pub index: usize,
+    pub role: MenuRole,
+    pub language: Lang,
+    pub prescription_id: String,
+    pub title: String,
+    pub level: Option<u8>,
+    /// Number of levels of the prescription (`None` for fixed steps).
+    pub level_count: Option<u8>,
+    /// The step has been played in this run.
+    pub done: bool,
+    /// The value shown: the catalog's `advance.metric` for prescription steps,
+    /// `None` (net WPM) for warm-up, check and finish.
+    pub metric: Option<MenuMetric>,
+    pub value: Option<f64>,
+    /// The same value from the latest earlier run of the same prescription at
+    /// the same level in the same language.
+    pub previous: Option<f64>,
+    pub direction: crate::analysis::grades::Direction,
+    /// `advance.sessions` of the level that was played.
+    pub required: Option<u8>,
+    /// Consecutive sessions meeting the condition so far (prescription state).
+    pub consecutive: Option<u8>,
+    /// Set when this run graduated the level.
+    pub graduation: Option<super::Graduation>,
+}
+
+impl StepSummary {
+    pub fn difference(&self) -> Option<f64> {
+        self.value.zip(self.previous).map(|(value, previous)| value - previous)
+    }
+}
+
+/// A change made by a run (§7.1 lower section), in the order the screen
+/// lists them: level changes, swaps and pauses, then judgments.
+#[derive(Clone, Debug, PartialEq)]
+pub enum RunChange {
+    LevelUp {
+        title: String,
+        language: Lang,
+        level: u8,
+    },
+    LevelDown {
+        title: String,
+        language: Lang,
+        level: u8,
+    },
+    Maintenance {
+        title: String,
+        language: Lang,
+    },
+    /// §5: the prescription is replaced by its alternate from the next menu.
+    /// `controlled` is true for R3 (transition) judgments.
+    Swapped {
+        title: String,
+        language: Lang,
+        alternate: String,
+        controlled: bool,
+    },
+    /// §5: the prescription (an alternate) rests until `until`.
+    Paused {
+        title: String,
+        language: Lang,
+        until: NaiveDate,
+    },
+    /// §5: «improved» — controlled (R3) or reference only.
+    Improved {
+        title: String,
+        language: Lang,
+        controlled: bool,
+    },
+}
+
+impl RunChange {
+    /// Priority group of §7.1: level changes, then swaps and pauses, then
+    /// judgments.
+    pub fn group(&self) -> u8 {
+        match self {
+            Self::LevelUp { .. } | Self::LevelDown { .. } | Self::Maintenance { .. } => 0,
+            Self::Swapped { .. } | Self::Paused { .. } => 1,
+            Self::Improved { .. } => 2,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RunStepsSummary {
+    pub run_id: i64,
+    pub date: NaiveDate,
+    pub minutes: u8,
+    pub bench_recommended: bool,
+    pub steps: Vec<StepSummary>,
+    pub changes: Vec<RunChange>,
+}
+
+impl RunStepsSummary {
+    pub fn completed(&self) -> usize {
+        self.steps.iter().filter(|step| step.done).count()
+    }
+
+    /// The run's check step, when it has been played.
+    pub fn check_language(&self) -> Option<Lang> {
+        self.steps
+            .iter()
+            .find(|step| step.role == MenuRole::Check && step.done)
+            .map(|step| step.language)
+    }
+}
+
+/// The steps and changes of `run_id` for the summary screen. `display`
+/// localizes the alternate titles. `None` when the run does not exist.
+pub fn run_steps_summary(db_path: &Path, layout: &str, run_id: i64, display: Lang) -> AppResult<Option<RunStepsSummary>> {
+    let Some(run) = db::load_menu_run(db_path, run_id)? else {
+        return Ok(None);
+    };
+    let menu = serde_json::from_str::<DailyMenu>(&run.plan_json)?;
+    let catalog = bundled_catalog().map_err(AppError::Record)?;
+    let history = db::load_menu_step_history(db_path)?;
+    let mut plans = std::collections::BTreeMap::<i64, Option<DailyMenu>>::new();
+    plans.insert(run.id, Some(menu.clone()));
+    // The language a played step was actually typed in: the language of its
+    // session (as the skill series and every analysis classify it), falling
+    // back to the run's plan when the session row is missing. Previous-run
+    // differences only compare steps of the same language (§4.2: the check
+    // step rotates daily and two-language menus mix languages by step).
+    let mut session_languages = std::collections::BTreeMap::<i64, Option<Lang>>::new();
+    let mut step_language = |row: &db::MenuStepHistoryRow| -> Option<Lang> {
+        let session = *session_languages.entry(row.step.session_id).or_insert_with(|| {
+            db::load_record(db_path, row.step.session_id)
+                .ok()
+                .flatten()
+                .map(|record| match crate::analysis::model::session_language(&record) {
+                    "ja" => Lang::Ja,
+                    _ => Lang::En,
+                })
+        });
+        if session.is_some() {
+            return session;
+        }
+        let plan = plans.entry(row.run_id).or_insert_with(|| {
+            db::load_menu_run(db_path, row.run_id)
+                .ok()
+                .flatten()
+                .and_then(|run| serde_json::from_str::<DailyMenu>(&run.plan_json).ok())
+        });
+        plan.as_ref()
+            .and_then(|plan| plan.steps.get(row.step.idx.checked_sub(1)?))
+            .map(|step| step.language)
+    };
+    let earlier = |row: &db::MenuStepHistoryRow| (row.date, row.run_id) < (run.date, run.id);
+    let mut steps = Vec::new();
+    let mut changes = Vec::new();
+    for (index, step) in menu.steps.iter().enumerate() {
+        let row = history.iter().find(|row| row.run_id == run.id && row.step.idx == index + 1);
+        let prescription = is_prescription_step(step).then(|| catalog.prescription(&step.prescription_id)).flatten();
+        let metric = prescription.and(step.advance_condition.as_ref()).map(|condition| condition.metric);
+        let value_of = |row: &db::MenuStepHistoryRow| match metric {
+            Some(_) => row.step.value,
+            None => row.net_wpm,
+        };
+        let value = row.and_then(value_of).filter(|value| value.is_finite());
+        let current_language = row.and_then(&mut step_language).unwrap_or(step.language);
+        let mut previous = None;
+        for candidate in history.iter().filter(|candidate| earlier(candidate)) {
+            if candidate.layout == run.layout
+                && candidate.step.prescription_id.as_deref() == Some(step.prescription_id.as_str())
+                && candidate.step.level == step.level
+                && step_language(candidate) == Some(current_language)
+                && let Some(value) = value_of(candidate).filter(|value| value.is_finite())
+            {
+                previous = Some(value);
+            }
+        }
+        let language = language_code(step.language);
+        let state = match prescription {
+            Some(_) => db::load_menu_progress(db_path, layout, language, &step.prescription_id)?,
+            None => None,
+        };
+        let required = prescription
+            .and(step.advance_condition.as_ref())
+            .map(|condition| condition.sessions.max(1));
+        let level_count = prescription.map(|prescription| level_count(prescription.levels.len()));
+        let graduation = row.and_then(|row| {
+            let (level, after) = (row.step.level?, row.step.level_after?);
+            if after > level {
+                return Some(super::Graduation::Level(after));
+            }
+            let state = state.as_ref()?;
+            (row.step.advance_met == Some(true)
+                && state.judgment == PrescriptionJudgment::Maintenance
+                && state.maintenance_due == run.date.checked_add_signed(chrono::Duration::days(super::MENU_RECHECK_DAYS)))
+            .then_some(super::Graduation::Maintenance)
+        });
+        let consecutive = match (graduation, required) {
+            (Some(_), Some(required)) => Some(required),
+            _ => state
+                .as_ref()
+                .filter(|state| Some(state.level) == step.level && state.judgment != PrescriptionJudgment::Maintenance)
+                .map(|state| state.consecutive),
+        };
+        if let Some(row) = row {
+            match graduation {
+                Some(super::Graduation::Level(level)) => changes.push(RunChange::LevelUp {
+                    title: step.title.clone(),
+                    language: step.language,
+                    level,
+                }),
+                Some(super::Graduation::Maintenance) => changes.push(RunChange::Maintenance {
+                    title: step.title.clone(),
+                    language: step.language,
+                }),
+                None => {
+                    if let (Some(level), Some(after)) = (row.step.level, row.step.level_after)
+                        && after < level
+                    {
+                        changes.push(RunChange::LevelDown {
+                            title: step.title.clone(),
+                            language: step.language,
+                            level: after,
+                        });
+                    }
+                }
+            }
+            if let Some(prescription) = prescription {
+                let alternate = catalog
+                    .prescription(&prescription.alternate)
+                    .filter(|alternate| alternate.id != prescription.id)
+                    .map(|alternate| alternate.title.text(display).to_owned());
+                if metric == Some(MenuMetric::PrescriptionR3) {
+                    match row.step.advance_met {
+                        Some(false) => {
+                            if let Some(alternate) = alternate {
+                                changes.push(RunChange::Swapped {
+                                    title: step.title.clone(),
+                                    language: step.language,
+                                    alternate,
+                                    controlled: true,
+                                });
+                            }
+                        }
+                        Some(true) => changes.push(RunChange::Improved {
+                            title: step.title.clone(),
+                            language: step.language,
+                            controlled: true,
+                        }),
+                        None => {}
+                    }
+                } else if let Some(state) = state.as_ref().filter(|state| state.pair_judged_run == Some(run.id)) {
+                    if let Some(until) = state.paused_until.filter(|until| *until > run.date) {
+                        changes.push(RunChange::Paused {
+                            title: step.title.clone(),
+                            language: step.language,
+                            until,
+                        });
+                    } else if state.judgment == PrescriptionJudgment::NoChange {
+                        if let Some(alternate) = alternate {
+                            changes.push(RunChange::Swapped {
+                                title: step.title.clone(),
+                                language: step.language,
+                                alternate,
+                                controlled: false,
+                            });
+                        }
+                    } else if state.judgment == PrescriptionJudgment::Improved {
+                        changes.push(RunChange::Improved {
+                            title: step.title.clone(),
+                            language: step.language,
+                            controlled: false,
+                        });
+                    }
+                }
+            }
+        }
+        steps.push(StepSummary {
+            index,
+            role: step.role,
+            language: step.language,
+            prescription_id: step.prescription_id.clone(),
+            title: step.title.clone(),
+            level: step.level,
+            level_count,
+            done: row.is_some(),
+            metric,
+            value,
+            previous,
+            direction: metric.map_or(crate::analysis::grades::Direction::Higher, MenuMetric::direction),
+            required,
+            consecutive,
+            graduation,
+        });
+    }
+    changes.sort_by_key(RunChange::group);
+    Ok(Some(RunStepsSummary {
+        run_id: run.id,
+        date: run.date,
+        minutes: run.minutes,
+        bench_recommended: menu.bench_recommended,
+        steps,
+        changes,
+    }))
+}

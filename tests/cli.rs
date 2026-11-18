@@ -247,6 +247,8 @@ fn parses_stats_skills_and_rebuild_skills_and_rejects_other_output_modes() {
     // --json still needs --menu or --skills.
     assert!(Cli::try_parse_from(["rs-typing-trainer", "stats", "--json"]).is_err());
     assert!(Cli::try_parse_from(["rs-typing-trainer", "stats", "--rebuild-skills", "--json"]).is_err());
+    // M6: `--csv` without a table belongs to `--skills`, so a table name is
+    // now rejected by the validation the binary runs after parsing.
     for other in [
         &["--menu"][..],
         &["--rebuild-skills"][..],
@@ -257,7 +259,7 @@ fn parses_stats_skills_and_rebuild_skills_and_rejects_other_output_modes() {
     ] {
         let mut args = vec!["rs-typing-trainer", "stats", "--skills"];
         args.extend_from_slice(other);
-        assert!(Cli::try_parse_from(&args).is_err(), "{args:?}");
+        assert!(Cli::try_parse_validated(&args).is_err(), "{args:?}");
     }
     assert!(Cli::try_parse_from(["rs-typing-trainer", "stats", "--rebuild-skills", "--summary"]).is_err());
 }
@@ -293,4 +295,103 @@ fn stats_rebuild_skills_on_an_empty_database_reports_zero() {
             "スキルの記録を作り直しました: 0 回のメニュー，0 行"
         );
     }
+}
+
+#[test]
+fn stats_skills_csv_parses_and_rejects_json_or_a_table_name() {
+    let cli = Cli::try_parse_validated(["rs-typing-trainer", "stats", "--skills", "--csv"]).unwrap();
+    assert!(cli.stats_skills);
+    assert!(matches!(cli.command, Some(Command::Stats { csv: Some(None), .. })));
+    // The existing tables keep working.
+    let cli = Cli::try_parse_validated(["rs-typing-trainer", "stats", "--csv", "sessions"]).unwrap();
+    assert!(matches!(
+        cli.command,
+        Some(Command::Stats {
+            csv: Some(Some(rs_typing_trainer::cli::StatsCsv::Sessions)),
+            ..
+        })
+    ));
+    for args in [
+        &["rs-typing-trainer", "stats", "--skills", "--csv", "--json"][..],
+        &["rs-typing-trainer", "stats", "--skills", "--json", "--csv"][..],
+        &["rs-typing-trainer", "stats", "--skills", "--csv", "grades"][..],
+        &["rs-typing-trainer", "stats", "--csv"][..],
+        &["rs-typing-trainer", "stats", "--menu", "--csv"][..],
+    ] {
+        assert!(Cli::try_parse_validated(args).is_err(), "{args:?}");
+    }
+}
+
+fn skills_csv_config(dir: &TempDir) -> (PathBuf, PathBuf) {
+    let db_path = dir.path().join("sessions.db");
+    let config_path = dir.path().join("config.toml");
+    std::fs::write(&config_path, format!("[storage]\ndb_path = {:?}\n", db_path)).unwrap();
+    (db_path, config_path)
+}
+
+#[test]
+fn stats_skills_csv_prints_the_header_and_rows_with_empty_missing_cells() {
+    use rs_typing_trainer::record::db::SkillSnapshotRecord;
+
+    let dir = TempDir::new().unwrap();
+    let (db_path, config_path) = skills_csv_config(&dir);
+    let day = |offset: i64| chrono::NaiveDate::from_ymd_opt(2026, 11, 2).unwrap() + chrono::Duration::days(offset);
+    for offset in 0..6 {
+        let run = db::ensure_menu_run(&db_path, day(offset), "qwerty", "en", "menu-v1", 15, "{}")
+            .unwrap()
+            .id;
+        let mut rows = vec![SkillSnapshotRecord {
+            run_id: run,
+            date: day(offset),
+            lang: "en".to_owned(),
+            component: "speed".to_owned(),
+            raw_value: 50.0 + offset as f64,
+            n: 100,
+            source: "check".to_owned(),
+            corrected: offset % 2 == 0,
+        }];
+        if offset == 5 {
+            rows.push(SkillSnapshotRecord {
+                run_id: run,
+                date: day(offset),
+                lang: "ja".to_owned(),
+                component: "preview".to_owned(),
+                raw_value: 1.5,
+                n: 40,
+                source: "check".to_owned(),
+                corrected: false,
+            });
+        }
+        db::replace_skill_snapshots(&db_path, run, &rows).unwrap();
+    }
+    let output = ProcessCommand::new(env!("CARGO_BIN_EXE_rs-typing-trainer"))
+        .args(["--lang", "ja", "--config", config_path.to_str().unwrap(), "stats", "--skills", "--csv"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let lines = stdout.lines().collect::<Vec<_>>();
+    assert_eq!(
+        lines[0],
+        "date,lang,component,raw_value,grade,score,moving_median,previous_diff,corrected,source"
+    );
+    // Every language with records, whatever `--lang` says.
+    assert_eq!(lines.len(), 1 + 6 + 1, "{stdout}");
+    assert!(lines.iter().all(|line| line.split(',').count() == 10), "{stdout}");
+    // First speed point: no previous difference and no moving median yet.
+    assert!(lines[1].starts_with("2026-11-02,en,speed,50,"), "{stdout}");
+    let first = lines[1].split(',').collect::<Vec<_>>();
+    assert!(!first[4].is_empty() && !first[5].is_empty(), "grade and score are computed: {stdout}");
+    assert_eq!((first[6], first[7], first[8], first[9]), ("", "", "true", "check"), "{stdout}");
+    // Fifth point: moving median of 50..54 = 52, previous difference +1.
+    let fifth = lines[5].split(',').collect::<Vec<_>>();
+    assert_eq!((fifth[0], fifth[6], fifth[7]), ("2026-11-06", "52", "1"), "{stdout}");
+    assert!(lines.iter().any(|line| line.starts_with("2026-11-07,ja,preview,1.5,")), "{stdout}");
+
+    let both = ProcessCommand::new(env!("CARGO_BIN_EXE_rs-typing-trainer"))
+        .args(["--config", config_path.to_str().unwrap(), "stats", "--skills", "--csv", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(both.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&both.stderr).contains("--csv and --json"));
 }

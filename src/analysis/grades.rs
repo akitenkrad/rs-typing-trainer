@@ -333,6 +333,58 @@ pub fn grade_component(language: &str, component: Component, value: f64) -> Resu
     })
 }
 
+/// The grade boundaries of one component under the current thresholds: its
+/// direction and the nine raw values that map to the scores 0, 1, …, 8 (the
+/// lower edges of G … S followed by the value that scores 8). Used to draw
+/// the F–S bands behind a component's series.
+pub fn component_score_points(language: &str, component: Component) -> Result<(Direction, [f64; 9]), String> {
+    let row = bundled_thresholds()?.component(language, component)?;
+    let mut points = [0.0; 9];
+    points[0] = row.score_zero;
+    points[1..8].copy_from_slice(&row.boundaries);
+    points[8] = row.score_eight;
+    Ok((row.direction, points))
+}
+
+/// The overall grade of a set of raw component values with the current
+/// thresholds (the same harmonic mean as every other grade). `None` without
+/// both speed and accuracy, as in [`evaluate_language`].
+pub fn overall_from_values(language: &str, values: &[ComponentValue]) -> Option<OverallGrade> {
+    evaluate_language(language, values, GradeSource::Provisional, GradeStatus::Provisional, 1)
+        .ok()
+        .and_then(|grade| grade.overall)
+}
+
+/// The grade from the benchmark records of `language` up to `as_of` — the
+/// same computation as the grade report's bench grade — together with the
+/// date of the latest benchmark it used. `None` without a benchmark.
+#[allow(clippy::too_many_arguments)]
+pub fn bench_language_grade(
+    language: &str,
+    records: &[SessionRecord],
+    layout: &KeyboardLayout,
+    geometry: &KeyboardGeometry,
+    options: GradeOptions,
+    as_of: DateTime<Utc>,
+    english_corpus: &[String],
+    japanese_corpus: &[JapaneseText],
+) -> Option<(LanguageGrade, NaiveDate)> {
+    let benches = benchmark_records(records, language, Some(as_of));
+    let date = benches
+        .last()
+        .and_then(|record| DateTime::parse_from_rfc3339(&record.header.started_at).ok())
+        .map(|time| time.date_naive())?;
+    let grade = bench_grade(language, &benches, layout, geometry, options, as_of, english_corpus, japanese_corpus)?;
+    Some((grade, date))
+}
+
+/// The benchmark sessions of `language` (part A for English, part C for
+/// Japanese, preferred series) that the bench grade is computed from, oldest
+/// first.
+pub fn language_bench_records<'a>(records: &'a [SessionRecord], language: &str) -> Vec<&'a SessionRecord> {
+    benchmark_records(records, language, None)
+}
+
 fn interpolate(value: f64, points: &[f64], direction: Direction) -> f64 {
     let before_start = match direction {
         Direction::Higher => value <= points[0],

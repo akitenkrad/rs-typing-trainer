@@ -698,6 +698,58 @@ pub fn load_all_menu_runs(path: &Path) -> AppResult<Vec<MenuRunRecord>> {
         .map_err(Into::into)
 }
 
+/// One recorded menu step together with the net WPM of its session (`None`
+/// when the session row is missing).
+#[derive(Clone, Debug, PartialEq)]
+pub struct MenuStepHistoryRow {
+    pub run_id: i64,
+    pub date: chrono::NaiveDate,
+    pub layout: String,
+    pub step: MenuStepRecord,
+    pub net_wpm: Option<f64>,
+}
+
+/// Every recorded menu step of every run, oldest run first and in step order.
+/// Read-only; the menu summary and the skills tab compare a step with earlier
+/// runs of the same prescription from these rows.
+pub fn load_menu_step_history(path: &Path) -> AppResult<Vec<MenuStepHistoryRow>> {
+    let conn = open(path)?;
+    let mut statement = conn.prepare(
+        "SELECT menu_steps.run_id, menu_steps.idx, menu_steps.role, menu_steps.prescription_id, menu_steps.level,
+                menu_steps.session_id, menu_steps.metric, menu_steps.value, menu_steps.advance_met, menu_steps.level_after,
+                menu_runs.date, menu_runs.layout, sessions.net_wpm
+         FROM menu_steps
+         JOIN menu_runs ON menu_runs.id=menu_steps.run_id
+         LEFT JOIN sessions ON sessions.id=menu_steps.session_id
+         ORDER BY menu_runs.date, menu_runs.id, menu_steps.idx",
+    )?;
+    statement
+        .query_map([], |row| {
+            let date: String = row.get(10)?;
+            Ok(MenuStepHistoryRow {
+                run_id: row.get(0)?,
+                date: chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d")
+                    .map_err(|error| rusqlite::Error::FromSqlConversionFailure(10, rusqlite::types::Type::Text, Box::new(error)))?,
+                layout: row.get(11)?,
+                step: MenuStepRecord {
+                    run_id: row.get(0)?,
+                    idx: row.get::<_, i64>(1)?.max(0) as usize,
+                    role: row.get(2)?,
+                    prescription_id: row.get(3)?,
+                    level: row.get::<_, Option<i64>>(4)?.map(|value| value.clamp(0, i64::from(u8::MAX)) as u8),
+                    session_id: row.get(5)?,
+                    metric: row.get(6)?,
+                    value: row.get(7)?,
+                    advance_met: row.get::<_, Option<i64>>(8)?.map(|value| value != 0),
+                    level_after: row.get::<_, Option<i64>>(9)?.map(|value| value.clamp(0, i64::from(u8::MAX)) as u8),
+                },
+                net_wpm: row.get(12)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(Into::into)
+}
+
 fn menu_run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MenuRunRecord> {
     let date: String = row.get(1)?;
     let minutes = row.get::<_, i64>(5)?.clamp(0, i64::from(u8::MAX)) as u8;

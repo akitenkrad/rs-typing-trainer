@@ -15,6 +15,7 @@ pub mod key_picker;
 pub mod keyboard;
 pub mod keyboard_image;
 pub mod menu;
+pub mod menu_summary;
 pub mod mode_select;
 pub mod playing;
 pub mod prompt;
@@ -36,6 +37,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         Screen::Title => title::render(frame, app),
         Screen::Menu => menu::render(frame, app),
         Screen::MenuFocus { remaining } => menu::render_focus(frame, app, remaining),
+        Screen::MenuSummary => menu_summary::render(frame, app),
         Screen::ModeSelect => mode_select::render(frame, app),
         Screen::KeyPicker => key_picker::render(frame, app),
         Screen::Countdown { remaining } => countdown::render(frame, app, remaining),

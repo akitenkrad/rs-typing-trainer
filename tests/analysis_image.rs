@@ -20,10 +20,10 @@ use rs_typing_trainer::record::SessionRecord;
 use rs_typing_trainer::ui;
 use rs_typing_trainer::ui::analysis_image::{
     AnalysisImageCache, ComparisonBarsSpec, FORECAST_EN_COLOR, FingerChartSpec, GradeBadgeSpec, GradeLadderSpec, MetricKind, PixelPoint, RadarAxis,
-    RadarChartSpec, RadarRing, SERIES_COLORS, SparklineSpec, TransitionArrowSpec, TransitionBar, TransitionBarsSpec, TransitionKeyboardSpec,
-    TrendChartSpec, TrendDateRange, TrendForecast, TrendPoint, TrendSeries, build_finger_bars, build_trend_data, radar_label_layout,
-    render_comparison_bars, render_finger_chart, render_grade_badge, render_grade_ladder, render_radar_chart, render_sparkline,
-    render_transition_arrow, render_transition_bars, render_trend_chart, render_trend_chart_with_range, shared_trend_date_range,
+    RadarChartSpec, RadarRing, SERIES_COLORS, SkillChartSpec, SparklineSpec, TransitionArrowSpec, TransitionBar, TransitionBarsSpec,
+    TransitionKeyboardSpec, TrendChartSpec, TrendDateRange, TrendForecast, TrendPoint, TrendSeries, build_finger_bars, build_trend_data,
+    radar_label_layout, render_comparison_bars, render_finger_chart, render_grade_badge, render_grade_ladder, render_radar_chart, render_skill_chart,
+    render_sparkline, render_transition_arrow, render_transition_bars, render_trend_chart, render_trend_chart_with_range, shared_trend_date_range,
 };
 use rs_typing_trainer::ui::bigtext_image::resolve_big_font;
 use rs_typing_trainer::ui::keyboard::{KeyboardState, KeyboardView, keycap_center_cells, keycap_tile_placements};
@@ -1192,4 +1192,62 @@ fn text_chart_keeps_the_existing_unknown_bucket_for_an_invalid_timestamp() {
     let text = buffer.content().iter().map(|cell| cell.symbol()).collect::<String>();
     assert!(text.contains("2026-01-01"), "{text}");
     assert!(text.contains("unknown"), "{text}");
+}
+
+fn skill_chart_spec() -> SkillChartSpec {
+    let point = |day: u32, value: f64| TrendPoint { date: date(day), value };
+    SkillChartSpec {
+        cells: Size::new(30, 3),
+        x_range: TrendDateRange {
+            start: date(1),
+            end: date(10),
+        },
+        y_range: (1.3, 1.7),
+        points: (1..=10).map(|day| point(day, 1.7 - f64::from(day) * 0.03)).collect(),
+        medians: (5..=10).map(|day| point(day, 1.62 - f64::from(day) * 0.02)).collect(),
+        bench: vec![point(3, 1.5)],
+        boundaries: vec![2.2, 2.0, 1.8, 1.6, 1.5, 1.4, 1.3, 1.2, 1.1],
+        line_color: Color::LightCyan,
+        bench_color: Color::LightYellow,
+    }
+}
+
+#[test]
+fn skill_chart_draws_bands_faint_points_a_thick_median_and_bench_diamonds() {
+    let spec = skill_chart_spec();
+    let cells = CellPixels::new(9, 20);
+    let image = render_skill_chart(cells, &spec).unwrap();
+    assert_eq!(image.width(), 30 * 9);
+    assert_eq!(image.height(), 3 * 20);
+    // The bench diamond is drawn in the bench colour (opaque), the run points
+    // only faintly.
+    let yellow = image
+        .pixels()
+        .filter(|pixel| pixel[3] == 255 && pixel[0] > 200 && pixel[1] > 200 && pixel[2] < 160)
+        .count();
+    assert!(yellow > 10, "no bench diamond");
+    let faint = image.pixels().filter(|pixel| pixel[3] > 0 && pixel[3] < 140).count();
+    assert!(faint > 0, "no faint points or bands");
+    let empty = render_skill_chart(
+        cells,
+        &SkillChartSpec {
+            y_range: (1.0, 1.0),
+            ..skill_chart_spec()
+        },
+    )
+    .unwrap();
+    assert!(empty.pixels().all(|pixel| pixel[3] == 0));
+}
+
+#[test]
+fn skill_chart_images_are_cached_by_their_content() {
+    let mut cache = AnalysisImageCache::new();
+    let spec = skill_chart_spec();
+    cache.prepare_skill_chart(&detection(), &spec).unwrap();
+    cache.prepare_skill_chart(&detection(), &spec).unwrap();
+    assert_eq!(cache.creation_count(), 1);
+    let mut moved = spec.clone();
+    moved.bench.clear();
+    cache.prepare_skill_chart(&detection(), &moved).unwrap();
+    assert_eq!(cache.creation_count(), 2);
 }

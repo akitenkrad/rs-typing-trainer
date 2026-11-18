@@ -785,8 +785,31 @@ fn menu_result_line(app: &App, lang: Lang, width: usize) -> Option<String> {
         Lang::En => ("Graduation condition: ", format!(" — This session: {status}{reference}")),
         Lang::Ja => ("卒業の条件: ", format!(" — この回: {status}{reference}")),
     };
-    let available = width.saturating_sub(UnicodeWidthStr::width(prefix) + UnicodeWidthStr::width(suffix.as_str()));
-    Some(format!("{prefix}{}{suffix}", truncate_display(&step.advance, available)))
+    // §7.2: «メニュー 2/5 先読みを広げる ② — …». The step position is added
+    // only when it leaves room for the condition; narrow windows keep the
+    // previous line.
+    let total = app.daily_menu.as_ref().map_or(0, |menu| menu.steps.len());
+    let position = app.menu_active_step.map_or(0, |index| index + 1);
+    let level = step.level.map(menu_level_mark).unwrap_or_default();
+    let step_label = match lang {
+        Lang::En => format!("Menu {position}/{total} {}{level} — ", step.title),
+        Lang::Ja => format!("メニュー {position}/{total} {}{level} — ", step.title),
+    };
+    let fixed = UnicodeWidthStr::width(prefix) + UnicodeWidthStr::width(suffix.as_str());
+    let step_label = if fixed + UnicodeWidthStr::width(step_label.as_str()) + 12 <= width {
+        step_label
+    } else {
+        String::new()
+    };
+    let available = width.saturating_sub(fixed + UnicodeWidthStr::width(step_label.as_str()));
+    Some(format!("{step_label}{prefix}{}{suffix}", truncate_display(&step.advance, available)))
+}
+
+fn menu_level_mark(level: u8) -> String {
+    match level {
+        1..=20 => char::from_u32(0x2460 + u32::from(level) - 1).map_or_else(|| format!(" {level}"), |mark| format!(" {mark}")),
+        _ => format!(" {level}"),
+    }
 }
 
 /// The check step itself has no graduation condition; it shows the

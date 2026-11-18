@@ -82,9 +82,15 @@ pub enum Command {
 
     /// Show typing statistics.
     Stats {
-        /// Emit machine-readable CSV for one table.
-        #[arg(long, value_enum, conflicts_with_all = ["summary", "grades", "coach", "stats_menu", "stats_skills", "rebuild_skills"])]
-        csv: Option<StatsCsv>,
+        /// Emit machine-readable CSV for one table. With `--skills`, give
+        /// `--csv` without a table to emit the skill series.
+        #[arg(
+            long,
+            value_enum,
+            num_args = 0..=1,
+            conflicts_with_all = ["summary", "grades", "coach", "stats_menu", "rebuild_skills"]
+        )]
+        csv: Option<Option<StatsCsv>>,
         /// Print the same rule-based summary shown in the first analysis tab.
         #[arg(long, conflicts_with_all = ["grades", "coach", "stats_menu", "stats_skills", "rebuild_skills"])]
         summary: bool,
@@ -135,6 +141,35 @@ pub enum StatsCsv {
 }
 
 impl Cli {
+    /// Checks that clap cannot express: `--csv` without a table is only for
+    /// `--skills`, a table name conflicts with `--skills`, and `--csv` and
+    /// `--json` cannot be combined.
+    pub fn validate(&self) -> Result<(), String> {
+        let Some(Command::Stats { csv: Some(table), .. }) = &self.command else {
+            return Ok(());
+        };
+        if self.json {
+            return Err("--csv and --json cannot be used together".to_owned());
+        }
+        match (table, self.stats_skills) {
+            (Some(_), true) => Err("--skills takes --csv without a table name".to_owned()),
+            (None, false) => Err("--csv needs a table name (or use it with --skills)".to_owned()),
+            _ => Ok(()),
+        }
+    }
+
+    /// [`Parser::try_parse_from`] followed by [`Cli::validate`]; the binary
+    /// parses its arguments this way.
+    pub fn try_parse_validated<I, T>(args: I) -> Result<Self, String>
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<std::ffi::OsString> + Clone,
+    {
+        let cli = <Self as Parser>::try_parse_from(args).map_err(|error| error.to_string())?;
+        cli.validate()?;
+        Ok(cli)
+    }
+
     pub fn effective_lang(&self, configured: Lang) -> Lang {
         self.lang.unwrap_or(configured)
     }

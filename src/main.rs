@@ -35,6 +35,10 @@ const CLEANUP_DRAIN_LIMIT: Duration = Duration::from_millis(75);
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let lang = cli.lang.unwrap_or_default();
+    if let Err(error) = cli.validate() {
+        eprintln!("{}: {error}", Msg::AppTitle.text(lang));
+        return ExitCode::from(2);
+    }
     if let Err(error) = rs_typing_trainer::analysis::grades::bundled_thresholds() {
         eprintln!("{}: invalid bundled grade thresholds: {error}", Msg::AppTitle.text(lang));
         return ExitCode::from(1);
@@ -316,7 +320,7 @@ fn run_replay_tui(
 fn run_stats(
     cli: &Cli,
     home: &std::path::Path,
-    csv: Option<rs_typing_trainer::cli::StatsCsv>,
+    csv: Option<Option<rs_typing_trainer::cli::StatsCsv>>,
     summary: bool,
     grades: bool,
     coach: bool,
@@ -347,6 +351,11 @@ fn run_stats(
         print!("{output}");
         return Ok(());
     }
+    if cli.stats_skills && csv.is_some() {
+        let output = rs_typing_trainer::practice::menu::skills::render_csv_from_storage(&config.resolve_db_path(home))?;
+        print!("{output}");
+        return Ok(());
+    }
     if cli.stats_skills {
         let output = rs_typing_trainer::practice::menu::skills::render_from_storage(
             &config.resolve_db_path(home),
@@ -372,7 +381,7 @@ fn run_stats(
         &config.resolve_db_path(home),
         home,
         &config,
-        csv,
+        csv.flatten(),
         summary,
         grades,
         coach,

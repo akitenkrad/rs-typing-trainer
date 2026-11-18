@@ -52,6 +52,10 @@ use unicode_segmentation::UnicodeSegmentation;
 /// any key input is dropped (R-06).
 pub const WORD_ENTER_DURATION: Duration = Duration::from_millis(200);
 pub const WORD_EXIT_DURATION: Duration = Duration::from_millis(200);
+/// Tabs of the analysis screen; the «skills» tab (§8.4) is the last.
+pub const ANALYSIS_TAB_COUNT: usize = 7;
+pub const ANALYSIS_SKILLS_TAB: usize = 6;
+
 pub const COUNTDOWN_DURATION: Duration = Duration::from_millis(3000);
 const ABORT_CONFIRMATION_DURATION: Duration = Duration::from_secs(2);
 
@@ -59,10 +63,16 @@ const ABORT_CONFIRMATION_DURATION: Duration = Duration::from_secs(2);
 pub enum Screen {
     Title,
     Menu,
-    MenuFocus { remaining: f32 },
+    MenuFocus {
+        remaining: f32,
+    },
+    /// Summary of a practice-menu run (design §7.1).
+    MenuSummary,
     ModeSelect,
     KeyPicker,
-    Countdown { remaining: f32 },
+    Countdown {
+        remaining: f32,
+    },
     Playing,
     Result,
     History,
@@ -277,6 +287,10 @@ pub struct App {
     pub analysis_confusion_selected: usize,
     pub analysis_goal_picker: bool,
     pub analysis_goal_selected: usize,
+    /// «Skills» tab (§8.4): stored snapshots, bench overlay and prescription
+    /// history, and the selected series language (`L`).
+    pub analysis_skills: crate::practice::menu::skills::SkillsTabData,
+    pub analysis_skills_lang: Option<String>,
     pub adaptive_focus: Vec<TransitionCost>,
     adaptive_candidates: Vec<TransitionCost>,
     pub adaptive_result: Vec<AdaptiveResultRow>,
@@ -303,6 +317,8 @@ pub struct App {
     pub menu_step_reference: Option<crate::practice::menu::ReferenceJudgment>,
     pub menu_step_others: Vec<crate::practice::menu::progress::StepJudgment>,
     pub menu_step_deferral: Option<crate::practice::menu::progress::JudgmentDeferral>,
+    /// Data of the open menu summary screen.
+    pub menu_summary: Option<crate::ui::menu_summary::MenuSummaryData>,
     analysis_as_of: chrono::NaiveDate,
     bench_run: Option<BenchRun>,
     ui_now: Instant,
@@ -466,6 +482,8 @@ impl App {
             analysis_confusion_selected: 0,
             analysis_goal_picker: false,
             analysis_goal_selected: 0,
+            analysis_skills: Default::default(),
+            analysis_skills_lang: None,
             adaptive_focus: Vec::new(),
             adaptive_candidates: Vec::new(),
             adaptive_result: Vec::new(),
@@ -492,6 +510,7 @@ impl App {
             menu_step_reference: None,
             menu_step_others: Vec::new(),
             menu_step_deferral: None,
+            menu_summary: None,
             analysis_as_of: date,
             bench_run: None,
             ui_now: now,
@@ -727,6 +746,11 @@ impl App {
         }
     }
 
+    /// The day the analysis screen counts its periods from.
+    pub fn analysis_day(&self) -> chrono::NaiveDate {
+        self.analysis_as_of
+    }
+
     pub fn practice_layout(&self) -> &KeyboardLayout {
         self.layouts
             .get(&self.config.keyboard.layout)
@@ -876,6 +900,7 @@ impl App {
             Screen::Title => self.handle_title_key(key, action),
             Screen::Menu => self.handle_menu_key(key, action),
             Screen::MenuFocus { .. } => self.handle_menu_focus_key(key),
+            Screen::MenuSummary => self.handle_menu_summary_key(key, action),
             Screen::ModeSelect => self.handle_mode_select_key(key, action),
             Screen::KeyPicker => self.handle_key_picker_key(key, action),
             Screen::Countdown { .. } => {
@@ -1073,7 +1098,43 @@ impl App {
         self.clear_menu_step_result();
         self.abort_confirm_until = None;
         self.input_blocked_until = None;
+        self.leave_menu_run();
+    }
+
+    /// Back to the menu from a run (§7): the summary screen comes first
+    /// whenever at least one step of the run has been played — «summary so
+    /// far» while steps remain, the full summary once all are done.
+    fn leave_menu_run(&mut self) {
+        self.menu_summary = None;
+        if let Some(run_id) = self.menu_run_id.filter(|_| !self.menu_completed.is_empty()) {
+            let db_path = self.db_path();
+            let layout = self.practice_layout().clone();
+            match crate::ui::menu_summary::build_summary(
+                &db_path,
+                &self.home_dir,
+                &self.config,
+                &layout,
+                run_id,
+                self.config.general.lang,
+                self.analysis_as_of,
+            ) {
+                Ok(Some(data)) => {
+                    self.menu_summary = Some(data);
+                    self.screen = Screen::MenuSummary;
+                    return;
+                }
+                Ok(None) => {}
+                Err(error) => self.menu_error = Some(error.to_string()),
+            }
+        }
         self.screen = Screen::Menu;
+    }
+
+    fn handle_menu_summary_key(&mut self, key: KeyEvent, action: InputAction) {
+        if matches!(key.code, KeyCode::Enter | KeyCode::Esc | KeyCode::Char(' ')) || matches!(action, InputAction::Abort) {
+            self.menu_summary = None;
+            self.screen = Screen::Menu;
+        }
     }
 
     fn continue_menu(&mut self) {
@@ -1096,7 +1157,7 @@ impl App {
         } else {
             self.menu_active_step = None;
             self.clear_menu_step_result();
-            self.screen = Screen::Menu;
+            self.leave_menu_run();
         }
     }
 
@@ -1292,8 +1353,16 @@ impl App {
                 });
                 self.analysis_confusion_selected = (self.analysis_confusion_selected + 1).min(count.saturating_sub(1));
             }
-            KeyCode::Tab | KeyCode::Right => self.analysis_tab = (self.analysis_tab + 1) % 6,
-            KeyCode::BackTab | KeyCode::Left => self.analysis_tab = (self.analysis_tab + 5) % 6,
+            KeyCode::Tab | KeyCode::Right => self.analysis_tab = (self.analysis_tab + 1) % ANALYSIS_TAB_COUNT,
+            KeyCode::BackTab | KeyCode::Left => self.analysis_tab = (self.analysis_tab + ANALYSIS_TAB_COUNT - 1) % ANALYSIS_TAB_COUNT,
+            KeyCode::Char('l') | KeyCode::Char('L') if self.analysis_tab == ANALYSIS_SKILLS_TAB => {
+                let languages = self.analysis_skills.languages();
+                if let Some(shown) = crate::ui::analysis::skills_language(self)
+                    && let Some(index) = languages.iter().position(|language| *language == shown)
+                {
+                    self.analysis_skills_lang = Some(languages[(index + 1) % languages.len()].clone());
+                }
+            }
             KeyCode::Up | KeyCode::Char('k') if self.analysis_tab == 0 => {
                 self.analysis_summary_scroll = self.analysis_summary_scroll.saturating_sub(1);
             }
@@ -1375,6 +1444,7 @@ impl App {
         self.analysis_goal_picker = false;
         self.analysis_goal_selected = 0;
         self.analysis_summary_scroll = 0;
+        self.analysis_skills_lang = None;
         self.reload_analysis();
         self.screen = Screen::Analysis;
     }
@@ -1408,6 +1478,13 @@ impl App {
             today,
             self.config.general.lang,
         );
+        let bench_records = if matches!(self.analysis_mode_filter.as_deref(), None | Some("bench")) {
+            self.analysis_records.clone()
+        } else {
+            db::load_records_filtered(&self.db_path(), since, Some("bench")).unwrap_or_default()
+        };
+        self.analysis_skills =
+            crate::practice::menu::skills::load_skills_tab(&self.db_path(), &self.config.keyboard.layout, &bench_records).unwrap_or_default();
         let mut prescriptions = db::load_prescriptions(&self.db_path()).unwrap_or_default();
         if let Some(since) = since {
             prescriptions.retain(|row| row.created_at.date_naive() >= since);
@@ -1895,7 +1972,7 @@ impl App {
                 ResultOrigin::JustPlayed if self.menu_active_step.is_some() => {
                     self.menu_active_step = None;
                     self.clear_menu_step_result();
-                    self.screen = Screen::Menu;
+                    self.leave_menu_run();
                 }
                 ResultOrigin::JustPlayed if self.bench_run.is_some() => {
                     if self.confirm_abort(now) {
@@ -1912,7 +1989,7 @@ impl App {
                 ResultOrigin::JustPlayed if self.menu_active_step.is_some() => {
                     self.menu_active_step = None;
                     self.clear_menu_step_result();
-                    self.screen = Screen::Menu;
+                    self.leave_menu_run();
                 }
                 ResultOrigin::JustPlayed if self.bench_run.is_some() => {
                     if self.confirm_abort(now) {

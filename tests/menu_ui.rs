@@ -262,6 +262,9 @@ fn menu_runs_steps_in_order_restores_settings_and_keeps_completion_marks() {
     app.on_tick_at(Duration::from_secs(3), now + Duration::from_secs(135)).unwrap();
     assert_eq!(app.screen, Screen::Playing);
     app.handle_key_at(key(KeyCode::Esc), now + Duration::from_secs(136));
+    // §7: leaving a run with a finished step shows «summary so far» first.
+    assert_eq!(app.screen, Screen::MenuSummary);
+    app.handle_key_at(key(KeyCode::Enter), now + Duration::from_secs(137));
     assert_eq!(app.screen, Screen::Menu);
     assert_eq!(app.config.mode.kind, ModeKind::Random);
     assert_eq!(app.config.session.duration_seconds, 17);
@@ -311,6 +314,9 @@ fn escape_from_a_menu_result_returns_to_the_menu_and_done_is_visible() {
     finish_selected_step(&mut app, now + Duration::from_secs(1));
 
     app.handle_key_at(key(KeyCode::Esc), now + Duration::from_secs(130));
+    // §7: «summary so far» comes first, then the menu.
+    assert_eq!(app.screen, Screen::MenuSummary);
+    app.handle_key_at(key(KeyCode::Esc), now + Duration::from_secs(131));
     assert_eq!(app.screen, Screen::Menu);
     let text = render(&app, 80, 24).join("\n");
     assert!(text.contains('済'), "{text}");
@@ -416,6 +422,9 @@ fn play_step(app: &mut rs_typing_trainer::app::App, index: usize, now: Instant) 
 }
 
 fn back_to_menu(app: &mut rs_typing_trainer::app::App, now: Instant) {
+    app.handle_key_at(key(KeyCode::Esc), now);
+    // §7: a run with a finished step shows its summary before the menu.
+    assert_eq!(app.screen, Screen::MenuSummary);
     app.handle_key_at(key(KeyCode::Esc), now);
     assert_eq!(app.screen, Screen::Menu);
 }
@@ -569,4 +578,22 @@ fn graduation_and_deferred_judgments_are_spelled_out_on_the_result() {
 
 fn compact(rows: &[String]) -> String {
     rows.join("").chars().filter(|character| !character.is_whitespace()).collect()
+}
+
+#[test]
+fn wide_menu_result_line_names_the_step_position_and_level() {
+    let mut app = test_app(base_config());
+    let now = Instant::now();
+    open_menu(&mut app, now);
+    app.handle_key(key(KeyCode::Down));
+    finish_selected_step(&mut app, now + Duration::from_secs(1));
+    let total = app.daily_menu.as_ref().unwrap().steps.len();
+    let title = app.daily_menu.as_ref().unwrap().steps[1].title.clone();
+
+    // §7.2: «Menu 2/5 <prescription> ① — graduation condition …».
+    let wide = render(&app, 160, 24).join("\n");
+    assert!(wide.contains(&format!("Menu 2/{total} {title} ① — Graduation condition:")), "{wide}");
+    // At 80 columns the condition and this session's outcome keep priority.
+    let narrow = render(&app, 80, 24).join("\n");
+    assert!(narrow.contains("This session: cannot determine"), "{narrow}");
 }

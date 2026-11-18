@@ -754,7 +754,7 @@ pub fn render_text(report: &SkillsReport, lang: Lang) -> String {
     output
 }
 
-fn trend_label(trend: TrendDirection, lang: Lang) -> &'static str {
+pub fn trend_label(trend: TrendDirection, lang: Lang) -> &'static str {
     match (trend, lang) {
         (TrendDirection::Improving, Lang::En) => "improving",
         (TrendDirection::Flat, Lang::En) => "flat",
@@ -765,7 +765,7 @@ fn trend_label(trend: TrendDirection, lang: Lang) -> &'static str {
     }
 }
 
-fn format_value(component: Component, value: f64, signed: bool) -> String {
+pub fn format_value(component: Component, value: f64, signed: bool) -> String {
     let digits = match component {
         Component::Rhythm => 3,
         Component::Preview => 2,
@@ -810,4 +810,332 @@ fn write_table(output: &mut String, rows: &[Vec<String>]) {
         output.push_str(line.trim_end());
         output.push('\n');
     }
+}
+
+// ---------------------------------------------------------------------------
+// Series readers for the summary screen, the skills tab and `--csv`
+// ---------------------------------------------------------------------------
+
+/// Snapshots of one language and one component, in series order (date, run
+/// id). Only the component's own source counts (§8.1), and non-finite values
+/// are dropped — exactly the rows [`skills_report`] reads.
+pub fn component_series<'a>(rows: &'a [SkillSnapshotRecord], language: &str, component: Component) -> Vec<&'a SkillSnapshotRecord> {
+    let mut series = rows
+        .iter()
+        .filter(|row| {
+            row.lang == language
+                && row.component == component.as_str()
+                && row.source == SnapshotSource::for_component(component).as_str()
+                && row.raw_value.is_finite()
+        })
+        .collect::<Vec<_>>();
+    series.sort_by(|left, right| left.date.cmp(&right.date).then(left.run_id.cmp(&right.run_id)));
+    series
+}
+
+/// Languages with at least one snapshot, in code order.
+pub fn snapshot_languages(rows: &[SkillSnapshotRecord]) -> Vec<String> {
+    rows.iter()
+        .map(|row| row.lang.clone())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+/// One point of a series with the §8.3 figures as of that point (computed by
+/// [`skill_trend`] over the points up to and including it).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SeriesPointFigures {
+    pub run_id: i64,
+    pub date: NaiveDate,
+    pub raw_value: f64,
+    pub corrected: bool,
+    pub source: String,
+    pub previous_difference: Option<f64>,
+    pub moving_median: Option<f64>,
+}
+
+/// Every point of one series with the previous difference and the moving
+/// median as they stood at that point.
+pub fn series_figures(rows: &[SkillSnapshotRecord], language: &str, component: Component, direction: Direction) -> Vec<SeriesPointFigures> {
+    let series = component_series(rows, language, component);
+    let points = series
+        .iter()
+        .map(|row| SeriesPoint {
+            run_id: row.run_id,
+            date: row.date,
+            value: row.raw_value,
+        })
+        .collect::<Vec<_>>();
+    series
+        .iter()
+        .enumerate()
+        .map(|(index, row)| {
+            let trend = skill_trend(&points[..=index], direction);
+            SeriesPointFigures {
+                run_id: row.run_id,
+                date: row.date,
+                raw_value: row.raw_value,
+                corrected: row.corrected,
+                source: row.source.clone(),
+                previous_difference: trend.and_then(|trend| trend.previous_difference),
+                moving_median: trend.and_then(|trend| trend.moving_median),
+            }
+        })
+        .collect()
+}
+
+/// The direction and unit of a component from the current thresholds
+/// (higher-is-better and no unit when the language has no table).
+pub fn component_direction_and_unit(language: &str, component: Component) -> (Direction, String) {
+    bundled_thresholds()
+        .ok()
+        .and_then(|thresholds| thresholds.language(language))
+        .and_then(|table| table.get(component.as_str()))
+        .map_or((Direction::Higher, String::new()), |row| (row.direction, row.unit.clone()))
+}
+
+/// One component of a run in the summary's middle section (§7.1).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ComponentRunSkill {
+    pub component: Component,
+    pub unit: String,
+    pub direction: Direction,
+    /// The run's raw value; `None` when this run has no value («no data»).
+    pub value: Option<f64>,
+    pub corrected: bool,
+    pub grade: Option<Level>,
+    pub score: Option<f64>,
+    /// §8.3 figures as of this run (`None` without a value in this run).
+    pub trend: Option<SkillTrend>,
+    /// Values of the latest 28 days up to the run, oldest first.
+    pub recent: Vec<f64>,
+}
+
+/// The middle section of the summary for one run: the check step's language
+/// series (§7.1). The overall is computed from the run's raw values with the
+/// existing overall-grade computation, and is a practice value — never the
+/// official bench grade.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RunSkillSummary {
+    pub run_id: i64,
+    pub date: NaiveDate,
+    pub language: String,
+    pub components: Vec<ComponentRunSkill>,
+    pub overall: Option<crate::analysis::grades::OverallGrade>,
+    /// The overall of the previous run in the same language series.
+    pub previous_overall: Option<crate::analysis::grades::OverallGrade>,
+}
+
+fn run_values(rows: &[SkillSnapshotRecord], language: &str, run_id: i64) -> Vec<crate::analysis::grades::ComponentValue> {
+    Component::all()
+        .iter()
+        .filter_map(|component| {
+            component_series(rows, language, *component)
+                .into_iter()
+                .find(|row| row.run_id == run_id)
+                .map(|row| crate::analysis::grades::ComponentValue::new(*component, row.raw_value))
+        })
+        .collect()
+}
+
+/// [`RunSkillSummary`] of `run_id` (dated `date`) in `language`. A component
+/// without a snapshot in this run has `value: None` («no data»; never 0).
+pub fn run_skill_summary(rows: &[SkillSnapshotRecord], run_id: i64, date: NaiveDate, language: &str) -> RunSkillSummary {
+    let position = (date, run_id);
+    let components = Component::all()
+        .iter()
+        .copied()
+        .map(|component| {
+            let (direction, unit) = component_direction_and_unit(language, component);
+            let series = component_series(rows, language, component)
+                .into_iter()
+                .filter(|row| (row.date, row.run_id) <= position)
+                .collect::<Vec<_>>();
+            let current = series.last().filter(|row| row.run_id == run_id).copied();
+            let points = series
+                .iter()
+                .map(|row| SeriesPoint {
+                    run_id: row.run_id,
+                    date: row.date,
+                    value: row.raw_value,
+                })
+                .collect::<Vec<_>>();
+            let trend = current.and_then(|_| skill_trend(&points, direction));
+            let grade = current.and_then(|row| grade_component(language, component, row.raw_value).ok());
+            let start = date - chrono::Duration::days(TREND_WINDOW_DAYS - 1);
+            ComponentRunSkill {
+                component,
+                unit,
+                direction,
+                value: current.map(|row| row.raw_value),
+                corrected: current.is_some_and(|row| row.corrected),
+                grade: grade.as_ref().map(|grade| grade.grade),
+                score: grade.as_ref().map(|grade| grade.score),
+                trend,
+                recent: series.iter().filter(|row| row.date >= start).map(|row| row.raw_value).collect(),
+            }
+        })
+        .collect::<Vec<_>>();
+    let previous_run = rows
+        .iter()
+        .filter(|row| row.lang == language && (row.date, row.run_id) < position)
+        .max_by(|left, right| (left.date, left.run_id).cmp(&(right.date, right.run_id)))
+        .map(|row| row.run_id);
+    RunSkillSummary {
+        run_id,
+        date,
+        language: language.to_owned(),
+        components,
+        overall: crate::analysis::grades::overall_from_values(language, &run_values(rows, language, run_id)),
+        previous_overall: previous_run
+            .and_then(|previous| crate::analysis::grades::overall_from_values(language, &run_values(rows, language, previous))),
+    }
+}
+
+/// `stats --skills --csv`: one row per stored point of every language and
+/// component, with the grade and score under the current thresholds and the
+/// moving median and previous difference as they stood at that point. Missing
+/// values are empty cells.
+pub fn render_csv(rows: &[SkillSnapshotRecord]) -> String {
+    use std::fmt::Write;
+
+    let mut output = String::from("date,lang,component,raw_value,grade,score,moving_median,previous_diff,corrected,source\n");
+    let optional = |value: Option<f64>| value.map(|value| value.to_string()).unwrap_or_default();
+    for language in snapshot_languages(rows) {
+        let mut lines = Vec::new();
+        for (order, component) in Component::all().iter().copied().enumerate() {
+            let (direction, _) = component_direction_and_unit(&language, component);
+            for point in series_figures(rows, &language, component, direction) {
+                let grade = grade_component(&language, component, point.raw_value).ok();
+                let mut line = String::new();
+                let _ = write!(
+                    line,
+                    "{},{},{},{},{},{},{},{},{},{}",
+                    point.date,
+                    language,
+                    component.as_str(),
+                    point.raw_value,
+                    grade.as_ref().map(|grade| grade.grade.as_str()).unwrap_or_default(),
+                    optional(grade.as_ref().map(|grade| grade.score)),
+                    optional(point.moving_median),
+                    optional(point.previous_difference),
+                    point.corrected,
+                    point.source,
+                );
+                lines.push(((point.date, point.run_id, order), line));
+            }
+        }
+        lines.sort_by_key(|line| line.0);
+        for (_, line) in lines {
+            output.push_str(&line);
+            output.push('\n');
+        }
+    }
+    output
+}
+
+/// `stats --skills --csv` from storage.
+pub fn render_csv_from_storage(path: &Path) -> AppResult<String> {
+    Ok(render_csv(&db::load_skill_snapshots(path)?))
+}
+
+/// Benchmark values that can be placed on a component series (§8.4): the
+/// existing bench trend has net WPM and accuracy per session, which are the
+/// speed and accuracy components' raw units. The other five components are
+/// not part of the bench trend and are never overlaid.
+pub const BENCH_OVERLAY_COMPONENTS: [Component; 2] = [Component::Speed, Component::Accuracy];
+
+/// Bench points (date, raw value) of `component` for `language` from the
+/// bench sessions the bench grade uses (part A for English, part C for
+/// Japanese). Empty for components outside [`BENCH_OVERLAY_COMPONENTS`].
+pub fn bench_component_points(records: &[SessionRecord], language: &str, component: Component) -> Vec<(NaiveDate, f64)> {
+    let value = |record: &SessionRecord| match component {
+        Component::Speed => Some(record.header.net_wpm),
+        Component::Accuracy => Some(record.header.accuracy * 100.0),
+        _ => None,
+    };
+    crate::analysis::grades::language_bench_records(records, language)
+        .into_iter()
+        .filter_map(|record| {
+            let date = DateTime::parse_from_rfc3339(&record.header.started_at).ok()?.date_naive();
+            Some((date, value(record).filter(|value| value.is_finite())?))
+        })
+        .collect()
+}
+
+/// One day's prescription step of the history band (§8.4).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PrescriptionDay {
+    pub date: NaiveDate,
+    pub role: MenuRole,
+    pub prescription_id: String,
+    pub level: Option<u8>,
+}
+
+/// Prescription steps played in `language` (layout `layout`), oldest first,
+/// from `menu_steps` and the run plans.
+pub fn prescription_history(path: &Path, layout: &str, language: &str) -> AppResult<Vec<PrescriptionDay>> {
+    let runs = db::load_all_menu_runs(path)?
+        .into_iter()
+        .filter(|run| run.layout == layout)
+        .filter_map(|run| Some((run.id, serde_json::from_str::<super::DailyMenu>(&run.plan_json).ok()?)))
+        .collect::<BTreeMap<_, _>>();
+    let mut days = Vec::new();
+    for row in db::load_menu_step_history(path)? {
+        let Some(plan) = runs.get(&row.run_id) else { continue };
+        let Some(step) = row.step.idx.checked_sub(1).and_then(|index| plan.steps.get(index)) else {
+            continue;
+        };
+        if !matches!(step.role, MenuRole::PrimaryA | MenuRole::PrimaryB) || super::language_code(step.language) != language {
+            continue;
+        }
+        days.push(PrescriptionDay {
+            date: row.date,
+            role: step.role,
+            prescription_id: step.prescription_id.clone(),
+            level: row.step.level,
+        });
+    }
+    Ok(days)
+}
+
+/// What the analysis screen's «skills» tab reads (§8.4), loaded once per
+/// reload: the stored snapshots, the bench points that can be overlaid and
+/// the prescription history per language.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SkillsTabData {
+    pub snapshots: Vec<SkillSnapshotRecord>,
+    /// (language, component) → bench points (date, raw value).
+    pub bench: BTreeMap<(String, Component), Vec<(NaiveDate, f64)>>,
+    /// language → prescription steps, oldest first.
+    pub prescriptions: BTreeMap<String, Vec<PrescriptionDay>>,
+}
+
+impl SkillsTabData {
+    pub fn languages(&self) -> Vec<String> {
+        snapshot_languages(&self.snapshots)
+    }
+}
+
+/// Load [`SkillsTabData`]. `bench_records` are the sessions to take bench
+/// points from (any non-bench session is ignored).
+pub fn load_skills_tab(path: &Path, layout: &str, bench_records: &[SessionRecord]) -> AppResult<SkillsTabData> {
+    let snapshots = db::load_skill_snapshots(path)?;
+    let mut bench = BTreeMap::new();
+    let mut prescriptions = BTreeMap::new();
+    for language in snapshot_languages(&snapshots) {
+        for component in BENCH_OVERLAY_COMPONENTS {
+            let points = bench_component_points(bench_records, &language, component);
+            if !points.is_empty() {
+                bench.insert((language.clone(), component), points);
+            }
+        }
+        prescriptions.insert(language.clone(), prescription_history(path, layout, &language)?);
+    }
+    Ok(SkillsTabData {
+        snapshots,
+        bench,
+        prescriptions,
+    })
 }

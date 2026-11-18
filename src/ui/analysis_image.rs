@@ -107,6 +107,25 @@ pub struct SparklineSpec {
     pub cells: Size,
 }
 
+/// One component chart of the «skills» tab (§8.4): each run as a faint point,
+/// the 7-run moving median as a thick line, bench sessions as diamonds, and
+/// the grade boundaries as faint bands behind them. The x axis is calendar
+/// days over `x_range`, as in the trend tab.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SkillChartSpec {
+    pub cells: Size,
+    pub x_range: TrendDateRange,
+    /// (minimum, maximum) of the y axis.
+    pub y_range: (f64, f64),
+    pub points: Vec<TrendPoint>,
+    pub medians: Vec<TrendPoint>,
+    pub bench: Vec<TrendPoint>,
+    /// Grade boundaries (raw values) inside or around `y_range`.
+    pub boundaries: Vec<f64>,
+    pub line_color: Color,
+    pub bench_color: Color,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct TransitionBar {
     pub value: f64,
@@ -363,6 +382,16 @@ enum AnalysisImageKey {
         color: [u8; 3],
         cells: Size,
     },
+    SkillChart {
+        cells: Size,
+        x_range: TrendDateRange,
+        y_range: (u64, u64),
+        points: Vec<PointKey>,
+        medians: Vec<PointKey>,
+        bench: Vec<PointKey>,
+        boundaries: Vec<u64>,
+        colors: [[u8; 3]; 2],
+    },
     TransitionBars {
         rows: Vec<(u64, u64, bool)>,
         max_error_rate: u64,
@@ -450,6 +479,16 @@ impl AnalysisImageCache {
         let key = sparkline_key(spec);
         self.cache
             .prepare(detection, key, spec.cells, |cell_pixels| render_sparkline(cell_pixels, spec))
+    }
+
+    pub fn prepare_skill_chart(&mut self, detection: &GraphicsDetection, spec: &SkillChartSpec) -> Result<(), String> {
+        self.cache.prepare(detection, skill_chart_key(spec), spec.cells, |cell_pixels| {
+            render_skill_chart(cell_pixels, spec)
+        })
+    }
+
+    pub(crate) fn skill_chart_protocol<'a>(&'a mut self, detection: &GraphicsDetection, spec: &SkillChartSpec) -> Option<&'a Protocol> {
+        self.cache.protocol(detection, &skill_chart_key(spec))
     }
 
     pub fn prepare_transition_bars(&mut self, detection: &GraphicsDetection, spec: &TransitionBarsSpec) -> Result<(), String> {
@@ -614,6 +653,28 @@ fn radar_key(font: &ResolvedBigFont, spec: &RadarChartSpec) -> AnalysisImageKey 
         color: color_rgb(spec.color, [255, 255, 255]),
         cells: spec.cells,
         missing_label: spec.missing_label.clone(),
+    }
+}
+
+fn skill_chart_key(spec: &SkillChartSpec) -> AnalysisImageKey {
+    let points = |points: &[TrendPoint]| {
+        points
+            .iter()
+            .map(|point| PointKey {
+                date: point.date,
+                value: point.value.to_bits(),
+            })
+            .collect::<Vec<_>>()
+    };
+    AnalysisImageKey::SkillChart {
+        cells: spec.cells,
+        x_range: spec.x_range,
+        y_range: (spec.y_range.0.to_bits(), spec.y_range.1.to_bits()),
+        points: points(&spec.points),
+        medians: points(&spec.medians),
+        bench: points(&spec.bench),
+        boundaries: spec.boundaries.iter().map(|value| value.to_bits()).collect(),
+        colors: [color_rgb(spec.line_color, [255, 255, 255]), color_rgb(spec.bench_color, [255, 220, 120])],
     }
 }
 
@@ -1202,6 +1263,67 @@ pub fn render_sparkline(cell_pixels: CellPixels, spec: &SparklineSpec) -> Result
         let radius = if index + 1 == points.len() { 4.5 } else { 2.4 };
         if let Some(circle) = PathBuilder::from_circle(vertex.0, vertex.1, radius) {
             fill_path(&mut pixmap, &circle, color, 255);
+        }
+    }
+    rgba_image(pixmap)
+}
+
+pub fn render_skill_chart(cell_pixels: CellPixels, spec: &SkillChartSpec) -> Result<RgbaImage, String> {
+    let width = u32::from(spec.cells.width) * u32::from(cell_pixels.width);
+    let height = u32::from(spec.cells.height) * u32::from(cell_pixels.height);
+    let mut pixmap = Pixmap::new(width.max(1), height.max(1)).ok_or_else(|| "skill chart dimensions are too large".to_owned())?;
+    let (min_y, max_y) = spec.y_range;
+    if !(min_y.is_finite() && max_y.is_finite()) || max_y <= min_y {
+        return rgba_image(pixmap);
+    }
+    let left = 2.0_f32;
+    let right = (width as f32 - 3.0).max(left);
+    let top = 2.0_f32;
+    let bottom = (height as f32 - 3.0).max(top);
+    let total_days = (spec.x_range.end - spec.x_range.start).num_days().max(1) as f64;
+    let x = |date: NaiveDate| left + ((date - spec.x_range.start).num_days() as f64 / total_days).clamp(0.0, 1.0) as f32 * (right - left);
+    let y = |value: f64| top + ((max_y - value) / (max_y - min_y)).clamp(0.0, 1.0) as f32 * (bottom - top);
+
+    // Grade bands: alternate faint fills between consecutive boundaries,
+    // with a faint line on each boundary.
+    let mut edges = spec.boundaries.iter().copied().filter(|value| value.is_finite()).collect::<Vec<_>>();
+    edges.sort_by(f64::total_cmp);
+    for (index, pair) in edges.windows(2).enumerate() {
+        let (low, high) = (pair[0].max(min_y), pair[1].min(max_y));
+        if high <= low {
+            continue;
+        }
+        if index % 2 == 0
+            && let Some(rect) = tiny_skia::Rect::from_ltrb(0.0, y(high), width as f32, y(low))
+        {
+            fill_path(&mut pixmap, &PathBuilder::from_rect(rect), GRID_COLOR, 22);
+        }
+    }
+    for edge in edges.iter().copied().filter(|edge| (min_y..=max_y).contains(edge)) {
+        stroke_line(&mut pixmap, (0.0, y(edge)), (width as f32, y(edge)), GRID_COLOR, 70, 1.0, None);
+    }
+
+    let line = color_rgb(spec.line_color, [255, 255, 255]);
+    for point in &spec.points {
+        if let Some(circle) = PathBuilder::from_circle(x(point.date), y(point.value), 2.2) {
+            fill_path(&mut pixmap, &circle, line, 95);
+        }
+    }
+    if let Some(path) = polygonal_line_path(spec.medians.iter().map(|point| (x(point.date), y(point.value)))) {
+        stroke_path(&mut pixmap, &path, line, 255, 3.2);
+    }
+    let bench = color_rgb(spec.bench_color, [255, 220, 120]);
+    for point in &spec.bench {
+        let (cx, cy) = (x(point.date), y(point.value));
+        let size = 4.5;
+        let mut diamond = PathBuilder::new();
+        diamond.move_to(cx, cy - size);
+        diamond.line_to(cx + size, cy);
+        diamond.line_to(cx, cy + size);
+        diamond.line_to(cx - size, cy);
+        diamond.close();
+        if let Some(path) = diamond.finish() {
+            fill_path(&mut pixmap, &path, bench, 255);
         }
     }
     rgba_image(pixmap)

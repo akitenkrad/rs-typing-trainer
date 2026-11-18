@@ -47,7 +47,8 @@ pub fn render(frame: &mut Frame, app: &App) {
         2 => render_keyboard(frame, app, chunks[1]),
         3 => render_transitions(frame, app, &theme, chunks[1]),
         4 => render_fingers(frame, app, chunks[1]),
-        _ => render_bench(frame, app, chunks[1]),
+        5 => render_bench(frame, app, chunks[1]),
+        _ => render_skills(frame, app, &theme, chunks[1]),
     }
     let period = match app.analysis_period {
         AnalysisPeriod::All => Msg::PeriodAll.text(lang),
@@ -65,7 +66,16 @@ pub fn render(frame: &mut Frame, app: &App) {
         Msg::AnalysisHintMode.text(lang),
         Msg::AnalysisHintBack.text(lang)
     );
-    frame.render_widget(Paragraph::new(hint).alignment(Alignment::Center), chunks[2]);
+    let mut hint_lines = vec![Line::from(hint)];
+    if app.analysis_tab == crate::app::ANALYSIS_SKILLS_TAB
+        && let Some(language) = skills_language(app)
+    {
+        hint_lines.push(Line::from(match lang {
+            Lang::En => format!("[L] language: {}", language_label(&language, lang)),
+            Lang::Ja => format!("[L] 言語: {}", language_label(&language, lang)),
+        }));
+    }
+    frame.render_widget(Paragraph::new(hint_lines).alignment(Alignment::Center), chunks[2]);
 }
 
 fn render_tabs(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
@@ -80,6 +90,10 @@ fn render_tabs(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         Msg::AnalysisTransitions.text(lang),
         Msg::AnalysisFingersHands.text(lang),
         Msg::AnalysisBench.text(lang),
+        match lang {
+            Lang::En => "Skills",
+            Lang::Ja => "スキル",
+        },
     ];
     let spans = labels
         .into_iter()
@@ -1662,4 +1676,422 @@ fn median(values: &[f64]) -> f64 {
     let mut values = values.to_vec();
     values.sort_by(f64::total_cmp);
     values[values.len() / 2]
+}
+
+// ---------------------------------------------------------------------------
+// «Skills» tab (design §8.4)
+// ---------------------------------------------------------------------------
+
+/// The language whose series the skills tab shows: the `L` selection, else
+/// the display language, else the first language with records.
+pub fn skills_language(app: &App) -> Option<String> {
+    let languages = app.analysis_skills.languages();
+    if let Some(selected) = app.analysis_skills_lang.as_ref().filter(|selected| languages.contains(selected)) {
+        return Some(selected.clone());
+    }
+    let display = match app.config.general.lang {
+        Lang::En => "en",
+        Lang::Ja => "ja",
+    };
+    languages.iter().find(|language| *language == display).or(languages.first()).cloned()
+}
+
+struct SkillRow {
+    component: crate::analysis::grades::Component,
+    points: Vec<TrendPoint>,
+    medians: Vec<TrendPoint>,
+    bench: Vec<TrendPoint>,
+    boundaries: Vec<f64>,
+    latest: Option<crate::practice::menu::skills::SeriesPointFigures>,
+}
+
+impl SkillRow {
+    fn y_range(&self) -> Option<(f64, f64)> {
+        let values = self
+            .points
+            .iter()
+            .chain(&self.medians)
+            .chain(&self.bench)
+            .map(|point| point.value)
+            .filter(|value| value.is_finite())
+            .collect::<Vec<_>>();
+        let min = values.iter().copied().fold(f64::INFINITY, f64::min);
+        let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        if !min.is_finite() || !max.is_finite() {
+            return None;
+        }
+        let padding = if (max - min).abs() < f64::EPSILON {
+            (max.abs() * 0.05).max(0.01)
+        } else {
+            (max - min) * 0.1
+        };
+        Some((min - padding, max + padding))
+    }
+}
+
+fn skill_rows(app: &App, language: &str, since: Option<chrono::NaiveDate>) -> Vec<SkillRow> {
+    use crate::practice::menu::skills::{component_direction_and_unit, series_figures};
+
+    let in_period = |date: chrono::NaiveDate| since.is_none_or(|since| date >= since);
+    crate::analysis::grades::Component::all()
+        .iter()
+        .copied()
+        .map(|component| {
+            let (direction, _) = component_direction_and_unit(language, component);
+            // Figures over the whole series, then cut to the period, so the
+            // moving median at the start of a period still uses earlier runs.
+            let figures = series_figures(&app.analysis_skills.snapshots, language, component, direction)
+                .into_iter()
+                .filter(|point| in_period(point.date))
+                .collect::<Vec<_>>();
+            SkillRow {
+                component,
+                points: figures
+                    .iter()
+                    .map(|point| TrendPoint {
+                        date: point.date,
+                        value: point.raw_value,
+                    })
+                    .collect(),
+                medians: figures
+                    .iter()
+                    .filter_map(|point| {
+                        Some(TrendPoint {
+                            date: point.date,
+                            value: point.moving_median?,
+                        })
+                    })
+                    .collect(),
+                bench: app
+                    .analysis_skills
+                    .bench
+                    .get(&(language.to_owned(), component))
+                    .into_iter()
+                    .flatten()
+                    .filter(|(date, _)| in_period(*date))
+                    .map(|(date, value)| TrendPoint { date: *date, value: *value })
+                    .collect(),
+                boundaries: crate::analysis::grades::component_score_points(language, component)
+                    .map(|(_, points)| points.to_vec())
+                    .unwrap_or_default(),
+                latest: figures.last().cloned(),
+            }
+        })
+        .collect()
+}
+
+fn render_skills(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    let lang = app.config.general.lang;
+    let Some(language) = skills_language(app) else {
+        let message = match lang {
+            Lang::En => "No skill records yet. Shown after finishing the check step of a practice menu.",
+            Lang::Ja => "スキルの記録はまだありません．メニューの確認段を終えると表示します．",
+        };
+        frame.render_widget(
+            Paragraph::new(message)
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(theme.muted)),
+            Rect::new(area.x, area.y + area.height / 2, area.width, 1.min(area.height)),
+        );
+        return;
+    };
+    let today = app.analysis_day();
+    let since = match app.analysis_period {
+        AnalysisPeriod::All => None,
+        AnalysisPeriod::Days30 => Some(today - ChronoDuration::days(29)),
+        AnalysisPeriod::Days7 => Some(today - ChronoDuration::days(6)),
+    };
+    let rows = skill_rows(app, &language, since);
+    let history = app
+        .analysis_skills
+        .prescriptions
+        .get(&language)
+        .into_iter()
+        .flatten()
+        .filter(|day| since.is_none_or(|since| day.date >= since))
+        .cloned()
+        .collect::<Vec<_>>();
+    let dates = rows
+        .iter()
+        .flat_map(|row| row.points.iter().chain(&row.bench).map(|point| point.date))
+        .chain(history.iter().map(|day| day.date))
+        .collect::<BTreeSet<_>>();
+    let image_enabled = app.graphics.mode != GraphicsMode::Off && app.graphics.cell_pixels.is_some();
+    let bench_mark = if image_enabled { "◆" } else { "█" };
+    let header = match lang {
+        Lang::En => format!(
+            "{} — · each run (faint)  ━ 7-run moving median  {bench_mark} bench (speed, accuracy)  bands: grades F–S",
+            language_label(&language, lang)
+        ),
+        Lang::Ja => format!(
+            "{} — ・各回（薄）  ━ 7 回移動中央値  {bench_mark} ベンチ（速さ・正確さ）  帯: 段 F〜S",
+            language_label(&language, lang)
+        ),
+    };
+    let (Some(first), Some(last)) = (dates.first().copied(), dates.last().copied()) else {
+        frame.render_widget(Paragraph::new(header), Rect::new(area.x, area.y, area.width, 1.min(area.height)));
+        if area.height > 1 {
+            frame.render_widget(
+                Paragraph::new(Msg::NoData.text(lang)).style(Style::default().fg(theme.muted)),
+                Rect::new(area.x, area.y + 1, area.width, 1),
+            );
+        }
+        return;
+    };
+    let start = since.map_or(first, |since| since.min(first));
+    let end = if last > start { last } else { start + ChronoDuration::days(1) };
+    let x_range = TrendDateRange { start, end };
+
+    let label_width = 20_u16.min(area.width / 3);
+    let plot_x = area.x + label_width;
+    let plot_width = area.width.saturating_sub(label_width);
+    frame.render_widget(
+        Paragraph::new(truncate_text(&header, usize::from(area.width))),
+        Rect::new(area.x, area.y, area.width, 1.min(area.height)),
+    );
+    let mut y = area.y + 1;
+    let bottom = area.y + area.height;
+    if y + 2 <= bottom {
+        render_prescription_band(frame, app, &history, x_range, area, label_width, y);
+        y += 2;
+    }
+    let row_height = (bottom.saturating_sub(y) / rows.len() as u16).max(1);
+    for row in &rows {
+        if y >= bottom {
+            break;
+        }
+        let height = row_height.min(bottom - y);
+        render_skill_label(frame, row, &language, lang, theme, Rect::new(area.x, y, label_width, height));
+        let plot_area = Rect::new(plot_x, y, plot_width, height);
+        if let Some(y_range) = row.y_range()
+            && plot_area.width > 2
+        {
+            let drawn = image_enabled && render_skill_chart_image(frame, app, row, x_range, y_range, theme, plot_area);
+            if !drawn {
+                render_skill_chart_text(frame, row, x_range, y_range, theme, plot_area);
+            }
+        }
+        y += height;
+    }
+}
+
+fn truncate_text(value: &str, width: usize) -> String {
+    if value.width() <= width {
+        return value.to_owned();
+    }
+    let mut output = String::new();
+    let mut used = 0;
+    for character in value.chars() {
+        let character_width = UnicodeWidthChar::width(character).unwrap_or(0);
+        if used + character_width + 1 > width {
+            break;
+        }
+        output.push(character);
+        used += character_width;
+    }
+    output.push('…');
+    output
+}
+
+fn render_skill_label(frame: &mut Frame, row: &SkillRow, language: &str, lang: Lang, theme: &Theme, area: Rect) {
+    let name = component_label(row.component, lang);
+    let width = usize::from(area.width);
+    let Some(latest) = &row.latest else {
+        let lines = vec![
+            Line::from(Span::styled(name, Style::default().add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled(Msg::NoData.text(lang), Style::default().fg(theme.muted))),
+        ];
+        frame.render_widget(Paragraph::new(lines), area);
+        return;
+    };
+    let grade = crate::analysis::grades::grade_component(language, row.component, latest.raw_value).ok();
+    let format = |value: f64| crate::practice::menu::skills::format_value(row.component, value, false);
+    let mut spans = vec![Span::styled(format!("{name} "), Style::default().add_modifier(Modifier::BOLD))];
+    if let Some(grade) = &grade {
+        spans.push(Span::styled(
+            format!("{} ", grade.grade.as_str()),
+            Style::default().fg(grade_color(grade.grade, theme)).add_modifier(Modifier::BOLD),
+        ));
+    }
+    spans.push(Span::raw(format(latest.raw_value)));
+    let median = latest.moving_median.map_or_else(|| "—".to_owned(), format);
+    let mut second = match lang {
+        Lang::En => format!("med {median}"),
+        Lang::Ja => format!("中央値 {median}"),
+    };
+    if let Some((next, gap)) = grade.as_ref().and_then(|grade| grade.next_grade.zip(grade.gap)) {
+        second.push_str(&format!(
+            " →{} {}",
+            next.as_str(),
+            crate::practice::menu::skills::format_value(row.component, gap, true)
+        ));
+    }
+    let lines = vec![
+        Line::from(spans),
+        Line::from(Span::styled(truncate_text(&second, width), Style::default().fg(theme.muted))),
+    ];
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
+fn render_skill_chart_image(
+    frame: &mut Frame,
+    app: &App,
+    row: &SkillRow,
+    x_range: TrendDateRange,
+    y_range: (f64, f64),
+    theme: &Theme,
+    area: Rect,
+) -> bool {
+    let spec = crate::ui::analysis_image::SkillChartSpec {
+        cells: area.as_size(),
+        x_range,
+        y_range,
+        points: row.points.clone(),
+        medians: row.medians.clone(),
+        bench: row.bench.clone(),
+        boundaries: row.boundaries.clone(),
+        line_color: theme.accent,
+        bench_color: theme.warning,
+    };
+    let mut images = app.analysis_images.borrow_mut();
+    if images.prepare_skill_chart(&app.graphics, &spec).is_err() {
+        return false;
+    }
+    let Some(protocol) = images.skill_chart_protocol(&app.graphics, &spec) else {
+        return false;
+    };
+    frame.render_widget(Image::new(protocol), area);
+    true
+}
+
+fn render_skill_chart_text(frame: &mut Frame, row: &SkillRow, x_range: TrendDateRange, y_range: (f64, f64), theme: &Theme, area: Rect) {
+    let days = (x_range.end - x_range.start).num_days().max(1) as f64;
+    let x = |date: chrono::NaiveDate| (date - x_range.start).num_days() as f64;
+    let boundaries = row
+        .boundaries
+        .iter()
+        .copied()
+        .filter(|value| (y_range.0..=y_range.1).contains(value))
+        .map(|value| vec![(0.0, value), (days, value)])
+        .collect::<Vec<_>>();
+    let points = row.points.iter().map(|point| (x(point.date), point.value)).collect::<Vec<_>>();
+    let medians = row.medians.iter().map(|point| (x(point.date), point.value)).collect::<Vec<_>>();
+    let bench = row.bench.iter().map(|point| (x(point.date), point.value)).collect::<Vec<_>>();
+    let mut datasets = boundaries
+        .iter()
+        .map(|line| {
+            Dataset::default()
+                .marker(symbols::Marker::Braille)
+                .graph_type(GraphType::Line)
+                .style(Style::default().fg(theme.muted))
+                .data(line)
+        })
+        .collect::<Vec<_>>();
+    datasets.push(
+        Dataset::default()
+            .marker(symbols::Marker::Dot)
+            .graph_type(GraphType::Scatter)
+            .style(Style::default().fg(theme.muted))
+            .data(&points),
+    );
+    datasets.push(
+        Dataset::default()
+            .marker(symbols::Marker::Braille)
+            .graph_type(GraphType::Line)
+            .style(Style::default().fg(theme.accent).add_modifier(Modifier::BOLD))
+            .data(&medians),
+    );
+    datasets.push(
+        Dataset::default()
+            .marker(symbols::Marker::Block)
+            .graph_type(GraphType::Scatter)
+            .style(Style::default().fg(theme.warning))
+            .data(&bench),
+    );
+    let chart = Chart::new(datasets)
+        .x_axis(Axis::default().bounds([0.0, days]))
+        .y_axis(Axis::default().bounds([y_range.0, y_range.1]));
+    frame.render_widget(chart, area);
+}
+
+/// «Prescription history» band (§8.4): one cell per column of the plot.
+/// The upper half is primary A, the lower half primary B; a menu day covers
+/// the days until the next menu day. Reference only (no control, §5).
+fn render_prescription_band(
+    frame: &mut Frame,
+    app: &App,
+    history: &[crate::practice::menu::skills::PrescriptionDay],
+    x_range: TrendDateRange,
+    area: Rect,
+    label_width: u16,
+    y: u16,
+) {
+    use crate::practice::menu::MenuRole;
+
+    let lang = app.config.general.lang;
+    let catalog = crate::practice::menu::bundled_catalog().ok();
+    let mut order = Vec::<String>::new();
+    for day in history {
+        if !order.contains(&day.prescription_id) {
+            order.push(day.prescription_id.clone());
+        }
+    }
+    let color = |id: &str| SERIES_COLORS[order.iter().position(|candidate| candidate == id).unwrap_or(0) % SERIES_COLORS.len()];
+    let menu_days = history.iter().map(|day| day.date).collect::<BTreeSet<_>>();
+    let plot_width = area.width.saturating_sub(label_width);
+    let days = (x_range.end - x_range.start).num_days().max(1) as f64;
+    let mut cells = Vec::new();
+    for column in 0..plot_width {
+        let fraction = if plot_width <= 1 {
+            0.0
+        } else {
+            f64::from(column) / f64::from(plot_width - 1)
+        };
+        let date = x_range.start + ChronoDuration::days((fraction * days).round() as i64);
+        let menu_day = menu_days
+            .range(..=date)
+            .next_back()
+            .copied()
+            .filter(|menu_day| *menu_day == date || menu_days.range(date..).next().is_some());
+        let find = |role: MenuRole| menu_day.and_then(|menu_day| history.iter().find(|day| day.date == menu_day && day.role == role));
+        let (a, b) = (find(MenuRole::PrimaryA), find(MenuRole::PrimaryB));
+        cells.push(match (a, b) {
+            (Some(a), Some(b)) => Span::styled("▀", Style::default().fg(color(&a.prescription_id)).bg(color(&b.prescription_id))),
+            (Some(a), None) => Span::styled("▀", Style::default().fg(color(&a.prescription_id))),
+            (None, Some(b)) => Span::styled("▄", Style::default().fg(color(&b.prescription_id))),
+            (None, None) => Span::raw(" "),
+        });
+    }
+    let label = match lang {
+        Lang::En => "Prescriptions (ref.)",
+        Lang::Ja => "処方の履歴（参考）",
+    };
+    frame.render_widget(
+        Paragraph::new(truncate_text(label, usize::from(label_width))),
+        Rect::new(area.x, y, label_width, 1),
+    );
+    frame.render_widget(Paragraph::new(Line::from(cells)), Rect::new(area.x + label_width, y, plot_width, 1));
+    let mut legend = vec![Span::raw(match lang {
+        Lang::En => "upper A / lower B, no control: ",
+        Lang::Ja => "上=A 下=B・対照なし: ",
+    })];
+    if order.is_empty() {
+        legend.push(Span::raw(Msg::NoData.text(lang)));
+    }
+    for id in &order {
+        let title = catalog
+            .and_then(|catalog| catalog.prescription(id))
+            .map_or_else(|| id.clone(), |prescription| prescription.title.text(lang).to_owned());
+        let levels = history
+            .iter()
+            .filter(|day| &day.prescription_id == id)
+            .filter_map(|day| day.level)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .map(|level| char::from_u32(0x2460 + u32::from(level.clamp(1, 20)) - 1).unwrap_or('?'))
+            .collect::<String>();
+        legend.push(Span::styled("■", Style::default().fg(color(id))));
+        legend.push(Span::raw(format!("{title} {levels}  ")));
+    }
+    frame.render_widget(Paragraph::new(Line::from(legend)), Rect::new(area.x, y + 1, area.width, 1));
 }

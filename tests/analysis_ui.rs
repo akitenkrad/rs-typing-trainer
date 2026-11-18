@@ -278,12 +278,15 @@ fn every_analysis_tab_renders_and_bench_shows_previous_delta() {
     app.handle_key(key(KeyCode::Char('a')));
     assert_eq!(app.screen, Screen::Analysis);
 
-    for expected in ["コーチ", "推移", "キーボード", "遷移", "指・手", "ベンチ"] {
+    // M6 adds the «スキル» tab (§8.4) after «ベンチ»: seven tabs in all.
+    for expected in ["コーチ", "推移", "キーボード", "遷移", "指・手", "ベンチ", "スキル"] {
         let output = render(&app);
         let compact = output.chars().filter(|character| !character.is_whitespace()).collect::<String>();
         assert!(compact.contains(expected), "tab {expected}: {output}");
         app.handle_key(key(KeyCode::Tab));
     }
+    // Back at the coach tab after a full cycle; five more presses reach «ベンチ».
+    assert_eq!(app.analysis_tab, 0);
     for _ in 0..5 {
         app.handle_key(key(KeyCode::Tab));
     }
@@ -406,7 +409,7 @@ fn japanese_analysis_tabs_do_not_contain_english_ui_phrases() {
         "same-finger",
         "alternating hands",
     ];
-    for tab in 0..6 {
+    for tab in 0..7 {
         let output = render(&app);
         for phrase in forbidden {
             assert!(!output.contains(phrase), "tab {tab} contains {phrase:?}: {output}");
