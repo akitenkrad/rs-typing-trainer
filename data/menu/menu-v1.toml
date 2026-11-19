@@ -91,21 +91,21 @@ mode = "adaptive"
 minutes = 5
 settings = { "adaptive.drill_ratio" = 0.30 }
 focus = { en = "Prepare the next finger before typing; move quickly when one finger repeats.", ja = "打つ前に次の指を準備する．同じ指が続くときは素早く移す" }
-advance = { metric = "prescription-r3", rule = "r3-effective", sessions = 1, source = "step", note = { en = "R3 judges the prescription effective.", ja = "既存の R3 で «効いた» と判定される" } }
+advance = { metric = "prescription-r3", rule = "r3-effective", sessions = 1, source = "step", note = { en = "The prescription check (against control transitions) finds it effective.", ja = "処方の効果判定（対照の遷移と比べる）で «効いた» と出る" } }
 
 [[prescription.level]]
 mode = "adaptive"
 minutes = 5
 settings = { "adaptive.drill_ratio" = 0.20 }
 focus = { en = "Prepare the next finger before typing; move quickly when one finger repeats.", ja = "打つ前に次の指を準備する．同じ指が続くときは素早く移す" }
-advance = { metric = "prescription-r3", rule = "r3-effective", sessions = 1, source = "step", note = { en = "R3 judges the prescription effective.", ja = "既存の R3 で «効いた» と判定される" } }
+advance = { metric = "prescription-r3", rule = "r3-effective", sessions = 1, source = "step", note = { en = "The prescription check (against control transitions) finds it effective.", ja = "処方の効果判定（対照の遷移と比べる）で «効いた» と出る" } }
 
 [[prescription.level]]
 mode = "words"
 minutes = 4
 settings = { "mode.key_filter" = "include" }
 focus = { en = "Use the target transition inside real words.", ja = "対象遷移を実在語の中でも滑らかに打つ" }
-advance = { metric = "prescription-r3", rule = "r3-effective", sessions = 1, source = "step", note = { en = "R3 judges the prescription effective.", ja = "既存の R3 で «効いた» と判定される" } }
+advance = { metric = "prescription-r3", rule = "r3-effective", sessions = 1, source = "step", note = { en = "The prescription check (against control transitions) finds it effective.", ja = "処方の効果判定（対照の遷移と比べる）で «効いた» と出る" } }
 
 [[prescription]]
 id = "transition.ngram"
@@ -120,7 +120,7 @@ mode = "ngram"
 minutes = 4
 settings = { "mode.ngram.source" = "pairs" }
 focus = { en = "Learn the isolated transition shape, then use it immediately in words.", ja = "遷移だけを切り出して形を覚え，すぐ単語に戻す" }
-advance = { metric = "prescription-r3", rule = "r3-effective", sessions = 1, source = "step", note = { en = "R3 judges the prescription effective.", ja = "既存の R3 で «効いた» と判定される" } }
+advance = { metric = "prescription-r3", rule = "r3-effective", sessions = 1, source = "step", note = { en = "The prescription check (against control transitions) finds it effective.", ja = "処方の効果判定（対照の遷移と比べる）で «効いた» と出る" } }
 
 [[prescription]]
 id = "preview.wide"

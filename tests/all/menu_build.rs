@@ -330,7 +330,7 @@ fn stats_menu_outputs_text_and_machine_readable_json_using_only_a_temporary_db()
     assert!(separated.status.success(), "{}", String::from_utf8_lossy(&separated.stderr));
     let separated = String::from_utf8(separated.stdout).unwrap();
     assert!(separated.contains("Today's practice menu"), "{separated}");
-    assert!(separated.contains("Language: JA"), "{separated}");
+    assert!(separated.contains("Language: Japanese"), "{separated}");
     assert!(!separated.contains("今日の練習メニュー"), "{separated}");
 }
 

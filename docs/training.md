@@ -221,7 +221,7 @@ A graduation condition is judged from one of two sources:
 
 - **The step itself** (`accuracy.gate`, `speed.pacer`, `endurance.split`): judged when the step finishes.
 - **The same run's check step** (all others except transitions): judged once per run, when both the prescription step and a check step in the same language have been played, in either order. “At or below your median” compares the check value with the median of your earlier check steps in that language. With no earlier check, or when today's check is in the other language, the condition is not judged in that run.
-- **Transitions** (`transition.*`): graduate when the existing R3 verdict of the latest adaptive prescription is “effective”. A verdict counts only once.
+- **Transitions** (`transition.*`): graduate when the prescription check (R3, against control transitions) of the latest adaptive prescription says “effective”. A verdict counts only once.
 
 A session that meets the condition advances the count; one that does not resets it; one that cannot be determined (missing data) leaves it unchanged. Missing data is never treated as zero. Reaching the required count moves to the next level. Graduating the last level puts the prescription into **maintenance**: it is checked once more after 14 days at a check step, and if that check's component score is below the median of the earlier checks, practice resumes from its last level rather than from level 1.
 
@@ -229,7 +229,7 @@ A session that meets the condition advances the count; one that does not resets 
 
 | Prescription | Judgment | Swap |
 |---|---|---|
-| Transitions (`transition.*`) | The existing R3 verdict with matched controls | “Not effective” switches to the alternate. Insufficient data does not switch. |
+| Transitions (`transition.*`) | The prescription check (R3, with matched controls) | “Not effective” switches to the alternate. Insufficient data does not switch. |
 | Others | **Reference judgment** on the component's 0–8 score from check steps: the median of the last three checks before the prescription started against the median of the last three checks since then. +0.3 or more is “improved”. When at least five checks exist since the start and the last five all stay within ±0.1 of the baseline median, the result is “no change”. | “No change” switches to the alternate. When the alternate (or a prescription that is its own alternate) is also “no change”, it rests for 14 days, during which its component is skipped. |
 
 The reference judgment has **no control**. Anything else that changed during the same period — other practice, familiarity with the prompts, the day's condition — is mixed into it, so the screens always write it as `improved (reference only; no control)`. It is a prompt to keep or change a prescription, not evidence that the prescription works. Practice WPM is still not evidence of improvement; judge progress with benchmarks. The thresholds (+0.3, ±0.1, five checks, 14 days) are initial values.
@@ -252,8 +252,8 @@ Evidence strength uses five levels. None is “strong”: no typing-training int
 |---|---|---|---|---|---|
 | `accuracy.gate` | Accuracy gate | Accuracy: give up speed and make every keystroke certain | ① `words`, `stop`, gate 97%, no pacer → ② gate 96% → ③ `sentence`, gate 96% | Pass the accuracy gate three sessions in a row (step) | `medium` |
 | `accuracy.anticipation` | Control anticipation errors | Accuracy when anticipation is the most common error: confirm the next character before pressing | ① `words`, pacer ratio 0.90 → ② 0.95 | Anticipation share of first errors at or below your median, three times in a row (check) | `weak` |
-| `transition.adaptive` | Adaptive transitions | Transitions: prepare the next finger before typing | ① `adaptive`, drill share 30% → ② 20% → ③ `words` with `include` | R3 judges the prescription effective | `medium` |
-| `transition.ngram` | N-gram transition drill | Transitions (alternate): isolate a transition, then return to words | ① `ngram`, `pairs` | R3 judges the prescription effective | `weak` |
+| `transition.adaptive` | Adaptive transitions | Transitions: prepare the next finger before typing | ① `adaptive`, drill share 30% → ② 20% → ③ `words` with `include` | The prescription check (R3, against control transitions) finds it effective | `medium` |
+| `transition.ngram` | N-gram transition drill | Transitions (alternate): isolate a transition, then return to words | ① `ngram`, `pairs` | The prescription check (R3, against control transitions) finds it effective | `weak` |
 | `preview.wide` | Widen preview | Preview: look at the next word, not the character being typed | ① `sentence`, preview 3, typed text hidden → ② preview 2 → ③ preview 1, typed text shown | Word-onset ratio at or below your median, three times in a row (check) | `phenomenon` |
 | `preview.phrase` | Read through phrases | Preview (alternate): start reading the next phrase at the boundary | ① `phrase`, long course, preview 2 → ② mixed course, preview 1 | Same as `preview.wide` | `weak` |
 | `rhythm.metronome` | Even rhythm | Rhythm: keep intervals even rather than faster | ① `rhythm` → ② `rhythm` → ③ `words` without the beat | Within-word IKI CV at or below your median, three times in a row (check) | `hypothesis` |

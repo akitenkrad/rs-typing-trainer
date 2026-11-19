@@ -2519,10 +2519,10 @@ fn render_text(menu: &DailyMenu, lang: Lang) -> String {
 
 fn language_row_label(practice: Lang, display: Lang) -> &'static str {
     match (practice, display) {
-        (Lang::En, Lang::En) => "EN",
-        (Lang::Ja, Lang::En) => "JA",
-        (Lang::En, Lang::Ja) => "英",
-        (Lang::Ja, Lang::Ja) => "日",
+        (Lang::En, Lang::En) => "English",
+        (Lang::Ja, Lang::En) => "Japanese",
+        (Lang::En, Lang::Ja) => "英語",
+        (Lang::Ja, Lang::Ja) => "日本語",
     }
 }
 
