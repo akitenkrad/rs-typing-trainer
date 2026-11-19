@@ -1820,7 +1820,7 @@ fn render_skills(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let bench_mark = if image_enabled { "◆" } else { "█" };
     let header = match lang {
         Lang::En => format!(
-            "{} — · each run (faint)  ━ 7-run moving median  {bench_mark} bench (speed, accuracy)  bands: grades F–S",
+            "{} — · run (faint)  ━ 7-run median  {bench_mark} bench (speed, accuracy)  bands F–S",
             language_label(&language, lang)
         ),
         Lang::Ja => format!(

@@ -300,6 +300,14 @@ fn skills_tab_renders_with_and_without_images_and_fits_80_by_24() {
                         Lang::En => "Overlap",
                     };
                     assert!(compact(&output).contains(label), "{lang:?} {graphics:?}: {output}");
+                    let legend_end = match lang {
+                        Lang::Ja => "帯:段F〜S",
+                        Lang::En => "bandsF–S",
+                    };
+                    assert!(
+                        compact(&output).contains(legend_end),
+                        "{lang:?} {graphics:?}: legend is cut at 80 columns:\n{output}"
+                    );
                     let last = output.lines().last().unwrap();
                     assert!(last.starts_with('└'), "{output}");
                 }

@@ -183,7 +183,7 @@ The text version of the Skills tab at 80×24 (sample data; with terminal images 
 ┌ ANALYSIS ────────────────────────────────────────────────────────────────────┐
 │       Coach  Trend  Keyboard  Transitions  Fingers/Hands  Bench  Skills      │
 │                                                                              │
-│English — · each run (faint)  ━ 7-run moving median  █ bench (speed, accuracy…│
+│English — · run (faint)  ━ 7-run median  █ bench (speed, accuracy)  bands F–S │
 │Prescriptions (ref.)▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀│
 │upper A / lower B, no control: ■Widen preview ①  ■Accuracy gate ①             │
 │Speed D 58.0        ⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒•⠒⠒⠒⠒⠒⠒•⠒⠒⠒⠒⠒⠒█│
@@ -206,7 +206,7 @@ The text version of the Skills tab at 80×24 (sample data; with terminal images 
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-The analysis screen's last tab, Skills, draws the series of one language. Its header reads `English — · each run (faint)  ━ 7-run moving median  ◆ bench (speed, accuracy)  bands: grades F–S`.
+The analysis screen's last tab, Skills, draws the series of one language. Its header reads `English — · run (faint)  ━ 7-run median  ◆ bench (speed, accuracy)  bands F–S`.
 
 - Each component has a label column — name, grade and latest value, then `med` with the moving median and the gap to the next grade (for example `→B +0.12`) — and a chart. Each run is a faint point and the 7-run moving median is a bold line. The F–S grade boundaries are drawn behind them as faint bands, so the distance from the line to the next band shows how close the next grade is. The horizontal axis is calendar time, as in the Trend tab.
 - Benchmark results are overlaid only on speed (net WPM) and accuracy, the two components that the benchmark trend records per session (part A for English, part C for Japanese). They use a different mark — `◆` with terminal images, `█` in the text chart — so official and practice values stay distinguishable. The other five components have no benchmark points.
