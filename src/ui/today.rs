@@ -103,6 +103,9 @@ pub struct TodayRun {
     /// `menu_runs.lang` (the practice languages of the settings, e.g. «en,ja»).
     pub languages: String,
     pub steps: RunStepsSummary,
+    /// The short name of each planned step (as in the progress band,
+    /// [`crate::practice::menu::step_short_label`]) and whether it is done.
+    pub chain: Vec<(String, bool)>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -115,8 +118,72 @@ pub struct TodayData {
     pub sessions: Vec<TodaySession>,
     /// `None` when nothing was recorded today.
     pub totals: Option<DayTotals>,
-    /// The last earlier day with any session.
-    pub previous: Option<DayTotals>,
+    /// The 7-day average the totals are compared with: the 7 calendar days
+    /// before today (today − 7 … yesterday), over the days with records.
+    pub baseline: Option<Baseline>,
+}
+
+/// Per-language part of [`Baseline`]: the average over the days the language
+/// was practised of that day's median net WPM and median accuracy.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BaselineLanguage {
+    pub language: Lang,
+    pub days: usize,
+    pub median_wpm: f64,
+    pub median_accuracy: f64,
+}
+
+/// The average day of the 7 calendar days before today, over the days with
+/// records (days without practice are not counted as zero).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Baseline {
+    pub from: NaiveDate,
+    pub to: NaiveDate,
+    /// Days with records in the window.
+    pub days: usize,
+    pub duration_ms: f64,
+    pub sessions: f64,
+    pub keystrokes: f64,
+    pub languages: Vec<BaselineLanguage>,
+}
+
+impl Baseline {
+    /// Days in the window: today − 7 … today − 1.
+    pub const WINDOW_DAYS: i64 = 7;
+
+    pub fn language(&self, language: Lang) -> Option<&BaselineLanguage> {
+        self.languages.iter().find(|row| row.language == language)
+    }
+
+    /// The average of `daily` (one entry per day with records); `None` when empty.
+    pub fn from_days(from: NaiveDate, to: NaiveDate, daily: &[DayTotals]) -> Option<Self> {
+        if daily.is_empty() {
+            return None;
+        }
+        let count = daily.len() as f64;
+        let average = |values: Vec<f64>| values.iter().sum::<f64>() / values.len().max(1) as f64;
+        let languages = [Lang::En, Lang::Ja]
+            .into_iter()
+            .filter_map(|language| {
+                let rows = daily.iter().filter_map(|day| day.language(language)).collect::<Vec<_>>();
+                (!rows.is_empty()).then(|| BaselineLanguage {
+                    language,
+                    days: rows.len(),
+                    median_wpm: average(rows.iter().map(|row| row.median_wpm).collect()),
+                    median_accuracy: average(rows.iter().map(|row| row.median_accuracy).collect()),
+                })
+            })
+            .collect();
+        Some(Self {
+            from,
+            to,
+            days: daily.len(),
+            duration_ms: daily.iter().map(|day| day.duration_ms as f64).sum::<f64>() / count,
+            sessions: daily.iter().map(|day| day.sessions as f64).sum::<f64>() / count,
+            keystrokes: daily.iter().map(|day| day.keystrokes as f64).sum::<f64>() / count,
+            languages,
+        })
+    }
 }
 
 impl TodayData {
@@ -126,7 +193,7 @@ impl TodayData {
             runs: Vec::new(),
             sessions: Vec::new(),
             totals: None,
-            previous: None,
+            baseline: None,
         }
     }
 
@@ -138,11 +205,10 @@ impl TodayData {
     }
 }
 
-/// Read today's runs and sessions and the last earlier practice day.
+/// Read today's runs and sessions and the 7-day average before today.
 pub fn build_today(db_path: &std::path::Path, today: NaiveDate, display: Lang) -> AppResult<TodayData> {
     let days = db::session_local_days(db_path)?;
     let today_ids = days.iter().filter(|(_, day)| *day == today).map(|(id, _)| *id).collect::<Vec<_>>();
-    let previous_day = days.iter().map(|(_, day)| *day).filter(|day| *day < today).max();
     let step_sessions = db::menu_step_sessions(db_path)?;
     let load = |ids: &[i64]| -> AppResult<Vec<TodaySession>> {
         let mut sessions = Vec::new();
@@ -164,19 +230,38 @@ pub fn build_today(db_path: &std::path::Path, today: NaiveDate, display: Lang) -
         Ok(sessions)
     };
     let sessions = load(&today_ids)?;
-    let previous = match previous_day {
-        Some(day) => {
-            let ids = days.iter().filter(|(_, date)| *date == day).map(|(id, _)| *id).collect::<Vec<_>>();
-            day_totals(day, &load(&ids)?)
-        }
-        None => None,
-    };
+    let from = today - chrono::Duration::days(Baseline::WINDOW_DAYS);
+    let to = today - chrono::Duration::days(1);
+    let window = days
+        .iter()
+        .map(|(_, day)| *day)
+        .filter(|day| (from..=to).contains(day))
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut daily = Vec::new();
+    for day in window {
+        let ids = days.iter().filter(|(_, date)| *date == day).map(|(id, _)| *id).collect::<Vec<_>>();
+        daily.extend(day_totals(day, &load(&ids)?));
+    }
+    let baseline = Baseline::from_days(from, to, &daily);
     let mut runs = Vec::new();
     for run in db::load_menu_runs_on(db_path, today)? {
         if let Some(steps) = run_steps_summary(db_path, &run.layout, run.id, display)? {
+            let chain = serde_json::from_str::<crate::practice::menu::DailyMenu>(&run.plan_json)
+                .map(|plan| {
+                    plan.steps
+                        .iter()
+                        .enumerate()
+                        .map(|(index, step)| {
+                            let done = steps.steps.get(index).is_some_and(|step| step.done);
+                            (crate::practice::menu::step_short_label(step, display), done)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             runs.push(TodayRun {
                 languages: run.lang.clone(),
                 steps,
+                chain,
             });
         }
     }
@@ -187,7 +272,7 @@ pub fn build_today(db_path: &std::path::Path, today: NaiveDate, display: Lang) -
         runs,
         totals: day_totals(today, &sessions),
         sessions,
-        previous,
+        baseline,
     })
 }
 
@@ -256,11 +341,11 @@ pub fn day_totals(date: NaiveDate, sessions: &[TodaySession]) -> Option<DayTotal
 // Text helpers
 // ---------------------------------------------------------------------------
 
-fn minutes(duration_ms: i64) -> f64 {
+pub(crate) fn minutes(duration_ms: i64) -> f64 {
     duration_ms as f64 / 60_000.0
 }
 
-fn grouped(value: usize) -> String {
+pub(crate) fn grouped(value: usize) -> String {
     let digits = value.to_string();
     let mut output = String::new();
     for (index, character) in digits.chars().enumerate() {
@@ -277,7 +362,7 @@ fn duration_text(duration_ms: i64) -> String {
     format!("{}:{:02}", seconds / 60, seconds % 60)
 }
 
-fn language_name(language: Lang, lang: Lang) -> &'static str {
+pub(crate) fn language_name(language: Lang, lang: Lang) -> &'static str {
     match (language, lang) {
         (Lang::En, Lang::En) => "English",
         (Lang::Ja, Lang::En) => "Japanese",
@@ -334,12 +419,22 @@ fn session_mode_text(session: &TodaySession, lang: Lang) -> String {
     }
 }
 
-fn previous_label(data: &TodayData, lang: Lang) -> String {
-    match (&data.previous, lang) {
-        (Some(previous), Lang::En) => format!("vs the last practice day ({})", previous.date.format("%m/%d")),
-        (Some(previous), Lang::Ja) => format!("前に練習した日（{}）と比べる", previous.date.format("%m/%d")),
-        (None, Lang::En) => "no earlier practice day".to_owned(),
-        (None, Lang::Ja) => "前に練習した日はありません".to_owned(),
+fn baseline_label(data: &TodayData, lang: Lang) -> String {
+    match (&data.baseline, lang) {
+        (Some(baseline), Lang::En) => format!(
+            "vs the 7-day average ({}–{}, {} days)",
+            baseline.from.format("%m/%d"),
+            baseline.to.format("%m/%d"),
+            baseline.days
+        ),
+        (Some(baseline), Lang::Ja) => format!(
+            "過去 7 日平均（{}〜{}，記録 {} 日）と比べる",
+            baseline.from.format("%m/%d"),
+            baseline.to.format("%m/%d"),
+            baseline.days
+        ),
+        (None, Lang::En) => "no records in the past 7 days".to_owned(),
+        (None, Lang::Ja) => "過去 7 日の記録なし".to_owned(),
     }
 }
 
@@ -384,8 +479,8 @@ pub fn text_lines(data: &TodayData, lang: Lang, theme: &Theme, width: usize) -> 
     lines.extend(individual_lines(&individual, lang, theme, width));
     lines.push(section_rule(
         match lang {
-            Lang::En => format!("Today's totals — {}", previous_label(data, lang)),
-            Lang::Ja => format!("今日の合計 — {}", previous_label(data, lang)),
+            Lang::En => format!("Today's totals — {}", baseline_label(data, lang)),
+            Lang::Ja => format!("今日の合計 — {}", baseline_label(data, lang)),
         },
         width,
         theme,
@@ -497,7 +592,7 @@ fn total_lines(data: &TodayData, lang: Lang, theme: &Theme) -> Vec<Line<'static>
     let Some(totals) = &data.totals else {
         return Vec::new();
     };
-    let previous = data.previous.as_ref();
+    let previous = data.baseline.as_ref();
     let labels = match lang {
         Lang::En => ["Time", "min", "Sessions", "Keystrokes"],
         Lang::Ja => ["練習時間", "分", "回数", "打鍵数"],
@@ -509,22 +604,17 @@ fn total_lines(data: &TodayData, lang: Lang, theme: &Theme) -> Vec<Line<'static>
             Style::default().add_modifier(Modifier::BOLD),
         ),
         delta_span(
-            previous.map(|previous| minutes(totals.duration_ms) - minutes(previous.duration_ms)),
+            previous.map(|previous| minutes(totals.duration_ms) - previous.duration_ms / 60_000.0),
             1,
             "",
             theme,
         ),
         Span::styled(format!("   {} ", labels[2]), Style::default().fg(theme.muted)),
         Span::styled(format!("{} ", totals.sessions), Style::default().add_modifier(Modifier::BOLD)),
-        delta_span(previous.map(|previous| totals.sessions as f64 - previous.sessions as f64), 0, "", theme),
+        delta_span(previous.map(|previous| totals.sessions as f64 - previous.sessions), 1, "", theme),
         Span::styled(format!("   {} ", labels[3]), Style::default().fg(theme.muted)),
         Span::styled(format!("{} ", grouped(totals.keystrokes)), Style::default().add_modifier(Modifier::BOLD)),
-        delta_span(
-            previous.map(|previous| totals.keystrokes as f64 - previous.keystrokes as f64),
-            0,
-            "",
-            theme,
-        ),
+        delta_span(previous.map(|previous| totals.keystrokes as f64 - previous.keystrokes), 0, "", theme),
     ])];
     for row in &totals.languages {
         let before = previous.and_then(|previous| previous.language(row.language));
@@ -690,16 +780,8 @@ pub fn card_specs(data: &TodayData, lang: Lang, theme: &Theme, cells: &[Size]) -
     let Some(totals) = &data.totals else {
         return Vec::new();
     };
-    let previous = data.previous.as_ref();
-    let since = previous.map(|previous| previous.date.format("%m/%d").to_string());
-    let delta_text = |delta: Option<f64>, digits: usize, suffix: &str| -> String {
-        match (delta, &since, lang) {
-            (Some(delta), Some(since), Lang::Ja) => format!("{since} 比 {}", signed(delta, digits, suffix)),
-            (Some(delta), Some(since), Lang::En) => format!("vs {since} {}", signed(delta, digits, suffix)),
-            (_, _, Lang::Ja) => "前の練習日なし".to_owned(),
-            (_, _, Lang::En) => "no earlier day".to_owned(),
-        }
-    };
+    let previous = data.baseline.as_ref();
+    let delta_text = |delta: Option<f64>, digits: usize, suffix: &str| previous_delta_text(data, delta, digits, suffix, lang);
     let mut rows = vec![
         (
             match lang {
@@ -707,7 +789,7 @@ pub fn card_specs(data: &TodayData, lang: Lang, theme: &Theme, cells: &[Size]) -
                 Lang::Ja => "練習時間（分）".to_owned(),
             },
             format!("{:.1}", minutes(totals.duration_ms)),
-            previous.map(|previous| minutes(totals.duration_ms) - minutes(previous.duration_ms)),
+            previous.map(|previous| minutes(totals.duration_ms) - previous.duration_ms / 60_000.0),
             1,
             "",
         ),
@@ -717,8 +799,8 @@ pub fn card_specs(data: &TodayData, lang: Lang, theme: &Theme, cells: &[Size]) -
                 Lang::Ja => "回数".to_owned(),
             },
             totals.sessions.to_string(),
-            previous.map(|previous| totals.sessions as f64 - previous.sessions as f64),
-            0,
+            previous.map(|previous| totals.sessions as f64 - previous.sessions),
+            1,
             "",
         ),
         (
@@ -727,7 +809,7 @@ pub fn card_specs(data: &TodayData, lang: Lang, theme: &Theme, cells: &[Size]) -
                 Lang::Ja => "打鍵数".to_owned(),
             },
             grouped(totals.keystrokes),
-            previous.map(|previous| totals.keystrokes as f64 - previous.keystrokes as f64),
+            previous.map(|previous| totals.keystrokes as f64 - previous.keystrokes),
             0,
             "",
         ),
@@ -766,12 +848,23 @@ pub fn card_specs(data: &TodayData, lang: Lang, theme: &Theme, cells: &[Size]) -
         .collect()
 }
 
-fn round_to(value: f64, digits: usize) -> f64 {
+/// «過去 7 日平均比 +5.0» / «vs 7-day avg +5.0» against the 7-day average,
+/// «過去 7 日の記録なし» without a value to compare with.
+pub(crate) fn previous_delta_text(_data: &TodayData, delta: Option<f64>, digits: usize, suffix: &str, lang: Lang) -> String {
+    match (delta, lang) {
+        (Some(delta), Lang::Ja) => format!("過去 7 日平均比 {}", signed(delta, digits, suffix)),
+        (Some(delta), Lang::En) => format!("vs 7-day avg {}", signed(delta, digits, suffix)),
+        (None, Lang::Ja) => "過去 7 日の記録なし".to_owned(),
+        (None, Lang::En) => "no records in past 7 days".to_owned(),
+    }
+}
+
+pub(crate) fn round_to(value: f64, digits: usize) -> f64 {
     let scale = 10_f64.powi(digits as i32);
     (value * scale).round() / scale
 }
 
-fn signed(delta: f64, digits: usize, suffix: &str) -> String {
+pub(crate) fn signed(delta: f64, digits: usize, suffix: &str) -> String {
     let rounded = round_to(delta, digits);
     if rounded == 0.0 {
         format!("±0{suffix}")
@@ -885,8 +978,8 @@ fn render_images(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, full: 
     y += timeline_height;
     frame.render_widget(
         rule(match lang {
-            Lang::En => format!("Today's totals — {}", previous_label(data, lang)),
-            Lang::Ja => format!("今日の合計 — {}", previous_label(data, lang)),
+            Lang::En => format!("Today's totals — {}", baseline_label(data, lang)),
+            Lang::Ja => format!("今日の合計 — {}", baseline_label(data, lang)),
         }),
         Rect::new(area.x, y, area.width, 1),
     );
@@ -954,11 +1047,11 @@ fn render_images(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, full: 
 pub fn hint(lang: Lang) -> [&'static str; 2] {
     match lang {
         Lang::En => [
-            "[Tab/←→] tab   [↑/↓] scroll   [Esc] back",
+            "[Tab/←→] tab   [↑/↓] scroll   [S] Summary   [Esc] back",
             "Today only: the period [P] and mode [M] filters do not apply",
         ],
         Lang::Ja => [
-            "[Tab/←→] タブ   [↑/↓] スクロール   [Esc] 戻る",
+            "[Tab/←→] タブ   [↑/↓] スクロール   [S] Summary   [Esc] 戻る",
             "今日の記録だけ: 期間 [P]・モード [M] の絞り込みは効きません",
         ],
     }

@@ -27,6 +27,7 @@ pub mod theme;
 pub mod title;
 pub mod title_image;
 pub mod today;
+pub mod today_summary;
 
 use ratatui::Frame;
 use ratatui::layout::Rect;

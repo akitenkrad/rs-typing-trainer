@@ -234,24 +234,60 @@ fn store_run(path: &std::path::Path, menu: &DailyMenu, steps: &[Played]) -> i64 
 
 /// Today: the warm-up (62 WPM, previous run 59) and the accuracy gate (met,
 /// level 1 → 2) of a 5-step menu, one individual Japanese session and one
-/// bench session. The previous practice day (9 days earlier) has a run with
-/// the warm-up at 59 WPM and two sessions in all.
+/// bench session. The past 7 days (11/12–11/18) hold English sessions on three
+/// days: 11/12 50.0 WPM (94%, 200 keys), 11/15 54.0 and 58.0 (96%, 200 keys
+/// each) and 11/18 60.0 (98%, 300 keys); the 7-day average is 55.33 WPM, 96%,
+/// 1.33 sessions, 300 keystrokes and 1.33 minutes. 9 days earlier (11/10,
+/// outside the window) a run has the warm-up at 59 WPM — the previous run of
+/// today's warm-up — and another session.
 fn seed(lang: Lang) -> (tempfile::TempDir, Config) {
+    seed_with(lang, true)
+}
+
+/// `japanese`: add today's Japanese romaji session (two languages today).
+fn seed_with(lang: Lang, japanese: bool) -> (tempfile::TempDir, Config) {
+    seed_full(lang, japanese, true)
+}
+
+/// `level_up`: the accuracy gate moves up to level 2 (an event of the day);
+/// otherwise it is played without meeting the condition (no event).
+fn seed_full(lang: Lang, japanese: bool, level_up: bool) -> (tempfile::TempDir, Config) {
+    seed_all(lang, japanese, level_up, true)
+}
+
+/// `past_week`: the three days of records inside the 7-day window.
+fn seed_all(lang: Lang, japanese: bool, level_up: bool, past_week: bool) -> (tempfile::TempDir, Config) {
     let directory = tempfile::TempDir::new().unwrap();
     let path = directory.path().join("sessions.db");
     store_run(&path, &plan(previous_day(), lang), &[(0, None, 59.0, None, None, 10, 0)]);
-    db::save(&path, &session(previous_day(), 10, 30, "words", "en", 55.0, 0.95, 200)).unwrap();
+    db::save(&path, &session(previous_day(), 10, 30, "words", "en", 20.0, 0.80, 2000)).unwrap();
+    if past_week {
+        let day = |offset: i64| today() - chrono::Duration::days(offset);
+        db::save(&path, &session(day(7), 10, 0, "words", "en", 50.0, 0.94, 200)).unwrap();
+        db::save(&path, &session(day(4), 10, 0, "words", "en", 54.0, 0.96, 200)).unwrap();
+        db::save(&path, &session(day(4), 11, 0, "words", "en", 58.0, 0.96, 200)).unwrap();
+        db::save(&path, &session(day(1), 10, 0, "words", "en", 60.0, 0.98, 300)).unwrap();
+    }
     store_run(
         &path,
         &plan(today(), lang),
-        &[(0, None, 62.0, None, None, 10, 0), (1, Some(1.0), 60.0, Some(true), Some(2), 10, 5)],
+        &[
+            (0, None, 62.0, None, None, 10, 0),
+            if level_up {
+                (1, Some(1.0), 60.0, Some(true), Some(2), 10, 5)
+            } else {
+                (1, Some(0.0), 60.0, Some(false), None, 10, 5)
+            },
+        ],
     );
-    db::save(&path, &session(today(), 11, 30, "romaji", "ja", 48.5, 0.93, 250)).unwrap();
+    if japanese {
+        db::save(&path, &session(today(), 11, 30, "romaji", "ja", 48.5, 0.93, 250)).unwrap();
+    }
     let mut bench = session(today(), 12, 15, "words", "en", 64.0, 0.98, 320);
     bench.header.bench_id = Some("bench-v1/A/01".to_owned());
     db::save(&path, &bench).unwrap();
     db::update_menu_progress(&path, "qwerty", "en", "accuracy.gate", |state| {
-        state.level = 2;
+        state.level = if level_up { 2 } else { 1 };
         state.consecutive = 0;
     })
     .unwrap();
@@ -282,7 +318,7 @@ fn open_today(config: Config, graphics: GraphicsMode) -> common::TestApp {
 }
 
 #[test]
-fn text_version_shows_the_three_sections_unplayed_steps_and_the_previous_day() {
+fn text_version_shows_the_three_sections_unplayed_steps_and_the_7_day_average() {
     for (width, height) in [(80, 24), (160, 45)] {
         let (_directory, config) = seed(Lang::Ja);
         let app = open_today(config, GraphicsMode::Off);
@@ -290,7 +326,11 @@ fn text_version_shows_the_three_sections_unplayed_steps_and_the_previous_day() {
         assert_inside_frame(&buffer);
         let rows = rows(&buffer);
         let text = rows.join("\n");
-        for expected in ["今日の訓練2026-11-19", "個別の練習（2回）", "今日の合計—前に練習した日（11/10）と比べる"] {
+        for expected in [
+            "今日の訓練2026-11-19",
+            "個別の練習（2回）",
+            "今日の合計—過去7日平均（11/12〜11/18，記録3日）と比べる",
+        ] {
             assert!(compact(&text).contains(expected), "{width}×{height} {expected}:\n{text}");
         }
         // The tab bar fits: the first and the last tab are both visible.
@@ -309,12 +349,14 @@ fn text_version_shows_the_three_sections_unplayed_steps_and_the_previous_day() {
         // Individual practice: the Japanese session and the bench, not the menu steps.
         assert!(compact(row_containing(&rows, "ローマ字")).contains("48.5"), "{text}");
         assert!(compact(row_containing(&rows, "[ベンチA]")).contains("64.0"), "{text}");
-        // Totals against 11/10: 4 sessions vs 2, 1,170 keystrokes vs 500.
+        // Totals against the 7-day average: 4 sessions vs 1.33, 1,170
+        // keystrokes vs 300, 4 minutes vs 1.33.
         let totals = compact(row_containing(&rows, "練習時間"));
-        assert!(totals.contains("回数4▲+2"), "{totals}");
-        assert!(totals.contains("打鍵数1,170▲+670"), "{totals}");
+        assert!(totals.contains("練習時間4.0分▲+2.7"), "{totals}");
+        assert!(totals.contains("回数4▲+2.7"), "{totals}");
+        assert!(totals.contains("打鍵数1,170▲+870"), "{totals}");
         // English median of 62, 60, 64 = 62 vs the median of 59 and 55 = 57.
-        assert!(compact(row_containing(&rows, "英語netWPM")).contains("62.0▲+5.0"), "{text}");
+        assert!(compact(row_containing(&rows, "英語netWPM")).contains("62.0▲+6.7"), "{text}");
         // Japanese has no earlier day to compare with.
         assert!(compact(row_containing(&rows, "日本語netWPM")).contains("48.5—"), "{text}");
         // The footer says the filters do not apply.
@@ -334,7 +376,7 @@ fn english_text_version_fits_80_columns() {
     for expected in [
         "Today'straining",
         "Individualpractice(2sessions)",
-        "Today'stotals—vsthelastpracticeday(11/10)",
+        "Today'stotals—vsthe7-dayaverage(11/12–11/18,3days)",
     ] {
         assert!(compact(&text).contains(expected), "{expected}:\n{text}");
     }
@@ -357,26 +399,70 @@ fn no_record_today_says_so() {
 }
 
 #[test]
-fn seven_day_period_keeps_the_previous_day_comparison() {
+fn seven_day_period_keeps_the_7_day_average() {
     let (_directory, config) = seed(Lang::Ja);
     let mut app = open_today(config, GraphicsMode::Off);
     app.handle_key(key(KeyCode::Char('p')));
     assert_eq!(app.analysis_period, AnalysisPeriod::Days7);
-    // The period filter drops the 11/10 records from the other tabs …
+    // The 7-day period (11/13–11/19) drops 11/12 from the other tabs …
     assert!(
         app.analysis_records
             .iter()
-            .all(|record| !record.header.started_at.starts_with("2026-11-10"))
+            .all(|record| !record.header.started_at.starts_with("2026-11-12"))
     );
-    // … but not from this tab.
-    assert_eq!(app.analysis_today.previous.as_ref().map(|day| day.date), Some(previous_day()));
+    // … but the average of this tab still counts it.
+    assert_eq!(app.analysis_today.baseline.as_ref().map(|baseline| baseline.days), Some(3));
     let text = rows(&render_buffer(&app, 80, 24)).join("\n");
-    assert!(compact(&text).contains("前に練習した日（11/10）と比べる"), "{text}");
-    assert!(compact(&text).contains("回数4▲+2"), "{text}");
+    assert!(compact(&text).contains("過去7日平均（11/12〜11/18，記録3日）と比べる"), "{text}");
+    assert!(compact(&text).contains("回数4▲+2.7"), "{text}");
     // A mode filter does not apply either.
     app.handle_key(key(KeyCode::Char('m')));
     assert!(app.analysis_mode_filter.is_some());
     assert_eq!(app.analysis_today.sessions.len(), 4);
+    assert_eq!(app.analysis_today.baseline.as_ref().map(|baseline| baseline.days), Some(3));
+}
+
+#[test]
+fn the_7_day_average_uses_only_the_days_with_records_before_today() {
+    let (_directory, config) = seed(Lang::Ja);
+    let app = open_today(config, GraphicsMode::Off);
+    let baseline = app.analysis_today.baseline.as_ref().unwrap();
+    // Today − 7 … yesterday; 11/10 (9 days ago) and today are left out.
+    assert_eq!(baseline.from, NaiveDate::from_ymd_opt(2026, 11, 12).unwrap());
+    assert_eq!(baseline.to, NaiveDate::from_ymd_opt(2026, 11, 18).unwrap());
+    assert_eq!(baseline.days, 3);
+    let close = |actual: f64, expected: f64| (actual - expected).abs() < 1e-9;
+    // Daily medians 50, 56 (54 and 58) and 60, averaged per day with records.
+    let english = baseline.language(Lang::En).unwrap();
+    assert_eq!(english.days, 3);
+    assert!(close(english.median_wpm, (50.0 + 56.0 + 60.0) / 3.0), "{}", english.median_wpm);
+    assert!(close(english.median_accuracy, (0.94 + 0.96 + 0.98) / 3.0), "{}", english.median_accuracy);
+    assert!(baseline.language(Lang::Ja).is_none());
+    // Per day with records: 4 sessions, 900 keystrokes and 4 minutes over 3 days.
+    assert!(close(baseline.sessions, 4.0 / 3.0), "{}", baseline.sessions);
+    assert!(close(baseline.keystrokes, 300.0), "{}", baseline.keystrokes);
+    assert!(close(baseline.duration_ms, 4.0 * 60_000.0 / 3.0), "{}", baseline.duration_ms);
+}
+
+#[test]
+fn no_records_in_the_past_7_days_shows_no_difference() {
+    // Only 11/10 (9 days ago) besides today.
+    let (_directory, config) = seed_all(Lang::Ja, false, true, false);
+    let mut app = open_today(config, GraphicsMode::Off);
+    assert!(app.analysis_today.baseline.is_none());
+    let rows_detail = rows(&render_buffer(&app, 80, 24));
+    let text = rows_detail.join("\n");
+    assert!(compact(&text).contains("今日の合計—過去7日の記録なし"), "{text}");
+    let totals = compact(row_containing(&rows_detail, "練習時間"));
+    assert!(totals.contains("回数3—"), "{totals}");
+    assert!(
+        !text.contains('▼') && !compact(row_containing(&rows_detail, "英語netWPM")).contains('▲'),
+        "{text}"
+    );
+    app.handle_key(key(KeyCode::Char('s')));
+    let summary = rows(&render_buffer(&app, 80, 24)).join("\n");
+    assert!(compact(&summary).contains("WPM過去7日の記録なし"), "{summary}");
+    assert!(!compact(&summary).contains("平均比"), "{summary}");
 }
 
 #[test]
@@ -529,11 +615,237 @@ fn image_functions_draw_the_three_figures() {
     let cards = card_specs(data, Lang::Ja, &theme, &cells);
     assert_eq!(cards.len(), 7);
     assert_eq!(cards[1].value, "4");
-    assert_eq!(cards[1].delta, Some(2.0));
-    assert_eq!(cards[1].delta_text, "11/10 比 +2");
+    assert_eq!(cards[1].delta, Some(2.7));
+    assert_eq!(cards[1].delta_text, "過去 7 日平均比 +2.7");
     for (index, card) in cards.iter().enumerate() {
         let image = render_today_card(&font, cell_pixels, card).unwrap();
         assert!(opaque_pixels(&image) > 1_000, "card {index}");
         save(&format!("today-card-{index}.png"), &image);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Summary (MYTASK-3632)
+// ---------------------------------------------------------------------------
+
+const BLOCKS: &str = "▀▄█▌▐▖▗▘▙▚▛▜▝▞▟";
+
+fn has_blocks(text: &str) -> bool {
+    text.chars().any(|character| BLOCKS.contains(character))
+}
+
+#[test]
+fn s_toggles_the_summary_and_back() {
+    let (_directory, config) = seed(Lang::Ja);
+    let mut app = open_today(config, GraphicsMode::Off);
+    assert!(!app.analysis_today_summary);
+    let detail = rows(&render_buffer(&app, 80, 24)).join("\n");
+    assert!(compact(&detail).contains("[S]Summary"), "{detail}");
+    app.handle_key(key(KeyCode::Char('s')));
+    assert!(app.analysis_today_summary);
+    let summary = rows(&render_buffer(&app, 80, 24)).join("\n");
+    assert!(compact(&summary).contains("Summary[S]詳細[Esc]戻る"), "{summary}");
+    // No tab bar on the Summary.
+    assert!(!compact(&summary).contains("コーチ"), "{summary}");
+    app.handle_key(key(KeyCode::Char('S')));
+    assert!(!app.analysis_today_summary);
+    assert!(compact(&rows(&render_buffer(&app, 80, 24)).join("\n")).contains("今日の訓練"));
+    // Not kept across openings of the analysis screen.
+    app.handle_key(key(KeyCode::Char('s')));
+    app.handle_key(key(KeyCode::Esc));
+    app.handle_key(key(KeyCode::Char('a')));
+    assert!(!app.analysis_today_summary);
+}
+
+#[test]
+fn summary_text_draws_the_main_value_with_big_text() {
+    let (_directory, config) = seed_with(Lang::Ja, false);
+    let mut app = open_today(config, GraphicsMode::Off);
+    app.handle_key(key(KeyCode::Char('s')));
+    let buffer = render_buffer(&app, 80, 24);
+    assert_inside_frame(&buffer);
+    let rows = rows(&buffer);
+    let text = rows.join("\n");
+    // Heading band and the bottom band.
+    assert!(compact(&text).contains("今日の練習2026-11-19"), "{text}");
+    assert!(compact(&text).contains("15分メニュー・5段中2段"), "{text}");
+    assert!(compact(&text).contains("▲正確さの関門がレベル2へ"), "{text}");
+    // The main value (English median 62, 60, 64 = 62.0) spans several rows of big text.
+    let big = rows.iter().filter(|row| has_blocks(row)).count();
+    assert!(big >= 4, "big text rows: {big}\n{text}");
+    assert!(compact(&text).contains("WPM過去7日平均比▲+6.7(平均55.3)"), "{text}");
+    assert!(compact(&text).contains("正確さ97.0%"), "{text}");
+    assert!(compact(&text).contains("打鍵数920"), "{text}");
+}
+
+#[test]
+fn summary_shows_two_main_values_for_two_languages() {
+    let (_directory, config) = seed(Lang::Ja);
+    let mut app = open_today(config, GraphicsMode::Off);
+    app.handle_key(key(KeyCode::Char('s')));
+    let buffer = render_buffer(&app, 80, 24);
+    assert_inside_frame(&buffer);
+    let rows = rows(&buffer);
+    let text = rows.join("\n");
+    let labels = row_containing(&rows, "英語");
+    assert!(compact(labels).contains("日本語"), "{text}");
+    // Big text on both halves of the same rows.
+    let both = rows
+        .iter()
+        .filter(|row| {
+            let characters = row.chars().collect::<Vec<_>>();
+            let half = characters.len() / 2;
+            has_blocks(&characters[..half].iter().collect::<String>()) && has_blocks(&characters[half..].iter().collect::<String>())
+        })
+        .count();
+    assert!(both >= 4, "{text}");
+    assert!(compact(&text).contains("正確さ英語97.0%"), "{text}");
+    assert!(compact(&text).contains("正確さ日本語93.0%"), "{text}");
+}
+
+#[test]
+fn summary_without_records_keeps_its_layout() {
+    for (lang, expected) in [(Lang::Ja, "今日の記録はまだありません"), (Lang::En, "Nopracticerecordedtodayyet")] {
+        let mut config = Config::default();
+        config.general.lang = lang;
+        let mut app = open_today(config, GraphicsMode::Kitty);
+        app.handle_key(key(KeyCode::Char('s')));
+        for (width, height) in [(80, 24), (160, 45), (40, 12)] {
+            let buffer = render_buffer(&app, width, height);
+            assert_inside_frame(&buffer);
+            let text = rows(&buffer).join("\n");
+            if width >= 80 {
+                assert!(compact(&text).contains(expected), "{text}");
+            }
+        }
+    }
+}
+
+#[test]
+fn summary_falls_back_to_plain_text_when_big_text_does_not_fit() {
+    let (_directory, config) = seed(Lang::En);
+    let mut app = open_today(config, GraphicsMode::Off);
+    app.handle_key(key(KeyCode::Char('s')));
+    let buffer = render_buffer(&app, 60, 14);
+    assert_inside_frame(&buffer);
+    let text = rows(&buffer).join("\n");
+    assert!(!has_blocks(&text), "{text}");
+    assert!(compact(&text).contains("62.0"), "{text}");
+}
+
+#[test]
+fn summary_image_draws_a_large_main_value() {
+    use rs_typing_trainer::ui::analysis_image::{render_today_summary, today_summary_value_height};
+    use rs_typing_trainer::ui::today_summary::{image_spec, summary_view, uses_image};
+    let theme = Theme::from_name("default");
+    let font = resolve_big_font("biz-ud-gothic", std::path::Path::new("/unused"));
+    let cell_pixels = CellPixels::new(9, 20);
+    for (japanese, name) in [(false, "today-summary-1lang.png"), (true, "today-summary-2lang.png")] {
+        let (_directory, config) = seed_with(Lang::Ja, japanese);
+        let app = open_today(config, GraphicsMode::Kitty);
+        assert!(uses_image(&app, Rect::new(0, 0, 158, 42)));
+        assert!(!uses_image(&app, Rect::new(0, 0, 100, 42)));
+        let view = summary_view(&app.analysis_today, Lang::Ja);
+        assert_eq!(view.mains.len(), if japanese { 2 } else { 1 });
+        let spec = image_spec(&view, Lang::Ja, &theme, Size::new(158, 42));
+        let image = render_today_summary(&font, cell_pixels, &spec).unwrap();
+        assert!(opaque_pixels(&image) > 100_000);
+        // The glyph box of the main value: 15–25% of the image height.
+        let ratio = today_summary_value_height(&spec, cell_pixels) / image.height() as f32;
+        assert!((0.15..=0.25).contains(&ratio), "{ratio}");
+        // The inked value itself is large too (accent pixels in the middle).
+        let accent = [41u8, 184, 219];
+        let (left, right) = (image.width() / 10, image.width() * 9 / 10);
+        let rows_with_value = (image.height() / 7..image.height() * 6 / 10)
+            .filter(|y| (left..right).any(|x| image.get_pixel(x, *y).0[..3] == accent))
+            .count();
+        assert!(rows_with_value as f32 / image.height() as f32 >= 0.10, "{rows_with_value}");
+        if let Some(directory) = std::env::var_os("TODAY_TAB_PNG_DIR") {
+            image.save(std::path::Path::new(&directory).join(name)).unwrap();
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Summary: the menu's steps in the bottom band
+// ---------------------------------------------------------------------------
+
+/// The progress band's short names of the seeded plan.
+fn chain_labels(lang: Lang) -> Vec<String> {
+    plan(today(), lang)
+        .steps
+        .iter()
+        .map(|step| rs_typing_trainer::practice::menu::step_short_label(step, lang))
+        .collect()
+}
+
+#[test]
+fn summary_without_events_shows_the_menu_steps_with_arrows() {
+    let (_directory, config) = seed_full(Lang::Ja, false, false);
+    let mut app = open_today(config, GraphicsMode::Off);
+    app.handle_key(key(KeyCode::Char('s')));
+    let buffer = render_buffer(&app, 80, 24);
+    assert_inside_frame(&buffer);
+    let rows = rows(&buffer);
+    let text = rows.join("\n");
+    let labels = chain_labels(Lang::Ja);
+    let expected = format!("✓{}→✓{}→{}→{}→{}", labels[0], labels[1], labels[2], labels[3], labels[4]);
+    let row = row_containing(&rows, &expected);
+    assert_eq!(row.matches('✓').count(), 2, "{text}");
+    assert!(row.contains(" → "), "{text}");
+    assert!(!compact(&text).contains("今日も練習しました"), "{text}");
+    assert!(!compact(&text).contains("レベル2へ"), "{text}");
+}
+
+#[test]
+fn step_chain_shrinks_like_the_progress_band() {
+    use rs_typing_trainer::ui::menu::step_chain;
+    use unicode_width::UnicodeWidthStr;
+    let steps = vec![
+        ("ウォームアップ".to_owned(), true),
+        ("遷移".to_owned(), true),
+        ("遷移".to_owned(), false),
+        ("確認".to_owned(), false),
+        ("仕上げ".to_owned(), false),
+    ];
+    let full = step_chain(&steps, Lang::Ja, 80);
+    assert_eq!(full, "✓ウォームアップ → ✓遷移 → 遷移 → 確認 → 仕上げ");
+    let tight = step_chain(&steps, Lang::Ja, full.width() - 1);
+    assert_eq!(tight, "✓ウォームアップ→✓遷移→遷移→確認→仕上げ");
+    assert_eq!(step_chain(&steps, Lang::Ja, tight.width() - 1), "段 2/5");
+    assert_eq!(step_chain(&steps, Lang::En, 10), "Step 2/5");
+    // The Summary in a narrow window: the short form in the band.
+    let (_directory, config) = seed_full(Lang::Ja, false, false);
+    let mut app = open_today(config, GraphicsMode::Off);
+    app.handle_key(key(KeyCode::Char('s')));
+    let buffer = render_buffer(&app, 40, 16);
+    assert_inside_frame(&buffer);
+    let text = rows(&buffer).join("\n");
+    assert!(compact(&text).contains("段2/5"), "{text}");
+}
+
+#[test]
+fn summary_image_draws_the_menu_steps() {
+    use rs_typing_trainer::ui::analysis_image::render_today_summary;
+    use rs_typing_trainer::ui::today_summary::{image_spec, summary_view};
+    let theme = Theme::from_name("default");
+    let font = resolve_big_font("biz-ud-gothic", std::path::Path::new("/unused"));
+    let cell_pixels = CellPixels::new(9, 20);
+    let (_directory, config) = seed_full(Lang::Ja, false, false);
+    let app = open_today(config, GraphicsMode::Kitty);
+    let view = summary_view(&app.analysis_today, Lang::Ja);
+    assert!(view.events.is_empty());
+    assert_eq!(view.chain.iter().filter(|(_, done)| *done).count(), 2);
+    let spec = image_spec(&view, Lang::Ja, &theme, Size::new(158, 42));
+    let image = render_today_summary(&font, cell_pixels, &spec).unwrap();
+    // The done steps are drawn in the theme's «correct» color in the bottom band.
+    let correct = [144u8, 238, 144];
+    let band = (image.height() * 8 / 10..image.height() * 95 / 100)
+        .flat_map(|y| (0..image.width()).map(move |x| (x, y)))
+        .filter(|(x, y)| image.get_pixel(*x, *y).0[..3] == correct)
+        .count();
+    assert!(band > 200, "{band}");
+    if let Some(directory) = std::env::var_os("TODAY_TAB_PNG_DIR") {
+        image.save(std::path::Path::new(&directory).join("today-summary-chain.png")).unwrap();
     }
 }

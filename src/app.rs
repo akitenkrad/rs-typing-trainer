@@ -305,6 +305,9 @@ pub struct App {
     /// database (independent of `[P]` and `[M]`).
     pub analysis_today: crate::ui::today::TodayData,
     pub analysis_today_scroll: u16,
+    /// «Today» tab shows the Summary screen (`S`); kept only while the
+    /// analysis screen is open, never saved.
+    pub analysis_today_summary: bool,
     pub adaptive_focus: Vec<TransitionCost>,
     adaptive_candidates: Vec<TransitionCost>,
     pub adaptive_result: Vec<AdaptiveResultRow>,
@@ -504,6 +507,7 @@ impl App {
             analysis_skills_lang: None,
             analysis_today: crate::ui::today::TodayData::empty(date),
             analysis_today_scroll: 0,
+            analysis_today_summary: false,
             adaptive_focus: Vec::new(),
             adaptive_candidates: Vec::new(),
             adaptive_result: Vec::new(),
@@ -1417,6 +1421,9 @@ impl App {
                     .min(u16::MAX as usize) as u16;
                 self.analysis_summary_scroll = (self.analysis_summary_scroll + 1).min(maximum);
             }
+            KeyCode::Char('s') | KeyCode::Char('S') if self.analysis_tab == ANALYSIS_TODAY_TAB => {
+                self.analysis_today_summary = !self.analysis_today_summary;
+            }
             KeyCode::Up | KeyCode::Char('k') if self.analysis_tab == ANALYSIS_TODAY_TAB => {
                 self.analysis_today_scroll = self.analysis_today_scroll.saturating_sub(1);
             }
@@ -1485,6 +1492,7 @@ impl App {
     fn open_analysis(&mut self) {
         self.analysis_tab = ANALYSIS_COACH_TAB;
         self.analysis_today_scroll = 0;
+        self.analysis_today_summary = false;
         self.analysis_period = AnalysisPeriod::Days30;
         self.analysis_mode_filter = None;
         self.analysis_transition_selected = 0;

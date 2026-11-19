@@ -36,6 +36,11 @@ pub fn render(frame: &mut Frame, app: &App) {
         .title(format!(" {} ", Msg::AnalysisTitle.text(lang)));
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
+    if app.analysis_tab == crate::app::ANALYSIS_TODAY_TAB && app.analysis_today_summary {
+        // Summary (MYTASK-3632): no tab bar and a one-line footer, for screenshots.
+        crate::ui::today_summary::render(frame, app, &theme, inner);
+        return;
+    }
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(2), Constraint::Min(3), Constraint::Length(2)])

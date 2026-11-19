@@ -135,9 +135,9 @@ The benchmark tab reports sustained speed, accuracy, rhythm, transitions, reach,
 
 ## Analysis screen
 
-Press `A` on the title screen. `Tab` or `←/→` changes tabs. The tabs are Today, Coach, Trend, Keyboard, Transitions, Fingers/Hands, Bench and Skills; the screen opens on Coach, and `←` from Coach reaches Today. The screen opens on the last 30 days (ending today); `P` steps to 7 days, then all time, then back to 30 days. `M` cycles the mode filter. Every tab, including Coach, uses the records left by these filters, except that the Today tab reads today's records and the last earlier practice day directly (see [Today tab](#today-tab)) and the Skills tab reads only menu check steps (see below). The expensive player model, diagnosis, progress, habits and grade calculations run once when the screen opens and again only when either filter changes; redraws use the cached report.
+Press `A` on the title screen. `Tab` or `←/→` changes tabs. The tabs are Today, Coach, Trend, Keyboard, Transitions, Fingers/Hands, Bench and Skills; the screen opens on Coach, and `←` from Coach reaches Today. The screen opens on the last 30 days (ending today); `P` steps to 7 days, then all time, then back to 30 days. `M` cycles the mode filter. Every tab, including Coach, uses the records left by these filters, except that the Today tab reads today's records and those of the past 7 days directly (see [Today tab](#today-tab)) and the Skills tab reads only menu check steps (see below). The expensive player model, diagnosis, progress, habits and grade calculations run once when the screen opens and again only when either filter changes; redraws use the cached report.
 
-- Today: today's menu steps, individual sessions and totals against the last earlier practice day (see [Today tab](#today-tab)).
+- Today: today's menu steps, individual sessions and totals against the average of the past 7 days (see [Today tab](#today-tab)).
 - Coach: a scrollable four-part report. With terminal images, each language starts with a G-to-S ladder: the darker, outlined step is the current grade and the triangle locates the continuous 0–8 score. The radar chart below uses the same scale on every component axis; the outer rings are higher grades, the axis suffix is that component's grade, and a labelled axis without a vertex has no data. The radar is omitted in short areas, and the existing prose continues below all graphics. “Where you are now” combines the S-to-G grade, component values and next-grade gaps, promotion/demotion, four-week speed/accuracy slopes, difficulty-adjusted form and the selected goal. “Last prescription” reports the target and matched-control changes in milliseconds with the R3 verdict. “Best opportunities” starts with the component that most raises overall and adds up to two concrete diagnoses, evidence counts, assumptions and a practice mode. Error advice is specific to anticipation, repeated-previous, adjacent-key, same-finger and opposite-hand errors; a total below 20 first errors is marked as a reference. Transition evidence is an effective count and is therefore shown as a rounded `n≈`, while observed counts use `n=`. Only `suggested` spelling rows appear. “Habits” includes only supported H1–H3/H5 findings; H4 is marked exploratory. Data coverage and benchmark reminders remain at the end. `T` opens goal candidates; `↑`/`↓` and `Enter` save one.
 - Trend: daily medians for net WPM, accuracy and median IKI, separated by mode or benchmark series and part. Charts show endpoint dates and value bounds after two valid days have accumulated; before that they show the current value. Horizontal distance represents calendar time, including days without records, in both the image and the text charts, and the three charts share one axis. A gap of more than 14 days between two recorded days is cut out of the axis and squeezed to the width of 3 days: the cut is marked `≈` on the axis (below the image with terminal images), no line is drawn across it, and the first date after it is labelled when there is room. Axis labels are always real dates, and the forecast fan follows the same axis. The translucent fan on the speed chart narrows to the latest language-level daily speed and widens to the fitted 28-day forecast interval; it is omitted when no learning curve is available.
 - Keyboard: error rate, median IKI, relative speed (personal median = 1.0), and confusion. `Enter` cycles the four views. In confusion view, `←`/`→` selects the expected key and the keyboard highlights the keys pressed instead. The legend below the keyboard maps the dark-to-bright red scale to each view's values; relative speed runs from fast at 0.0 to slow at 2.0+, with `(1.0 = personal median)` kept as a separate note. The uncoloured sample means no data.
@@ -179,16 +179,16 @@ The text version of the Trend tab at 80×24 with all time selected (sample data:
 
 ### Today tab
 
-The first tab sums up today (the local date). It reads the database directly, so the period (`P`) and mode (`M`) filters do not apply: with the 7-day period selected, the comparison with a practice day 9 days ago is still shown. The footer says so instead of showing the period and mode. `↑`/`↓` (`k`/`j`) scroll the text version.
+The first tab sums up today (the local date). It reads the database directly, so the period (`P`) and mode (`M`) filters do not apply: with the 7-day period selected, the 7-day average still counts the day 7 days ago that the period leaves out. The footer says so instead of showing the period and mode. `↑`/`↓` (`k`/`j`) scroll the text version. `S` switches to the [Summary](#summary) and back.
 
 - Today's training: for each menu run of today with at least one played step, newest first (for example after changing the practice languages), one row per planned step with the same figures as the upper section of the [menu summary](training.md#practice-menu): step, prescription and level, this time's value, the difference from the previous run of the same prescription at the same level, and the graduation condition (`●●○ 2/3`, `●●● → Lv 2`). Steps not played yet are marked `not yet`. When no run of today has a played step, the latest run is shown as `not played`; without any run the tab says that there is no menu for today yet.
 - Individual practice: today's sessions that are not menu steps, with start time, mode, language, length, net WPM and accuracy. Benchmark parts are included and marked `[bench A]`.
-- Today's totals: practice time, sessions and keystrokes, and per language the median net WPM (with `▁▂▃▄▅▆▇` bars of the day's sessions in time order) and the median accuracy. Each value is compared with the last earlier day that has any record; the difference uses the result screen's colours and arrows (green `▲` higher, red `▼` lower, `±0` unchanged), and `—` when there is nothing to compare with.
+- Today's totals: practice time, sessions and keystrokes, and per language the median net WPM (with `▁▂▃▄▅▆▇` bars of the day's sessions in time order) and the median accuracy. Each value is compared with the average of the past 7 days: the 7 calendar days before today (today − 7 to yesterday), averaged over the days with records — days without practice do not count as zero, and today is never included. Net WPM and accuracy take each day's median (as above) and average those per day; time, sessions and keystrokes are averaged per day with records; each language is averaged over the days it was practised. The difference reads `vs 7-day avg +5.0` and uses the result screen's colours and arrows (green `▲` higher, red `▼` lower, `±0` unchanged), and `—` when there is nothing to compare with. Without any record in those 7 days the heading says `no records in the past 7 days` and no difference is shown. The comparison with the previous run of the same prescription in Today's training is unchanged.
 - Without any session today the tab shows `No practice recorded today yet`.
 
-With terminal images and at least 120×37 cells (120×29 for a compact version with lower cards), the three sections are figures: the steps with a done/not-yet badge, a bar for the step's minutes (filled when played), the value and difference, the graduation condition as circles, and level-ups highlighted with an up-arrow; a timeline of today's sessions (horizontal = time of day, vertical = net WPM, colour = language, filled circle = menu step, ring = individual, diamond = benchmark, marker size and the label above it = accuracy), with the list of individual sessions as text beside it; and big-number cards for practice time, sessions, keystrokes, and net WPM and accuracy per language, each with its difference from the last practice day. Without terminal images, without a known cell size, or in a smaller window, the tab falls back to the text version in the result screen's order.
+With terminal images and at least 120×37 cells (120×29 for a compact version with lower cards), the three sections are figures: the steps with a done/not-yet badge, a bar for the step's minutes (filled when played), the value and difference, the graduation condition as circles, and level-ups highlighted with an up-arrow; a timeline of today's sessions (horizontal = time of day, vertical = net WPM, colour = language, filled circle = menu step, ring = individual, diamond = benchmark, marker size and the label above it = accuracy), with the list of individual sessions as text beside it; and big-number cards for practice time, sessions, keystrokes, and net WPM and accuracy per language, each with its difference from the 7-day average. Without terminal images, without a known cell size, or in a smaller window, the tab falls back to the text version in the result screen's order.
 
-The text version at 80×24 (sample data: two of five menu steps played, the accuracy gate moving up to level 2, a Japanese romaji session and benchmark part A; the last practice day was 11/10):
+The text version at 80×24 (sample data: two of five menu steps played, the accuracy gate moving up to level 2, a Japanese romaji session and benchmark part A; the past 7 days have English records on 11/12, 11/15 and 11/18):
 
 ```text
 ┌ ANALYSIS ────────────────────────────────────────────────────────────────────┐
@@ -206,14 +206,54 @@ The text version at 80×24 (sample data: two of five menu steps played, the accu
 │  Time  Mode         Lang     Length net WPM  Accuracy                        │
 │  20:30 romaji       Japanese 1:00      48.5   93.0%                          │
 │  21:15 [bench A]    English  1:00      64.0   98.0%                          │
-│  ── Today's totals — vs the last practice day (11/10) ─────────────────────  │
-│  Time 4.0 min ▲+2.0   Sessions 4 ▲+2   Keystrokes 1,170 ▲+670                │
-│  English   net WPM 62.0 ▲+5.0   ▄▁▇       accuracy 97.0% ▲+1.0pt             │
+│  ── Today's totals — vs the 7-day average (11/12–11/18, 3 days) ───────────  │
+│  Time 4.0 min ▲+2.7   Sessions 4 ▲+2.7   Keystrokes 1,170 ▲+870              │
+│  English   net WPM 62.0 ▲+6.7   ▄▁▇       accuracy 97.0% ▲+1.0pt             │
 │  Japanese  net WPM 48.5 —       ▄         accuracy 93.0% —                   │
 │                                                                              │
 │                                                                              │
-│                   [Tab/←→] tab   [↑/↓] scroll   [Esc] back                   │
+│            [Tab/←→] tab   [↑/↓] scroll   [S] Summary   [Esc] back            │
 │         Today only: the period [P] and mode [M] filters do not apply         │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Summary
+
+`S` on the Today tab switches between the detailed view and **Summary**, a screen for screenshots that shows the main results of the day in large figures. The state lasts while the analysis screen is open and is not saved. The tab bar is hidden and the footer is a single small line (`Summary   [S] details   [Esc] back`).
+
+- Heading band: `Today's practice 2026-11-19` and the menu (`15-min menu · 2 of 5 steps`), or `Individual practice` without a menu.
+- Main value: today's net WPM (median) in very large figures with a small `WPM`, its difference from the 7-day average and the average itself (`vs 7-day avg ▲+6.7 (avg 55.3)`). With both languages practised, the two values stand side by side under `English` and `Japanese`.
+- Supporting figures: accuracy (per language when there are two), practice time and keystrokes, each with its difference from the 7-day average in the result screen's colours and arrows.
+- Bottom band: up to two events of the day — level-ups first (`Accuracy gate: up to level 2`), then graduations, then swaps. Without any, the band shows today's menu as a chain of its steps with the progress band's short names, `✓Warm-up → ✓Accuracy → Preview → Check → Finish`: done steps carry `✓` and are bright green, the others are dimmed. When the chain does not fit, the spaces around the arrows go first and last it becomes `Step 2/5` (done of total), as the progress band shrinks. A day with individual practice only shows `Practiced today (4 sessions)`; without a record, `No practice recorded today yet`.
+
+With terminal images and at least 120×29 cells, the Summary is one image in the theme colours: an accent heading band, a frame with cut corners, the main value about a fifth of the screen high (it scales with the window), and a dark band for the events. In the image the arrows and checks of the step chain are drawn as shapes (the image font has neither). Otherwise it is text: the main value is drawn with the bitmap big text used for prompts (several rows even at 80×24), and with normal characters when even that does not fit.
+
+The text version at 80×24 (sample data as above, without the Japanese session):
+
+```text
+┌ ANALYSIS ────────────────────────────────────────────────────────────────────┐
+│ Today's practice 2026-11-19                       15-min menu · 2 of 5 steps │
+│╔════════════════════════════════════════════════════════════════════════════╗│
+│║                                                                            ║│
+│║                                   English                                  ║│
+│║                               ▄▖  ▗▖      ▗▖                               ║│
+│║                              ▐ ▝ ▗▘▝▖     ▌▐                               ║│
+│║                              ▌   ▝  ▌    ▐  ▌                              ║│
+│║                              ▙▀▚   ▞     ▐  ▌                              ║│
+│║                              ▌  ▌ ▞      ▐  ▌                              ║│
+│║                              ▌  ▌▗▘      ▝▖▗▘                              ║│
+│║                              ▝▄▞ ▐▄▄▖▐▌   ▚▞                               ║│
+│║                                                                            ║│
+│║                     WPM  vs 7-day avg ▲+6.7 (avg 55.3)                     ║│
+│║                                                                            ║│
+│║                                                                            ║│
+│║   Accuracy 97.0% vs 7-day avg ▲+1.0pt   Time 3.0 min vs 7-day avg ▲+1.7    ║│
+│║                     Keystrokes 920 vs 7-day avg ▲+620                      ║│
+│║                                                                            ║│
+│║                                                                            ║│
+│║                       ▲ Accuracy gate: up to level 2                       ║│
+│╚════════════════════════════════════════════════════════════════════════════╝│
+│                                            Summary   [S] details   [Esc] back│
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 

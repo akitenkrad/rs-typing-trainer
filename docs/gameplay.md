@@ -59,6 +59,7 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | Benchmark summary | Any key during `session.result_input_delay_ms` | Ignore the input; the hint shows the approximate remaining delay |
 | Benchmark summary | `Enter` / `Space` / `Esc` / `Q` | Return to the title screen after the input delay |
 | Today | `↑` / `↓` (`k` / `j`) | Scroll the text version |
+| Today | `S` | Switch between the details and the Summary |
 | Coach | `↑` / `↓` (`k` / `j`) | Scroll the report |
 | Coach | `T` | Open or close goal candidates |
 | Goal candidates | `↑` / `↓`, `Enter` | Select and save a goal |
@@ -258,7 +259,7 @@ The detail keeps the original result charts and adds the recorded mode, language
 
 ## Coaching and grades
 
-Press `A` to open the analysis screen. Its tabs are Today, Coach, Trend, Keyboard, Transitions, Fingers/Hands, Bench and Skills. Today, the first tab, sums up today's menu steps, individual sessions and totals against the last practice day ([Today tab](analysis.md#today-tab)). The screen opens on Coach: current English and Japanese grades, the latest adaptive prescription result, one to three concrete opportunities, and stable habit findings. Large terminals draw the overall grade as a coloured badge; compact terminals keep the grade letter and value in normal text. The report always names its source (official, interim, provisional, or provisional with difficulty uncorrected), keeps evidence counts, and states when evidence is insufficient. `T` opens goal candidates derived from recent records; `Enter` persists the selected goal and its remaining gap is shown in the first section.
+Press `A` to open the analysis screen. Its tabs are Today, Coach, Trend, Keyboard, Transitions, Fingers/Hands, Bench and Skills. Today, the first tab, sums up today's menu steps, individual sessions and totals against the 7-day average ([Today tab](analysis.md#today-tab)). The screen opens on Coach: current English and Japanese grades, the latest adaptive prescription result, one to three concrete opportunities, and stable habit findings. Large terminals draw the overall grade as a coloured badge; compact terminals keep the grade letter and value in normal text. The report always names its source (official, interim, provisional, or provisional with difficulty uncorrected), keeps evidence counts, and states when evidence is insufficient. `T` opens goal candidates derived from recent records; `Enter` persists the selected goal and its remaining gap is shown in the first section.
 
 The mode-selection heading carries a compact English/Japanese grade. Completing benchmark A or C shows that language's official or interim grade and any promotion or demotion on the result screen; ordinary practice does not show a grade change. After any completed session, the result screen may show the clearest session-specific observation. `[display].feedback = "summary"` limits this to one line, while `"detailed"` allows up to three; nothing is displayed when the session lacks usable evidence.
 

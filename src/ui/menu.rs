@@ -280,6 +280,37 @@ pub fn progress_band(
     truncate_display(&line, width)
 }
 
+/// The steps of a menu run as a chain, `✓ウォームアップ → ✓遷移 → 遷移 → 確認
+/// → 仕上げ` (the Summary of the analysis «today» tab, MYTASK-3632): the
+/// progress band's short names, `✓` on the done steps. When it does not fit
+/// `width`, the spaces around the arrows go first, and last the line shrinks
+/// to `段 2/5` (done of total), as the progress band does.
+pub fn step_chain(steps: &[(String, bool)], lang: Lang, width: usize) -> String {
+    let joined = |separator: &str| {
+        steps
+            .iter()
+            .map(|(label, done)| if *done { format!("✓{label}") } else { label.clone() })
+            .collect::<Vec<_>>()
+            .join(separator)
+    };
+    for separator in [" → ", "→"] {
+        let line = joined(separator);
+        if UnicodeWidthStr::width(line.as_str()) <= width {
+            return line;
+        }
+    }
+    truncate_display(&step_chain_short(steps, lang), width)
+}
+
+/// The last form of [`step_chain`]: `段 2/5` / `Step 2/5` (done of total).
+pub fn step_chain_short(steps: &[(String, bool)], lang: Lang) -> String {
+    let done = steps.iter().filter(|(_, done)| *done).count();
+    match lang {
+        Lang::En => format!("Step {done}/{}", steps.len()),
+        Lang::Ja => format!("段 {done}/{}", steps.len()),
+    }
+}
+
 /// The progress band of the step `index` about to start (countdown screen).
 pub fn progress_band_for_start(app: &App, width: usize) -> Option<String> {
     let menu = app.daily_menu.as_ref()?;

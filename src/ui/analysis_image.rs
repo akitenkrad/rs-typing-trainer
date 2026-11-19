@@ -715,6 +715,21 @@ impl AnalysisImageCache {
         self.cache.protocol(detection, &today_timeline_key(font, spec))
     }
 
+    pub fn prepare_today_summary(&mut self, detection: &GraphicsDetection, font: &ResolvedBigFont, spec: &TodaySummarySpec) -> Result<(), String> {
+        self.cache.prepare(detection, today_summary_key(font, spec), spec.cells, |cell_pixels| {
+            render_today_summary(font, cell_pixels, spec)
+        })
+    }
+
+    pub(crate) fn today_summary_protocol<'a>(
+        &'a mut self,
+        detection: &GraphicsDetection,
+        font: &ResolvedBigFont,
+        spec: &TodaySummarySpec,
+    ) -> Option<&'a Protocol> {
+        self.cache.protocol(detection, &today_summary_key(font, spec))
+    }
+
     pub(crate) fn chart_protocol_with_range<'a>(
         &'a mut self,
         detection: &GraphicsDetection,
@@ -2794,4 +2809,489 @@ pub fn render_today_timeline(font: &ResolvedBigFont, cell_pixels: CellPixels, sp
         }
     }
     rgba_image(pixmap)
+}
+
+// ---------------------------------------------------------------------------
+// «Today» Summary screen (MYTASK-3632)
+// ---------------------------------------------------------------------------
+
+/// A value with its difference from the last practice day.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SummaryFigure {
+    pub label: String,
+    pub value: String,
+    /// The signed difference; only its sign picks the color and the arrow.
+    pub delta: Option<f64>,
+    /// The difference as shown, e.g. «過去 7 日平均比 +5.0»; empty for none.
+    pub delta_text: String,
+    /// The value compared with, e.g. «平均 57.0»; empty when not shown.
+    pub average: String,
+}
+
+/// The screenshot-friendly Summary of the «today» tab: a heading band, a
+/// decorated frame with one or two very large net WPM values, a row of
+/// supporting figures, and a dark band with the day's events at the bottom.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TodaySummarySpec {
+    pub heading: String,
+    pub subheading: String,
+    /// One per language practised today (at most two); empty without records.
+    pub mains: Vec<SummaryFigure>,
+    pub unit: String,
+    pub details: Vec<SummaryFigure>,
+    /// One or two lines; the first is highlighted when `highlight` is set.
+    pub events: Vec<String>,
+    /// Without events: the menu's steps (short name, done), drawn with
+    /// arrows between them; `chain_short` («段 2/5») when they do not fit.
+    pub chain: Vec<(String, bool)>,
+    pub chain_short: String,
+    pub highlight: bool,
+    pub cells: Size,
+    pub colors: crate::ui::result_image::ResultImageColors,
+}
+
+fn today_summary_key(font: &ResolvedBigFont, spec: &TodaySummarySpec) -> AnalysisImageKey {
+    AnalysisImageKey::Today {
+        kind: "summary",
+        font: Some(font.identity()),
+        spec: format!("{spec:?}"),
+        cells: spec.cells,
+    }
+}
+
+/// Pixel height of the main value's glyphs: about a fifth of the image
+/// height, reduced only when the values would not fit the frame's width.
+pub fn today_summary_value_height(spec: &TodaySummarySpec, cell_pixels: CellPixels) -> f32 {
+    let width = f32::from(spec.cells.width) * f32::from(cell_pixels.width);
+    let height = f32::from(spec.cells.height) * f32::from(cell_pixels.height);
+    let target = height * 0.2;
+    let columns = spec.mains.len().max(1) as f32;
+    let column_width = width * 0.86 / columns;
+    // Widest value in display cells, plus room for the unit.
+    let cells = spec
+        .mains
+        .iter()
+        .map(|main| main.value.chars().map(|c| UnicodeWidthChar::width(c).unwrap_or(1).max(1)).sum::<usize>())
+        .max()
+        .unwrap_or(1)
+        .max(1) as f32
+        + 2.0;
+    let aspect = f32::from(cell_pixels.width) / f32::from(cell_pixels.height).max(1.0);
+    let by_width = column_width * 0.9 / (cells * aspect);
+    target.min(by_width).max(8.0)
+}
+
+fn text_cells_width(text: &str, glyph_height: f32, cell_pixels: CellPixels) -> f32 {
+    small_text_width(text, glyph_height.max(1.0) as u32, cell_pixels) as f32
+}
+
+/// Draw `delta_text` after a ▲/▼ in the result screen's colors, centered at `x`.
+#[allow(clippy::too_many_arguments)]
+fn draw_delta_centered(
+    pixmap: &mut Pixmap,
+    font: &ResolvedBigFont,
+    figure: &SummaryFigure,
+    x: f32,
+    y: f32,
+    size: f32,
+    colors: crate::ui::result_image::ResultImageColors,
+    cell_pixels: CellPixels,
+    glyphs: &mut HashMap<SmallGlyphKey, Pixmap>,
+) -> Result<(), String> {
+    if figure.delta_text.is_empty() {
+        return Ok(());
+    }
+    let color = delta_color(figure.delta, None, colors);
+    let arrow = figure.delta.filter(|delta| *delta != 0.0 && delta.is_finite());
+    let icon = size * 0.75;
+    let text_width = text_cells_width(&figure.delta_text, size, cell_pixels);
+    let total = text_width + if arrow.is_some() { icon + 4.0 } else { 0.0 };
+    let mut left = x - total / 2.0;
+    if let Some(delta) = arrow {
+        fill_triangle(pixmap, left, y + (size - icon) / 2.0, icon, delta > 0.0, color);
+        left += icon + 4.0;
+    }
+    draw_small_text(
+        pixmap,
+        font,
+        &figure.delta_text,
+        left,
+        y,
+        size as u32,
+        color,
+        false,
+        TextAlign::Left,
+        cell_pixels,
+        glyphs,
+    )
+}
+
+/// An octagon: a rectangle with its corners cut by `cut`.
+fn chamfered(bounds: [f32; 4], cut: f32) -> [(f32, f32); 8] {
+    let [left, top, right, bottom] = bounds;
+    [
+        (left + cut, top),
+        (right - cut, top),
+        (right, top + cut),
+        (right, bottom - cut),
+        (right - cut, bottom),
+        (left + cut, bottom),
+        (left, bottom - cut),
+        (left, top + cut),
+    ]
+}
+
+pub fn render_today_summary(font: &ResolvedBigFont, cell_pixels: CellPixels, spec: &TodaySummarySpec) -> Result<RgbaImage, String> {
+    let width = u32::from(spec.cells.width) * u32::from(cell_pixels.width);
+    let height = u32::from(spec.cells.height) * u32::from(cell_pixels.height);
+    let mut pixmap = Pixmap::new(width.max(1), height.max(1)).ok_or_else(|| "summary dimensions are too large".to_owned())?;
+    let (w, h) = (width as f32, height as f32);
+    let colors = spec.colors;
+    let foreground = color_rgb(colors.foreground, [230, 230, 230]);
+    let muted = color_rgb(colors.muted, GRID_COLOR);
+    let accent = color_rgb(colors.accent, [41, 184, 219]);
+    let warning = color_rgb(colors.warning, [229, 229, 16]);
+    let panel = color_rgb(colors.panel, BADGE_FACE);
+    let mut glyphs = HashMap::new();
+
+    // Heading band.
+    let band = (h * 0.09).max(f32::from(cell_pixels.height));
+    fill_rect(&mut pixmap, [0.0, 0.0, w, band], accent, 255);
+    let heading_size = band * 0.62;
+    let heading_y = (band - heading_size) / 2.0;
+    draw_small_text(
+        &mut pixmap,
+        font,
+        &spec.heading,
+        w * 0.03,
+        heading_y,
+        heading_size as u32,
+        BADGE_FACE,
+        true,
+        TextAlign::Left,
+        cell_pixels,
+        &mut glyphs,
+    )?;
+    draw_small_text(
+        &mut pixmap,
+        font,
+        &spec.subheading,
+        w * 0.97,
+        heading_y + heading_size * 0.15,
+        (heading_size * 0.8) as u32,
+        BADGE_FACE,
+        false,
+        TextAlign::Right,
+        cell_pixels,
+        &mut glyphs,
+    )?;
+
+    // Decorated frame: a chamfered panel with a thick outer and a thin inner line.
+    let frame = [w * 0.04, band + h * 0.035, w * 0.96, h * 0.975];
+    let cut = (h * 0.05).min(w * 0.05);
+    if let Some(path) = polygon_path(chamfered(frame, cut)) {
+        fill_path(&mut pixmap, &path, panel, 235);
+    }
+    stroke_polygon(&mut pixmap, chamfered(frame, cut), accent, 255, (h * 0.006).max(2.0));
+    let inset = (h * 0.014).max(4.0);
+    let inner = [frame[0] + inset, frame[1] + inset, frame[2] - inset, frame[3] - inset];
+    stroke_polygon(&mut pixmap, chamfered(inner, (cut - inset * 0.6).max(2.0)), muted, 160, 1.2);
+    for (x, y) in [
+        (frame[0] + cut / 2.0, frame[1] + cut / 2.0),
+        (frame[2] - cut / 2.0, frame[1] + cut / 2.0),
+        (frame[0] + cut / 2.0, frame[3] - cut / 2.0),
+        (frame[2] - cut / 2.0, frame[3] - cut / 2.0),
+    ] {
+        let r = cut * 0.22;
+        if let Some(path) = polygon_path([(x, y - r), (x + r, y), (x, y + r), (x - r, y)]) {
+            fill_path(&mut pixmap, &path, accent, 255);
+        }
+    }
+
+    // Main values.
+    let frame_height = frame[3] - frame[1];
+    let label_size = (h * 0.045).max(8.0);
+    let value_size = today_summary_value_height(spec, cell_pixels);
+    let unit_size = (value_size * 0.3).max(8.0);
+    let label_y = frame[1] + frame_height * 0.06;
+    let value_y = label_y + label_size * 1.4;
+    let delta_size = (h * 0.038).max(8.0);
+    let delta_y = value_y + value_size + h * 0.015;
+    let columns = spec.mains.len().max(1);
+    let column_width = (frame[2] - frame[0]) / columns as f32;
+    for (index, main) in spec.mains.iter().enumerate() {
+        let center = frame[0] + column_width * (index as f32 + 0.5);
+        draw_small_text(
+            &mut pixmap,
+            font,
+            &main.label,
+            center,
+            label_y,
+            label_size as u32,
+            muted,
+            true,
+            TextAlign::Center,
+            cell_pixels,
+            &mut glyphs,
+        )?;
+        let value_width = text_cells_width(&main.value, value_size, cell_pixels);
+        let unit_width = text_cells_width(&spec.unit, unit_size, cell_pixels);
+        let left = center - (value_width + unit_width + value_size * 0.15) / 2.0;
+        draw_small_text(
+            &mut pixmap,
+            font,
+            &main.value,
+            left,
+            value_y,
+            value_size as u32,
+            accent,
+            true,
+            TextAlign::Left,
+            cell_pixels,
+            &mut glyphs,
+        )?;
+        draw_small_text(
+            &mut pixmap,
+            font,
+            &spec.unit,
+            left + value_width + value_size * 0.15,
+            value_y + value_size - unit_size * 1.1,
+            unit_size as u32,
+            foreground,
+            true,
+            TextAlign::Left,
+            cell_pixels,
+            &mut glyphs,
+        )?;
+        draw_delta_centered(&mut pixmap, font, main, center, delta_y, delta_size, colors, cell_pixels, &mut glyphs)?;
+        if !main.average.is_empty() {
+            draw_small_text(
+                &mut pixmap,
+                font,
+                &main.average,
+                center,
+                delta_y + delta_size * 1.25,
+                (delta_size * 0.85) as u32,
+                muted,
+                false,
+                TextAlign::Center,
+                cell_pixels,
+                &mut glyphs,
+            )?;
+        }
+        if index > 0 {
+            let x = frame[0] + column_width * index as f32;
+            stroke_line(&mut pixmap, (x, label_y), (x, delta_y + delta_size), GRID_COLOR, 90, 1.0, None);
+        }
+    }
+
+    // Supporting figures.
+    let detail_label = (h * 0.035).max(8.0);
+    let detail_value = (h * 0.06).max(9.0);
+    let averages = if spec.mains.iter().any(|main| !main.average.is_empty()) {
+        delta_size * 1.1
+    } else {
+        0.0
+    };
+    let detail_y = delta_y + delta_size + averages + h * 0.045;
+    let count = spec.details.len().max(1);
+    let detail_width = (frame[2] - frame[0]) / count as f32;
+    for (index, detail) in spec.details.iter().enumerate() {
+        let center = frame[0] + detail_width * (index as f32 + 0.5);
+        draw_small_text(
+            &mut pixmap,
+            font,
+            &detail.label,
+            center,
+            detail_y,
+            detail_label as u32,
+            muted,
+            false,
+            TextAlign::Center,
+            cell_pixels,
+            &mut glyphs,
+        )?;
+        draw_small_text(
+            &mut pixmap,
+            font,
+            &detail.value,
+            center,
+            detail_y + detail_label * 1.3,
+            detail_value as u32,
+            foreground,
+            true,
+            TextAlign::Center,
+            cell_pixels,
+            &mut glyphs,
+        )?;
+        draw_delta_centered(
+            &mut pixmap,
+            font,
+            detail,
+            center,
+            detail_y + detail_label * 1.3 + detail_value * 1.15,
+            detail_label,
+            colors,
+            cell_pixels,
+            &mut glyphs,
+        )?;
+    }
+
+    // Dark band with the day's events at the bottom of the frame.
+    let lines = if spec.events.is_empty() {
+        1.0
+    } else {
+        spec.events.len().clamp(1, 2) as f32
+    };
+    let event_size = (h * 0.05).max(9.0);
+    let band_height = event_size * (1.5 * lines + 0.6);
+    let band_bottom = frame[3] - inset * 1.8;
+    let band_top = band_bottom - band_height;
+    let band_left = frame[0] + cut * 0.8;
+    let band_right = frame[2] - cut * 0.8;
+    fill_round_rect(
+        &mut pixmap,
+        [band_left, band_top, band_right, band_bottom],
+        event_size * 0.3,
+        [6, 8, 12],
+        245,
+    );
+    stroke_line(&mut pixmap, (band_left, band_top), (band_right, band_top), accent, 200, 1.5, None);
+    if spec.events.is_empty() && !spec.chain.is_empty() {
+        draw_step_chain(
+            &mut pixmap,
+            font,
+            spec,
+            [band_left, band_top, band_right, band_bottom],
+            event_size,
+            cell_pixels,
+            &mut glyphs,
+        )?;
+    }
+    for (index, event) in spec.events.iter().take(2).enumerate() {
+        let y = band_top + event_size * (0.45 + 1.5 * index as f32);
+        let highlight = spec.highlight && index == 0;
+        let text_width = text_cells_width(event, event_size, cell_pixels);
+        let icon = event_size * 0.7;
+        let mut left = w / 2.0 - (text_width + if highlight { icon + 6.0 } else { 0.0 }) / 2.0;
+        if highlight {
+            fill_triangle(&mut pixmap, left, y + (event_size - icon) / 2.0, icon, true, warning);
+            left += icon + 6.0;
+        }
+        draw_small_text(
+            &mut pixmap,
+            font,
+            event,
+            left,
+            y,
+            event_size as u32,
+            if highlight { warning } else { foreground },
+            true,
+            TextAlign::Left,
+            cell_pixels,
+            &mut glyphs,
+        )?;
+    }
+    rgba_image(pixmap)
+}
+
+/// The menu's steps in the bottom band: a drawn check and the accent color on
+/// done steps, dimmed names on the rest, and drawn arrows between them (the
+/// image font has no «→» or «✓»). The size shrinks to fit the band; below a
+/// readable size the band shows `chain_short` («段 2/5») instead.
+fn draw_step_chain(
+    pixmap: &mut Pixmap,
+    font: &ResolvedBigFont,
+    spec: &TodaySummarySpec,
+    band: [f32; 4],
+    size: f32,
+    cell_pixels: CellPixels,
+    glyphs: &mut HashMap<SmallGlyphKey, Pixmap>,
+) -> Result<(), String> {
+    let [left, top, right, bottom] = band;
+    let room = (right - left) * 0.94;
+    let correct = color_rgb(spec.colors.correct, [13, 188, 121]);
+    let dim = [150, 155, 165];
+    let measure = |size: f32| {
+        let arrow = size * 1.6;
+        let check = size * 0.9;
+        spec.chain
+            .iter()
+            .map(|(label, done)| text_cells_width(label, size, cell_pixels) + if *done { check } else { 0.0 })
+            .sum::<f32>()
+            + arrow * spec.chain.len().saturating_sub(1) as f32
+    };
+    let mut size = size;
+    while measure(size) > room && size > 8.0 {
+        size *= 0.92;
+    }
+    let minimum = (f32::from(cell_pixels.height) * 0.7).max(9.0);
+    if measure(size) > room || size < minimum {
+        let size = (bottom - top) * 0.45;
+        return draw_small_text(
+            pixmap,
+            font,
+            &spec.chain_short,
+            (left + right) / 2.0,
+            top + ((bottom - top) - size) / 2.0,
+            size as u32,
+            [235, 235, 235],
+            true,
+            TextAlign::Center,
+            cell_pixels,
+            glyphs,
+        );
+    }
+    let y = top + ((bottom - top) - size) / 2.0;
+    let center_y = y + size / 2.0;
+    let mut x = (left + right) / 2.0 - measure(size) / 2.0;
+    for (index, (label, done)) in spec.chain.iter().enumerate() {
+        if index > 0 {
+            // Arrow: a shaft and a head.
+            let start = x + size * 0.3;
+            let end = x + size * 1.3;
+            stroke_line(
+                pixmap,
+                (start, center_y),
+                (end - size * 0.25, center_y),
+                dim,
+                255,
+                (size * 0.1).max(1.5),
+                None,
+            );
+            if let Some(path) = polygon_path([
+                (end, center_y),
+                (end - size * 0.38, center_y - size * 0.24),
+                (end - size * 0.38, center_y + size * 0.24),
+            ]) {
+                fill_path(pixmap, &path, dim, 255);
+            }
+            x += size * 1.6;
+        }
+        if *done {
+            let mut check = PathBuilder::new();
+            check.move_to(x + size * 0.08, center_y);
+            check.line_to(x + size * 0.3, center_y + size * 0.25);
+            check.line_to(x + size * 0.7, center_y - size * 0.3);
+            if let Some(path) = check.finish() {
+                stroke_path(pixmap, &path, correct, 255, (size * 0.13).max(2.0));
+            }
+            x += size * 0.9;
+        }
+        draw_small_text(
+            pixmap,
+            font,
+            label,
+            x,
+            y,
+            size as u32,
+            if *done { correct } else { dim },
+            *done,
+            TextAlign::Left,
+            cell_pixels,
+            glyphs,
+        )?;
+        x += text_cells_width(label, size, cell_pixels);
+    }
+    Ok(())
 }
