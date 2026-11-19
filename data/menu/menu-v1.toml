@@ -51,7 +51,7 @@ advance = { metric = "accuracy-gate-passed", rule = "gate-passed", sessions = 3,
 
 [[prescription.level]]
 mode = "sentence"
-minutes = 4
+minutes = 3
 settings = { "session.error_mode" = "stop", "gate.min_accuracy" = 0.96, "pacer.enabled" = false }
 focus = { en = "Carry the same careful keystrokes into sentences.", ja = "短文でも 1 打ずつ確実に打つ" }
 advance = { metric = "accuracy-gate-passed", rule = "gate-passed", sessions = 3, source = "step", note = { en = "Pass the accuracy gate three sessions in a row.", ja = "関門を 3 回続けて通る" } }
@@ -132,21 +132,21 @@ alternate = "preview.phrase"
 
 [[prescription.level]]
 mode = "sentence"
-minutes = 4
+minutes = 3
 settings = { "session.preview_items" = 3, "mode.sentence.hide_typed" = true }
 focus = { en = "Look at the next word, not the character being typed.", ja = "打っている文字ではなく，次の単語を見る" }
 advance = { metric = "word-onset-ratio", rule = "le-own-median", sessions = 3, source = "check", note = { en = "Keep word-onset delay at or below your median for three sessions.", ja = "語頭の遅れが自分の中央値以下の回を 3 回続ける" } }
 
 [[prescription.level]]
 mode = "sentence"
-minutes = 4
+minutes = 3
 settings = { "session.preview_items" = 2, "mode.sentence.hide_typed" = true }
 focus = { en = "Keep looking ahead while typing continuously.", ja = "先を見たまま打ち続ける" }
 advance = { metric = "word-onset-ratio", rule = "le-own-median", sessions = 3, source = "check", note = { en = "Keep word-onset delay at or below your median for three sessions.", ja = "語頭の遅れが自分の中央値以下の回を 3 回続ける" } }
 
 [[prescription.level]]
 mode = "sentence"
-minutes = 4
+minutes = 3
 settings = { "session.preview_items" = 1, "mode.sentence.hide_typed" = false }
 focus = { en = "Check that word starts stay smooth with less assistance.", ja = "補助を減らしても語頭で止まらないか確かめる" }
 advance = { metric = "word-onset-ratio", rule = "le-own-median", sessions = 3, source = "check", note = { en = "Keep word-onset delay at or below your median for three sessions.", ja = "語頭の遅れが自分の中央値以下の回を 3 回続ける" } }
@@ -212,14 +212,14 @@ alternate = "recovery.retry"
 
 [[prescription.level]]
 mode = "sentence"
-minutes = 4
+minutes = 3
 settings = { "session.error_mode" = "advance", "session.retry_on_error" = true }
 focus = { en = "Correct the error and return to your prior pace without stopping.", ja = "誤打しても止まらず，直してすぐ元の速さに戻る" }
 advance = { metric = "post-error-excess-ms", rule = "le-own-median", sessions = 3, source = "check", note = { en = "Keep excess time after errors at or below your median for three sessions.", ja = "誤り後の余分な時間が自分の中央値以下の回を 3 回続ける" } }
 
 [[prescription.level]]
 mode = "sentence"
-minutes = 4
+minutes = 3
 settings = { "session.error_mode" = "advance", "session.retry_on_error" = false }
 focus = { en = "Correct the error and return to your prior pace without stopping.", ja = "誤打しても止まらず，直してすぐ元の速さに戻る" }
 advance = { metric = "post-error-excess-ms", rule = "le-own-median", sessions = 3, source = "check", note = { en = "Keep excess time after errors at or below your median for three sessions.", ja = "誤り後の余分な時間が自分の中央値以下の回を 3 回続ける" } }
@@ -307,7 +307,7 @@ advance = { metric = "spelling-usage-rate", rule = "ge-threshold", threshold = 0
 
 [[prescription.level]]
 mode = "sentence"
-minutes = 4
+minutes = 3
 settings = { "mode.sentence.lang" = "ja" }
 focus = { en = "Keep the suggested spelling in Japanese sentences.", ja = "日本語の短文でも勧められた綴りに統一する" }
 advance = { metric = "spelling-usage-rate", rule = "ge-threshold", threshold = 0.80, sessions = 3, source = "check", note = { en = "Use the suggested spelling at least 80% of the time for three sessions.", ja = "その綴りの使用率が 80% 以上の回を 3 回続ける" } }
@@ -329,15 +329,15 @@ advance = { metric = "endurance-second-half-slowdown", rule = "lt-threshold", th
 
 [[prescription.level]]
 mode = "endurance"
-minutes = 4
-settings = { "endurance.minutes" = 4 }
+minutes = 3
+settings = { "endurance.minutes" = 3 }
 focus = { en = "Keep the same technique in the second half as in the first.", ja = "後半も前半と同じ打ち方を保つ" }
 advance = { metric = "endurance-second-half-slowdown", rule = "lt-threshold", threshold = 0.15, sessions = 3, source = "step", note = { en = "Keep second-half slowdown below 15% for three sessions.", ja = "後半の遅れを 15% 未満に 3 回続けて保つ" } }
 
 [[prescription.level]]
 mode = "endurance"
-minutes = 5
-settings = { "endurance.minutes" = 5 }
+minutes = 3
+settings = { "endurance.minutes" = 3 }
 focus = { en = "Keep the same technique in the second half as in the first.", ja = "後半も前半と同じ打ち方を保つ" }
 advance = { metric = "endurance-second-half-slowdown", rule = "lt-threshold", threshold = 0.15, sessions = 3, source = "step", note = { en = "Keep second-half slowdown below 15% for three sessions.", ja = "後半の遅れを 15% 未満に 3 回続けて保つ" } }
 

@@ -247,9 +247,11 @@ fn menu_minutes_control_primary_b_and_phase_durations() {
     // MYTASK-3619 (design §4.2, 2026-11-18): a prescription step takes its
     // catalog level's minutes (preview.wide: 4); the 20-minute frame of 7 is
     // only the default for a level without minutes. The earlier expectation
-    // of 7 stretched every primary A to the frame.
-    assert_eq!(twenty.steps.iter().find(|step| step.role == MenuRole::PrimaryA).unwrap().minutes, 4);
-    assert_eq!(twenty.steps.iter().find(|step| step.role == MenuRole::Check).unwrap().minutes, 4);
+    // of 7 stretched every primary A to the frame. MYTASK-3626: preview.wide
+    // ① is a sentence step, so the long-text limit of 3 applies; the check
+    // step (sentence) is 3 too instead of the 20-minute frame's 4.
+    assert_eq!(twenty.steps.iter().find(|step| step.role == MenuRole::PrimaryA).unwrap().minutes, 3);
+    assert_eq!(twenty.steps.iter().find(|step| step.role == MenuRole::Check).unwrap().minutes, 3);
 }
 
 #[test]
@@ -681,9 +683,10 @@ fn removable_keyboard_assistance_puts_blind_fade_first() {
 
 #[test]
 fn prescription_steps_take_the_catalog_level_minutes_and_the_total_is_shown() {
-    // §4.2 (MYTASK-3619): endurance.split level ③ is 5 minutes in a 20-minute
-    // menu (frame 7) and in a 10-minute menu (frame 4); the difference is not
-    // redistributed and the total says so.
+    // §4.2 (MYTASK-3619): endurance.split level ③ keeps its catalog minutes
+    // in a 20-minute menu (frame 7) and in a 10-minute menu (frame 4); the
+    // difference is not redistributed and the total says so. MYTASK-3626:
+    // every endurance level is 3 minutes (the long-text limit).
     let mut case = input(97.0, Component::Preview);
     case.endurance_break_recommended = true;
     let mut states = all_in_maintenance_except(&[]);
@@ -708,8 +711,8 @@ fn prescription_steps_take_the_catalog_level_minutes_and_the_total_is_shown() {
         .unwrap();
         let primary = menu.steps.iter().find(|step| step.role == MenuRole::PrimaryA).unwrap();
         assert_eq!(primary.prescription_id, "endurance.split");
-        assert_eq!(primary.minutes, 5, "{minutes}-minute menu");
-        assert_eq!(primary.settings.get("endurance.minutes").and_then(toml::Value::as_integer), Some(5));
+        assert_eq!(primary.minutes, 3, "{minutes}-minute menu");
+        assert_eq!(primary.settings.get("endurance.minutes").and_then(toml::Value::as_integer), Some(3));
         let total = menu.steps.iter().map(|step| u32::from(step.minutes)).sum::<u32>();
         assert_eq!(menu.total_minutes(), total);
         assert_ne!(menu.total_minutes(), u32::from(minutes));
@@ -723,26 +726,30 @@ fn a_level_without_minutes_uses_the_frame_and_endurance_minutes_must_match_the_s
     use rs_typing_trainer::practice::menu::{level_minutes, parse_catalog};
 
     let catalog = bundled_catalog().unwrap();
-    let mut level = catalog.prescription("preview.wide").unwrap().levels[0].clone();
-    assert_eq!(level_minutes(&level, 7), 4);
+    let mut level = catalog.prescription("accuracy.gate").unwrap().levels[0].clone();
+    assert_eq!(level_minutes(&level, 4), 4);
     level.minutes = 0;
-    assert_eq!(level_minutes(&level, 7), 7, "no minutes: the frame default");
+    assert_eq!(level_minutes(&level, 4), 4, "no minutes: the frame default");
+    assert_eq!(level_minutes(&level, 7), 5, "the 7-minute frame is cut to the 5-minute step limit");
+    let mut sentence = catalog.prescription("preview.wide").unwrap().levels[0].clone();
+    sentence.minutes = 0;
+    assert_eq!(level_minutes(&sentence, 7), 3, "a sentence step is cut to the long-text limit");
     let mut endurance = catalog.prescription("endurance.split").unwrap().levels[1].clone();
     endurance.minutes = 0;
-    assert_eq!(level_minutes(&endurance, 7), 4, "the mode's own duration setting");
+    assert_eq!(level_minutes(&endurance, 7), 3, "the mode's own duration setting");
 
     let raw = include_str!("../../data/menu/menu-v1.toml");
     let mismatched = raw.replacen(
-        "minutes = 4\nsettings = { \"endurance.minutes\" = 4 }",
-        "minutes = 5\nsettings = { \"endurance.minutes\" = 4 }",
+        "minutes = 3\nsettings = { \"endurance.minutes\" = 3 }",
+        "minutes = 2\nsettings = { \"endurance.minutes\" = 3 }",
         1,
     );
     assert_ne!(raw, mismatched);
     let error = parse_catalog(&mismatched).unwrap_err();
     assert!(error.contains("endurance.minutes"), "{error}");
     let without_minutes = raw.replacen(
-        "minutes = 4\nsettings = { \"endurance.minutes\" = 4 }",
-        "settings = { \"endurance.minutes\" = 4 }",
+        "minutes = 3\nsettings = { \"endurance.minutes\" = 3 }",
+        "settings = { \"endurance.minutes\" = 3 }",
         1,
     );
     assert!(parse_catalog(&without_minutes).is_ok(), "minutes is optional");
@@ -764,9 +771,9 @@ fn endurance_menu_step_keeps_the_mode_duration_equal_to_the_step_time() {
     );
     let menu = build_menu(bundled_catalog().unwrap(), &case, &MenuConfig::default(), &[], &states).unwrap();
     let step = menu.steps.iter().find(|step| step.prescription_id == "endurance.split").unwrap();
-    assert_eq!(step.minutes, 4);
+    assert_eq!(step.minutes, 3);
     let mut base = Config::default();
-    base.endurance.minutes = 3;
+    base.endurance.minutes = 5;
     let config = config_for_menu_step(&base, step).unwrap();
     assert_eq!(config.endurance.minutes, u64::from(step.minutes));
 }

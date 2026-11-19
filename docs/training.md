@@ -152,12 +152,14 @@ The menu for a day is fixed once its first step starts (for the same layout, pra
 | # | Step | Content | 10 min | 15 min (default) | 20 min |
 |---|---|---|---:|---:|---:|
 | 1 | Warm-up | `words`, pacer off, gate off | 2 | 2 | 2 |
-| 2 | Primary A | the first-ranked prescription at its current level | level (4) | level (5) | level (7) |
+| 2 | Primary A | the first-ranked prescription at its current level | level (4) | level (5) | level (5) |
 | 3 | Primary B | the second-ranked prescription at its current level | — | level (4) | level (4) |
-| 4 | Check | `sentence` without aids: one preview item, pacer off; the keyboard follows your own setting | 3 | 3 | 4 |
+| 4 | Check | `sentence` without aids: one preview item, pacer off; the keyboard follows your own setting | 3 | 3 | 3 |
 | 5 | Finish | three `burst` sprints | 1 | 1 | 1 |
 
-`[menu] minutes` selects 10, 15 or 20 (see [Configuration](configuration.md#practice-menu)). “level (n)” means that a prescription step runs for the `minutes` of its catalog level; n is only the slot default for a level that gives no `minutes`. The difference is not redistributed to other steps, so the menu screen and `stats --menu` show the actual total, followed by the configured length when they differ, for example `14 min (set: 15)`. Every level of `menu-v1` gives `minutes` (4 for most levels, 5 for `transition.adaptive` ① and ②, and 3, 4 and 5 for `endurance.split`), so with two 4-minute prescriptions the 10-, 15- and 20-minute plans total 10, 14 and 15 minutes. A level that sets a mode's own duration (`endurance.minutes`) must agree with its `minutes`, and the step runs the mode for exactly the step time. The introductory menu's `transition.adaptive` still takes the remaining time. The settings of a step override the configuration for that session only and are never written back to the configuration file.
+`[menu] minutes` selects 10, 15 or 20 (see [Configuration](configuration.md#practice-menu)). “level (n)” means that a prescription step runs for the `minutes` of its catalog level; n is only the slot default for a level that gives no `minutes`. The difference is not redistributed to other steps, so the menu screen and `stats --menu` show the actual total, followed by the configured length when they differ, for example `14 min (set: 15)`.
+
+No step runs longer than **5 minutes**, and a step that types long text — `sentence` or `endurance` — no longer than **3 minutes**, because long text tires the arms sooner. The limits apply to every way a step gets its time: a catalog level, the slot default (the 20-minute menu's 7-minute slot becomes 5, or 3 for long text) and the check step (3 minutes in every length; the 20-minute menu's fourth minute is not redistributed). The catalog is checked against the limits when it is loaded, so a level or fixed step over its limit is a catalog error rather than something cut silently. Every level of `menu-v1` gives `minutes`: 4 for most levels, 5 for `transition.adaptive` ① and ②, and 3 for the `sentence` levels and every `endurance.split` level. With two 4-minute prescriptions the 10-, 15- and 20-minute plans therefore total 10, 14 and 14 minutes. A level that sets a mode's own duration (`endurance.minutes`) must agree with its `minutes`, and the step runs the mode for exactly the step time. The settings of a step override the configuration for that session only and are never written back to the configuration file.
 
 The check step is the daily small measurement. It removes every aid so that its keystrokes can be compared across days; the skill records and most graduation conditions are taken from it, because the prescription steps run with aids.
 
@@ -189,7 +191,15 @@ Reaction time is not used for ranking. A preview step only adds it to the reason
 
 ### Introductory menu
 
-When no practice language has enough data, the menu is: warm-up (2 min), `transition.adaptive` at its current level as primary A (the remaining time: 3, 8 or 13 minutes), check (3 min) and finish (2 min), with the reason `Introductory menu: fewer than 2,000 logged keystrokes or no overall grade`. With two practice languages and neither ready, the introductory menu alternates the language daily.
+When no practice language has enough data, the menu is: warm-up (2 min), transition steps for the remaining time, check (3 min) and finish (2 min), with the reason `Introductory menu: fewer than 2,000 logged keystrokes or no overall grade`. The menu keeps its length: the remaining time is split into the fewest steps of at most 5 minutes, as evenly as possible with the longer steps first. The transition steps alternate between `transition.adaptive` and `transition.ngram`, starting with `transition.adaptive`, each at its current level. All of them are primary A.
+
+| Length | Steps (minutes) |
+|---|---|
+| 10 min | warm-up 2 · `transition.adaptive` 3 · check 3 · finish 2 |
+| 15 min | warm-up 2 · `transition.adaptive` 4 · `transition.ngram` 4 · check 3 · finish 2 |
+| 20 min | warm-up 2 · `transition.adaptive` 5 · `transition.ngram` 4 · `transition.adaptive` 4 · check 3 · finish 2 |
+
+`ngram` drills come from the English word pool, and a Japanese `ngram` step would only be a plain romaji word list, so a Japanese introductory menu uses `transition.adaptive` for every transition step. Before the player model has a target transition, an English `ngram` step builds its drills from `mode.keys` and its reason says `no target transition yet` (see [Targets in the prompts](#targets-in-the-prompts)). With two practice languages and neither ready, the introductory menu alternates the language daily and is split the same way in the language of the day.
 
 ### Two practice languages
 
@@ -262,14 +272,14 @@ Evidence strength uses five levels. None is “strong”: no typing-training int
 | `speed.pacer` | Follow a faster pacer | Speed: follow a slightly faster pace, but stop chasing when accuracy breaks | ① `phrase`, pacer ratio 1.05 → ② 1.10 | Reach the pacer target at 95% accuracy or better, three sessions in a row (step) | `medium` |
 | `reach.unlock` | Unlock remote rows | Reach: return to the home row after reaching | ① `words`, `only` with home-row base keys → ② `include` | Remote-row/home-row IKI ratio at or below your median, three times in a row (check) | `weak` |
 | `japanese.spelling` | Use the suggested romaji spelling | Japanese: use the suggested spelling consistently | ① `romaji`, `include` → ② Japanese `sentence` | Suggested spelling used at least 80% of the time, three times in a row (check) | `weak` |
-| `endurance.split` | Hold form through the second half | Endurance: keep the first-half technique in the second half | ① `endurance` 3 min → ② 4 min → ③ 5 min | Second-half slowdown below 15%, three sessions in a row (step) | `hypothesis` |
+| `endurance.split` | Hold form through the second half | Endurance: keep the first-half technique in the second half | ①②③ `endurance` 3 min | Second-half slowdown below 15%, three sessions in a row (step) | `hypothesis` |
 | `blind.fade` | Fade keyboard assistance | Visual assistance: do not look at the keyboard display | ① `keyboard.show = "auto"` → ② `hidden` → ③ `session.blind` | H5 marks keyboard assistance as removable (check) | `correlational` |
 
 Notes on how the current implementation runs these levels:
 
 - `words`, `ngram` and `romaji` levels of `reach.unlock`, `transition.*` and `japanese.spelling` use the targets described in [Targets in the prompts](#targets-in-the-prompts).
 - The `rhythm` levels play at the level's `pacer.ratio` times the rate derived from your median IKI: 90% at level ① and 95% at level ②. During the menu this replaces a fixed `rhythm.bpm`; outside the menu the rhythm mode keeps its own default (90%, or `rhythm.bpm`).
-- `endurance.split` levels last 3, 4 and 5 minutes, and `endurance.minutes` follows the step time.
+- Every `endurance.split` level lasts 3 minutes (the long-text limit); the levels do not lengthen the session, so moving up only means meeting the condition again. `endurance.minutes` follows the step time.
 - The spelling-usage rate is not measured yet, so the `japanese.spelling` condition always remains undetermined.
 - `blind.fade` is offered by rule 4 of [How weaknesses are chosen](#how-weaknesses-are-chosen).
 

@@ -1,7 +1,7 @@
 //! Countdown screen.
 
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Constraint, Direction, Layout};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Paragraph};
@@ -23,6 +23,10 @@ pub fn render(frame: &mut Frame, app: &App, remaining: f32) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    // Today's training (MYTASK-3627): the whole menu and where this step is,
+    // two rows below the hint. Nothing for a session started on its own.
+    let band = crate::ui::menu::progress_band_for_start(app, usize::from(inner.width));
+    let band_rows = if band.is_some() { 2 } else { 0 };
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -30,6 +34,7 @@ pub fn render(frame: &mut Frame, app: &App, remaining: f32) {
             Constraint::Length(7),
             Constraint::Length(2),
             Constraint::Length(1),
+            Constraint::Length(band_rows),
             Constraint::Min(0),
         ])
         .split(inner);
@@ -61,6 +66,13 @@ pub fn render(frame: &mut Frame, app: &App, remaining: f32) {
         .alignment(Alignment::Center)
         .style(Style::default().fg(hint_color));
     frame.render_widget(hint, chunks[3]);
+    if let Some(band) = band {
+        let row = Rect::new(chunks[4].x, chunks[4].y + 1, chunks[4].width, 1);
+        frame.render_widget(
+            Paragraph::new(band).alignment(Alignment::Center).style(Style::default().fg(theme.accent)),
+            row,
+        );
+    }
 }
 
 fn render_big_number(s: &str) -> String {

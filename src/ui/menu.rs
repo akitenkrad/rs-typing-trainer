@@ -196,3 +196,116 @@ fn truncate_display(value: &str, width: usize) -> String {
     output.push('…');
     output
 }
+
+/// The whole of today's menu on one line, with where the player is
+/// (MYTASK-3627): `✓ウォームアップ 2 › ▶遷移 4 › 遷移 4 › 確認 3 › 仕上げ 2  段 2/5 · 残り 13 分`.
+///
+/// Done steps carry `✓`; `marker` (the step about to start, or the next one
+/// on the result screen) carries `▶`. The minutes left are the minutes of the
+/// steps not done yet, together with the marked step. When the line does not
+/// fit `width` (East Asian display width), the minutes of the done steps are
+/// dropped first, then every step's minutes, and last the line shrinks to
+/// `段 2/5 ▶遷移 · 残り 13 分`.
+pub fn progress_band(
+    menu: &crate::practice::menu::DailyMenu,
+    completed: &std::collections::BTreeSet<usize>,
+    marker: Option<usize>,
+    position: usize,
+    lang: Lang,
+    width: usize,
+) -> String {
+    let total = menu.steps.len();
+    let left: u32 = menu
+        .steps
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !completed.contains(index) || marker == Some(*index))
+        .map(|(_, step)| u32::from(step.minutes))
+        .sum();
+    let status = match lang {
+        Lang::En => format!("Step {position}/{total} · {left} min left"),
+        Lang::Ja => format!("段 {position}/{total} · 残り {left} 分"),
+    };
+    let labels = menu
+        .steps
+        .iter()
+        .map(|step| crate::practice::menu::step_short_label(step, lang))
+        .collect::<Vec<_>>();
+    // How much of the per-step minutes to keep: all, those of the steps not
+    // done yet (a done step's minutes no longer matter), none.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Minutes {
+        All,
+        Pending,
+        None,
+    }
+    let steps = |minutes: Minutes| {
+        menu.steps
+            .iter()
+            .zip(&labels)
+            .enumerate()
+            .map(|(index, (step, label))| {
+                let marked = marker == Some(index);
+                let done = completed.contains(&index) && !marked;
+                let mark = if marked {
+                    "▶"
+                } else if done {
+                    "✓"
+                } else {
+                    ""
+                };
+                if minutes == Minutes::All || (minutes == Minutes::Pending && !done) {
+                    format!("{mark}{label} {}", step.minutes)
+                } else {
+                    format!("{mark}{label}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" › ")
+    };
+    for minutes in [Minutes::All, Minutes::Pending, Minutes::None] {
+        let line = format!("{}  {status}", steps(minutes));
+        if UnicodeWidthStr::width(line.as_str()) <= width {
+            return line;
+        }
+    }
+    let current = marker
+        .and_then(|index| labels.get(index))
+        .map(|label| format!(" ▶{label}"))
+        .unwrap_or_default();
+    let line = match lang {
+        Lang::En => format!("Step {position}/{total}{current} · {left} min left"),
+        Lang::Ja => format!("段 {position}/{total}{current} · 残り {left} 分"),
+    };
+    truncate_display(&line, width)
+}
+
+/// The progress band of the step `index` about to start (countdown screen).
+pub fn progress_band_for_start(app: &App, width: usize) -> Option<String> {
+    let menu = app.daily_menu.as_ref()?;
+    let index = app.menu_active_step?;
+    Some(progress_band(
+        menu,
+        &app.menu_completed,
+        Some(index),
+        index + 1,
+        app.config.general.lang,
+        width,
+    ))
+}
+
+/// The progress band after a step finished (result screen): `▶` moves to the
+/// step that [Enter] starts next — the same step while a burst series is
+/// unfinished, nothing after the last step.
+pub fn progress_band_after_step(app: &App, width: usize) -> Option<String> {
+    let menu = app.daily_menu.as_ref()?;
+    let current = app.menu_active_step?;
+    let repeat = menu
+        .steps
+        .get(current)
+        .is_some_and(|step| step.mode == "burst" && !app.burst_series.complete());
+    let next = if repeat { current } else { current + 1 };
+    let marker = (next < menu.steps.len()).then_some(next);
+    let position = marker.map_or(current + 1, |index| index + 1);
+    Some(progress_band(menu, &app.menu_completed, marker, position, app.config.general.lang, width))
+}

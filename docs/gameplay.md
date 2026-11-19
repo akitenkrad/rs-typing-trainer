@@ -138,9 +138,47 @@ The finish step consists of three `burst` sprints: `Enter` after each sprint sta
 
 When you leave the run after at least one finished step — with `Esc`, or by finishing the last step — the menu summary screen opens first. `Enter`, `Space` or `Esc` on it returns to the menu.
 
+### Where you are in the menu
+
+The countdown before each step and the result screen after it show the whole menu on one line: every step by a short name (the practice component of a prescription step, such as `Transition`, or the role of a fixed step) and its minutes, `✓` on finished steps and `▶` on the step about to start — on the result screen, the step that `Enter` starts next. The line ends with the position and the minutes left, which count the steps not finished yet, including the marked one:
+
+```text
+✓Warm-up 2 › ▶Transition 4 › Transition 4 › Check 3 › Finish 2  Step 2/5 · 13 min left
+```
+
+When the window is too narrow, the minutes of finished steps are dropped first, then every step's minutes, and last the line shrinks to `Step 2/5 ▶Transition · 13 min left`. Width is measured as terminal columns, so Japanese names count double. A session started from Individual training shows no such line. The countdown of the first step of a 15-minute introductory menu at 80×24:
+
+```text
+┌ Get ready! ──────────────────────────────────────────────────────────────────┐
+│                                                                              │
+│                                   ┌───────┐                                  │
+│                                   │       │                                  │
+│                                   │   3   │                                  │
+│                                   │       │                                  │
+│                                   └───────┘                                  │
+│                                                                              │
+│                              Get ready to type!                              │
+│                                                                              │
+│  ▶Warm-up › Transition › Transition › Check › Finish  Step 1/5 · 15 min left │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+(Blank rows above and below are trimmed. At 80 columns the English line drops the minutes; the Japanese one keeps them: `▶ウォームアップ 2 › 遷移 4 › 遷移 4 › 確認 3 › 仕上げ 2  段 1/5 · 残り 15 分`.)
+
 ### The menu line on the result screen
 
-The result screen of a menu step adds one line above the key hint, and the hint becomes `[Enter] Next step    [Esc] Menu`:
+The result screen of a menu step adds two lines above the key hint — the menu line, then the progress line under it — and the hint becomes `[Enter] Next step    [Esc] Menu`. The bottom of the result screen after the warm-up of the same menu at 80×24:
+
+```text
+│  💾 Saved to DB → row #1                                                     │
+│                                                                              │
+│  ✓Warm-up › ▶Transition › Transition › Check › Finish  Step 2/5 · 13 min left│
+│  [Enter] Next step    [Esc] Menu                                             │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+The warm-up has no graduation condition, so its menu line is empty. For a prescription step it reads:
 
 ```text
 Menu 2/5 Widen preview ② — Graduation condition: Keep word-onset delay at or below your median for three sessions. — This session: judged after the check step

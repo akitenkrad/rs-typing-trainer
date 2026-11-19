@@ -126,10 +126,10 @@ fn render_compact_image_result(frame: &mut Frame, app: &App, result: &GameResult
         .constraints([
             Constraint::Length(8),
             Constraint::Length(4),
-            Constraint::Length(2),
+            Constraint::Length(result_hint_height(app)),
             Constraint::Min(12),
             Constraint::Length(1),
-            Constraint::Length(2),
+            Constraint::Length(result_hint_height(app)),
         ])
         .split(area);
     let card_areas = Layout::default()
@@ -234,7 +234,7 @@ fn render_image_result(frame: &mut Frame, app: &App, result: &GameResult, theme:
             Constraint::Ratio(5, 9),
             Constraint::Ratio(4, 9),
             Constraint::Length(1),
-            Constraint::Length(2),
+            Constraint::Length(result_hint_height(app)),
         ])
         .split(area);
     let card_areas = Layout::default()
@@ -631,22 +631,24 @@ fn result_notice_lines(app: &App, theme: &Theme, lang: Lang) -> Vec<Line<'static
 fn render_text_result(frame: &mut Frame, app: &App, result: &GameResult, theme: &Theme, area: Rect, lang: Lang) {
     let compact = area.width < 100 || area.height < 30;
     let constraints = if compact {
+        // The progress band of today's training takes its row from the
+        // heatmap, which still shows its two entries in four rows.
         vec![
             Constraint::Length(3),
             Constraint::Length(4),
-            Constraint::Length(5),
+            Constraint::Length(7 - result_hint_height(app)),
             Constraint::Min(4),
             Constraint::Length(1),
-            Constraint::Length(2),
+            Constraint::Length(result_hint_height(app)),
         ]
     } else {
         vec![
             Constraint::Length(9),
             Constraint::Length(4),
-            Constraint::Length(10),
+            Constraint::Length(12 - result_hint_height(app)),
             Constraint::Min(6),
             Constraint::Length(1),
-            Constraint::Length(2),
+            Constraint::Length(result_hint_height(app)),
         ]
     };
     let rows = Layout::default().direction(Direction::Vertical).constraints(constraints).split(area);
@@ -746,17 +748,35 @@ fn save_line(app: &App, result: &GameResult, theme: &Theme) -> Line<'static> {
     }
 }
 
+/// Rows of the bottom hint area: one more for the progress band of today's
+/// training (MYTASK-3627).
+fn result_hint_height(app: &App) -> u16 {
+    if app.result_origin == ResultOrigin::JustPlayed && app.menu_active_step.is_some() {
+        3
+    } else {
+        2
+    }
+}
+
 fn render_result_hint(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, lang: Lang) {
     match app.result_origin {
         ResultOrigin::JustPlayed if app.menu_active_step.is_some() => {
             let rows = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Length(1), Constraint::Length(1)])
+                .constraints([Constraint::Length(1), Constraint::Length(1), Constraint::Length(1)])
                 .split(area);
-            if let Some(line) = menu_result_line(app, lang, usize::from(rows[0].width.saturating_sub(4))) {
+            let width = usize::from(rows[0].width.saturating_sub(4));
+            if let Some(line) = menu_result_line(app, lang, width) {
                 frame.render_widget(Paragraph::new(line).style(Style::default().fg(theme.warning)), left_inset(rows[0]));
             }
-            render_hint(frame, app, theme, rows[1], lang);
+            // MYTASK-3627: the whole menu, with the step [Enter] starts next.
+            // It starts where the other rows start and may use the right
+            // margin, so the full band fits 80 columns in Japanese.
+            let band_area = Rect::new(rows[1].x.saturating_add(2), rows[1].y, rows[1].width.saturating_sub(2), 1);
+            if let Some(band) = crate::ui::menu::progress_band_after_step(app, usize::from(band_area.width)) {
+                frame.render_widget(Paragraph::new(band).style(Style::default().fg(theme.accent)), band_area);
+            }
+            render_hint(frame, app, theme, rows[2], lang);
         }
         ResultOrigin::JustPlayed => render_hint(frame, app, theme, area, lang),
         ResultOrigin::History => render_hint_history(frame, app, theme, area, lang),

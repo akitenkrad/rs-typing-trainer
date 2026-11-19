@@ -93,7 +93,7 @@ Legacy session timing aliases are resolved independently for each key. An explic
 
 The `[menu]` section configures the [practice menu](training.md#practice-menu). Its keys are also in the table above and are described here in detail:
 
-- `menu.minutes` — integer, default `15`. Menu length; only `10`, `15` and `20` are accepted, and any other value is a configuration error. Ten minutes drops primary B; twenty minutes lengthens the check step to 4 minutes. Prescription steps run for the minutes of their catalog level, so the actual total can differ from this value (see [Steps and length](training.md#steps-and-length)).
+- `menu.minutes` — integer, default `15`. Menu length; only `10`, `15` and `20` are accepted, and any other value is a configuration error. Ten minutes drops primary B. No step runs longer than 5 minutes (3 for `sentence` and `endurance` steps), so twenty minutes keeps the check step at 3 minutes. Prescription steps run for the minutes of their catalog level, so the actual total can differ from this value (see [Steps and length](training.md#steps-and-length)).
 - `menu.languages` — array of `en` / `ja`, default unset. The practice languages of the menu: `["en"]`, `["ja"]`, or both (`["en", "ja"]`), which mixes both languages in one menu. Unset follows the interface language (`general.lang`, or `--lang`); an unset value is not written out, so a written configuration reads back as following the interface language. An empty array, more than two entries or a repeated language is a configuration error. The settings screen's “Practice-menu language” chooses Same as display (unset), English, Japanese, or English + 日本語; it is independent of the interface language and of `adaptive.lang`.
 
 ```toml

@@ -23,6 +23,31 @@ pub const MIN_MENU_KEYSTROKES: u64 = 2_000;
 pub const ACCURACY_PRIORITY_PERCENT: f64 = 94.5;
 /// Design §4.2: offer a benchmark after this many days.
 pub const BENCH_REMINDER_DAYS: i64 = 7;
+/// §4.2 (MYTASK-3626): no menu step runs longer than this.
+pub const MAX_STEP_MINUTES: u8 = 5;
+/// §4.2 (MYTASK-3626): a step that types long text (`sentence`,
+/// `endurance`) tires the arms sooner, so it is capped lower.
+pub const MAX_LONG_TEXT_MINUTES: u8 = 3;
+
+/// Whether a menu mode types long text (`sentence` or `endurance`).
+pub fn is_long_text_mode(mode: &str) -> bool {
+    matches!(mode, "sentence" | "endurance")
+}
+
+/// The longest a step of `mode` may run (§4.2, MYTASK-3626).
+pub fn max_step_minutes(mode: &str) -> u8 {
+    if is_long_text_mode(mode) {
+        MAX_LONG_TEXT_MINUTES
+    } else {
+        MAX_STEP_MINUTES
+    }
+}
+
+/// `minutes` cut to the step limit of `mode`. Time cut off is not
+/// redistributed (the same rule as catalog-level minutes).
+pub fn cap_step_minutes(mode: &str, minutes: u8) -> u8 {
+    minutes.min(max_step_minutes(mode))
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LocalizedText {
@@ -100,6 +125,15 @@ impl MenuComponent {
             Component::Preview => Self::Preview,
             Component::Recovery => Self::Recovery,
             Component::Overlap => Self::Overlap,
+        }
+    }
+
+    /// A name short enough for the one-line progress band (MYTASK-3627).
+    fn short_label(self, lang: Lang) -> &'static str {
+        match (self, lang) {
+            (Self::Transition, Lang::En) => "Transition",
+            (Self::Blind, Lang::En) => "Blind",
+            _ => self.label(lang),
         }
     }
 
@@ -377,6 +411,7 @@ impl MenuCatalog {
             }
             validate_mode(&step.mode, &step.id)?;
             validate_settings(&step.settings, &step.id)?;
+            validate_step_minutes(&step.mode, i64::from(step.minutes), &step.id)?;
             step.title.validate(&format!("{}.title", step.id))?;
             step.focus.validate(&format!("{}.focus", step.id))?;
         }
@@ -397,6 +432,10 @@ impl MenuCatalog {
                 level.advance.note.validate(&format!("{owner}.advance.note"))?;
                 if level.advance.sessions == 0 {
                     return Err(format!("{owner} has invalid advance sessions"));
+                }
+                validate_step_minutes(&level.mode, i64::from(level.minutes), &owner)?;
+                if let Some(mode_minutes) = mode_duration_setting(&level.settings) {
+                    validate_step_minutes(&level.mode, mode_minutes, &format!("{owner} endurance.minutes"))?;
                 }
                 // §4.2 (MYTASK-3619): a mode's own duration setting must not
                 // disagree with the step time.
@@ -443,6 +482,17 @@ pub fn parse_catalog(raw: &str) -> Result<MenuCatalog, String> {
 pub fn bundled_catalog() -> Result<&'static MenuCatalog, String> {
     static CATALOG: OnceLock<Result<MenuCatalog, String>> = OnceLock::new();
     CATALOG.get_or_init(|| parse_catalog(MENU_DATA)).as_ref().map_err(Clone::clone)
+}
+
+/// §4.2 (MYTASK-3626): a catalog step longer than its mode's limit is a
+/// catalog error, not something to cut silently.
+fn validate_step_minutes(mode: &str, minutes: i64, owner: &str) -> Result<(), String> {
+    let limit = max_step_minutes(mode);
+    if minutes > i64::from(limit) {
+        Err(format!("{owner} has {minutes} minutes, over the {limit}-minute limit for {mode} steps"))
+    } else {
+        Ok(())
+    }
 }
 
 fn validate_mode(mode: &str, owner: &str) -> Result<(), String> {
@@ -510,15 +560,19 @@ fn mode_duration_setting(settings: &BTreeMap<String, toml::Value>) -> Option<i64
 /// Minutes of a prescription step (§4.2, MYTASK-3619): the catalog level's
 /// `minutes` is authoritative, and a mode's own duration setting
 /// (`endurance.minutes`) is kept in agreement with it. `frame` (the slot's
-/// 4–5 or 7 minutes) is used only when the level gives neither.
+/// 4–5 or 7 minutes) is used only when the level gives neither. The result
+/// never exceeds the step limit of the level's mode ([`max_step_minutes`],
+/// MYTASK-3626), so the 7-minute frame becomes 5 (3 for long text).
 pub fn level_minutes(level: &PrescriptionLevel, frame: u8) -> u8 {
-    if level.minutes > 0 {
-        return level.minutes;
-    }
-    mode_duration_setting(&level.settings)
-        .and_then(|minutes| u8::try_from(minutes).ok())
-        .filter(|minutes| *minutes > 0)
-        .unwrap_or(frame)
+    let minutes = if level.minutes > 0 {
+        level.minutes
+    } else {
+        mode_duration_setting(&level.settings)
+            .and_then(|minutes| u8::try_from(minutes).ok())
+            .filter(|minutes| *minutes > 0)
+            .unwrap_or(frame)
+    };
+    cap_step_minutes(&level.mode, minutes)
 }
 
 /// Setting keys under this prefix carry a step's practice target (§4.2,
@@ -1413,7 +1467,9 @@ pub fn build_menu_for_languages(
     let check_language = plans[check_index].language;
     let mut check = fixed_step(catalog.fixed(MenuRole::Check)?, display, check_language, "-");
     if menu.minutes == 20 {
-        check.minutes = 4;
+        // The check step is a `sentence` step: its limit (3) wins over the
+        // 20-minute frame's 4, and the minute is not redistributed.
+        check.minutes = cap_step_minutes(&check.mode, 4);
     }
     steps.push(check);
     let finish_language = b_plan.map_or(a_plan.language, |plan| plan.language);
@@ -1673,22 +1729,33 @@ fn introductory_menu(
         practice,
         &reason_with_language(intro_reason, practice, display, show_label),
     )];
-    let selected = available_prescription(catalog, "transition.adaptive", states)
+    let adaptive = available_prescription(catalog, "transition.adaptive", states)
         .or_else(|| available_prescription(catalog, "transition.ngram", states))
         .ok_or_else(|| "no introductory transition prescription is available".to_owned())?;
+    // §4.2 (MYTASK-3626): the transition time is split into steps of at most
+    // five minutes, alternating with the n-gram drill. The n-gram mode draws
+    // from the English word pool only (a Japanese n-gram step would become a
+    // plain romaji word list), so a Japanese menu stays on the adaptive drill.
+    let ngram = (practice == Lang::En)
+        .then(|| available_prescription(catalog, "transition.ngram", states))
+        .flatten()
+        .unwrap_or(adaptive);
     let reason = match display {
         Lang::En => "Introductory routine: practice weak transitions while collecting baseline data",
         Lang::Ja => "入門ルーチン: 基準データを集めながら弱い遷移を練習",
     };
     let reason = reason_with_language(reason, practice, display, show_label);
-    steps.push(prescription_step_with_reason(
-        &selected,
-        MenuRole::PrimaryA,
-        menu.minutes.saturating_sub(7),
-        display,
-        practice,
-        &reason,
-    ));
+    for (index, minutes) in introductory_transition_minutes(menu.minutes.saturating_sub(7)).into_iter().enumerate() {
+        let selected = if index % 2 == 0 { &adaptive } else { &ngram };
+        steps.push(prescription_step_with_reason(
+            selected,
+            MenuRole::PrimaryA,
+            minutes,
+            display,
+            practice,
+            &reason,
+        ));
+    }
     let mut check = fixed_step(catalog.fixed(MenuRole::Check)?, display, practice, &reason);
     check.minutes = 3;
     steps.push(check);
@@ -1704,6 +1771,18 @@ fn introductory_menu(
         bench_recommended,
         steps,
     })
+}
+
+/// The introductory transition time split into the fewest steps of at most
+/// [`MAX_STEP_MINUTES`], as evenly as possible with the longer steps first
+/// (§4.2, MYTASK-3626): 3 → [3], 8 → [4, 4], 13 → [5, 4, 4].
+pub fn introductory_transition_minutes(total: u8) -> Vec<u8> {
+    if total == 0 {
+        return Vec::new();
+    }
+    let count = total.div_ceil(MAX_STEP_MINUTES);
+    let (base, extra) = (total / count, total % count);
+    (0..count).map(|index| base + u8::from(index < extra)).collect()
 }
 
 fn primary_minutes(minutes: u8) -> u8 {
@@ -1722,7 +1801,7 @@ fn fixed_step(step: &FixedStep, display: Lang, practice: Lang, reason: &str) -> 
         title: step.title.text(display).to_owned(),
         level: None,
         mode: step.mode.clone(),
-        minutes: step.minutes,
+        minutes: cap_step_minutes(&step.mode, step.minutes),
         reason: reason.to_owned(),
         focus: step.focus.text(display).to_owned(),
         advance: "-".to_owned(),
@@ -1780,7 +1859,7 @@ fn prescription_step_with_reason(
         title: prescription.title.text(display).to_owned(),
         level: Some(*level_number),
         mode: level.mode.clone(),
-        minutes,
+        minutes: cap_step_minutes(&level.mode, minutes),
         reason: reason.to_owned(),
         focus: level.focus.text(display).to_owned(),
         advance,
@@ -2524,6 +2603,18 @@ fn language_row_label(practice: Lang, display: Lang) -> &'static str {
         (Lang::En, Lang::Ja) => "英語",
         (Lang::Ja, Lang::Ja) => "日本語",
     }
+}
+
+/// A short name of a step for the progress band of today's training
+/// (MYTASK-3627): the practice component of a prescription step («遷移»,
+/// «Accuracy»), the role of a fixed step («ウォームアップ», «Check»).
+pub fn step_short_label(step: &MenuStep, lang: Lang) -> String {
+    if matches!(step.role, MenuRole::PrimaryA | MenuRole::PrimaryB)
+        && let Some(prescription) = bundled_catalog().ok().and_then(|catalog| catalog.prescription(&step.prescription_id))
+    {
+        return prescription.component.short_label(lang).to_owned();
+    }
+    role_label(step.role, lang).to_owned()
 }
 
 fn role_label(role: MenuRole, lang: Lang) -> &'static str {
