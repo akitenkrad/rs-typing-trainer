@@ -5,7 +5,7 @@ role = "warmup"
 id = "fixed.warmup"
 title = { en = "Warm-up", ja = "ウォームアップ" }
 mode = "words"
-minutes = 2
+minutes = 1
 settings = { "pacer.enabled" = false, "gate.min_accuracy" = 0.0 }
 focus = { en = "Start with familiar words and favor clean keystrokes over speed.", ja = "よく打つ単語で，速さより正確な打鍵を優先する" }
 
@@ -21,11 +21,11 @@ focus = { en = "Keep the same technique without training aids.", ja = "補助が
 [[fixed_step]]
 role = "finish"
 id = "fixed.finish"
-title = { en = "Finish with three bursts", ja = "バースト 3 本で仕上げ" }
+title = { en = "Finish with three short sprints", ja = "短距離 3 本で仕上げ" }
 mode = "burst"
 minutes = 1
 settings = { "pacer.enabled" = false }
-focus = { en = "Stay relaxed through three short bursts.", ja = "力を抜いたまま短いバーストを 3 本打つ" }
+focus = { en = "Type three all-out sprints (bursts) of about 12 words; the best one counts. Stay relaxed while going fast.", ja = "12 語ほどの短い区間（バースト）を全力で 3 本打ち，最も速い 1 本を記録する．力を抜いたまま速さを出す" }
 
 [[prescription]]
 id = "accuracy.gate"

@@ -6,6 +6,7 @@
 
 | Mode | Prompts | Key selection |
 |---|---|---|
+| `warmup` | The practice menu's 1-minute warm-up (`words`, pacer and gate off), in English or Japanese | No key picker; `L` switches the language |
 | `random` | Pseudo-words made from `mode.keys` | The selected characters are the alphabet |
 | `words` | English words | `include` or `only` |
 | `romaji` | Japanese words shown with their kana reading | `include` or `only`, evaluated against accepted romaji spellings |
@@ -15,7 +16,7 @@
 | `adaptive` | Cost-weighted weak transitions in real words and drills | Automatic from shrinkage estimates |
 | `unlock` | Words and fallback pseudo-words using unlocked keys | Automatic, stored per layout |
 | `rhythm` | Words paced one keystroke per metronome beat | Automatic |
-| `burst` | A 10–15-word sprint, repeated three times | Automatic |
+| `burst` | Three all-out sprints over 10–15 words; the fastest one is recorded | Automatic |
 | `endurance` | A 3–5-minute sentence session | No key picker; uses the sentence language |
 
 The title opens the mode selector. `words`, `romaji`, and `ngram` then open the keyboard key picker. Move with the arrow keys, press `Space` to toggle a key, `Tab` to switch between `include` and `only`, and `Enter` to start. The selection is saved in `[mode]` without rewriting unrelated TOML keys.
@@ -26,7 +27,7 @@ The previous ten prompts are excluded from each draw while enough candidates rem
 
 Japanese sentences and phrases display the surface form, kana reading, and live romaji guide as three independently wrapped rows. Completed kana use a distinct style. Sentence and phrase modes never apply or display the per-item timeout. Phrase mode still follows the normal session duration. Setting `item_timeout_seconds = 0` hides the timer in every timed mode.
 
-`phrase`, `adaptive`, `unlock`, `rhythm`, `burst` and `endurance` start directly. In phrase mode, `L` switches English/Japanese and `C` cycles short, normal, long and mixed. English length ranges are 10–15, 16–22 and 23–29 display characters; Japanese ranges are 6–10, 11–15 and 16–20 reading characters. Mixed repeats five short, five normal and five long prompts in that order. Press `P` on the mode-selection screen to toggle the pacer for `words`, `sentence`, `phrase` or `adaptive`; `L` on `adaptive` switches its practice language independently of the interface; `[` and `]` choose zero through three preview items. See [Training tools](training.md) for goals, initial values and configuration.
+`warmup`, `phrase`, `adaptive`, `unlock`, `rhythm`, `burst` and `endurance` start directly. `warmup` is not a mode of its own: it runs `words` with the menu's warm-up settings for that session only and is recorded as `words` (see [Warm-up on its own](training.md#warm-up-on-its-own)). In phrase mode, `L` switches English/Japanese and `C` cycles short, normal, long and mixed. English length ranges are 10–15, 16–22 and 23–29 display characters; Japanese ranges are 6–10, 11–15 and 16–20 reading characters. Mixed repeats five short, five normal and five long prompts in that order. Press `P` on the mode-selection screen to toggle the pacer for `words`, `sentence`, `phrase` or `adaptive`; `L` on `adaptive` switches its practice language independently of the interface; `[` and `]` choose zero through three preview items. See [Training tools](training.md) for goals, initial values and configuration.
 
 ## Daily rotation
 

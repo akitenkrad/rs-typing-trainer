@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use chrono::Duration as ChronoDuration;
 use ratatui::Frame;
@@ -17,9 +17,9 @@ use crate::i18n::{Lang, Msg};
 use crate::layout::geometry::geometry;
 use crate::ui::analysis_image::{
     ComparisonBarsSpec, FORECAST_EN_COLOR, FORECAST_JA_COLOR, FingerChartSpec, GradeLadderSpec, MetricKind, PixelPoint, RadarAxis, RadarChartSpec,
-    RadarRing, SERIES_COLORS, SparklineSpec, TransitionArrowSpec, TransitionBar, TransitionBarsSpec, TransitionKeyboardSpec, TrendChartSpec,
-    TrendDateRange, TrendForecast, TrendPoint, build_finger_bars, build_text_trend_data, build_trend_data, metric_value, mode_label,
-    shared_trend_date_range,
+    RadarRing, SERIES_COLORS, SparklineSpec, TREND_BREAK_WIDTH_DAYS, TextTrendData, TransitionArrowSpec, TransitionBar, TransitionBarsSpec,
+    TransitionKeyboardSpec, TrendAxis, TrendChartSpec, TrendDateRange, TrendForecast, TrendPoint, build_finger_bars, build_text_trend_data,
+    build_trend_data, metric_value, mode_label, shared_trend_axis,
 };
 use crate::ui::keyboard::{
     KeyboardState, KeyboardStyle, KeyboardView, finger_color, heatmap_color, keycap_center_cells, keycap_image_area, keycap_tile_placements,
@@ -42,13 +42,21 @@ pub fn render(frame: &mut Frame, app: &App) {
         .split(inner);
     render_tabs(frame, app, &theme, chunks[0]);
     match app.analysis_tab {
-        0 => render_summary(frame, app, &theme, chunks[1]),
-        1 => render_trend(frame, app, chunks[1]),
-        2 => render_keyboard(frame, app, chunks[1]),
-        3 => render_transitions(frame, app, &theme, chunks[1]),
-        4 => render_fingers(frame, app, chunks[1]),
-        5 => render_bench(frame, app, chunks[1]),
+        crate::app::ANALYSIS_TODAY_TAB => crate::ui::today::render(frame, app, &theme, chunks[1]),
+        crate::app::ANALYSIS_COACH_TAB => render_summary(frame, app, &theme, chunks[1]),
+        crate::app::ANALYSIS_TREND_TAB => render_trend(frame, app, chunks[1]),
+        crate::app::ANALYSIS_KEYBOARD_TAB => render_keyboard(frame, app, chunks[1]),
+        crate::app::ANALYSIS_TRANSITIONS_TAB => render_transitions(frame, app, &theme, chunks[1]),
+        crate::app::ANALYSIS_FINGERS_TAB => render_fingers(frame, app, chunks[1]),
+        crate::app::ANALYSIS_BENCH_TAB => render_bench(frame, app, chunks[1]),
         _ => render_skills(frame, app, &theme, chunks[1]),
+    }
+    if app.analysis_tab == crate::app::ANALYSIS_TODAY_TAB {
+        // The «today» tab reads today's records directly; the period and mode
+        // filters do not apply, so they are not shown.
+        let hint = crate::ui::today::hint(lang).map(Line::from).to_vec();
+        frame.render_widget(Paragraph::new(hint).alignment(Alignment::Center), chunks[2]);
+        return;
     }
     let period = match app.analysis_period {
         AnalysisPeriod::All => Msg::PeriodAll.text(lang),
@@ -81,6 +89,10 @@ pub fn render(frame: &mut Frame, app: &App) {
 fn render_tabs(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let lang = app.config.general.lang;
     let labels = [
+        match lang {
+            Lang::En => "Today",
+            Lang::Ja => "今日",
+        },
         match lang {
             Lang::En => "Coach",
             Lang::Ja => "コーチ",
@@ -469,36 +481,124 @@ fn render_trend(frame: &mut Frame, app: &App, area: Rect) {
     if let Some(spec) = &mut image_specs[0] {
         spec.forecasts = trend_forecasts(app);
     }
-    let x_range = shared_trend_date_range(image_specs.iter().flatten());
-    for ((area, kind), spec) in chunks.iter().copied().zip(kinds).zip(image_specs) {
-        render_metric_chart(frame, app, area, kind, lang, spec, x_range);
+    // One axis for the three image charts (forecasts included) and one for the
+    // three text charts, so that a day sits in the same column in each chart.
+    let image_axis = shared_trend_axis(image_specs.iter().flatten());
+    let text_data = kinds.map(|kind| build_text_trend_data(&app.analysis_records, kind, lang));
+    let text_axis = TrendAxis::from_dates(
+        text_data
+            .iter()
+            .flatten()
+            .flat_map(|data| data.series.iter().flat_map(|series| series.points.iter().filter_map(|(date, _)| *date))),
+    );
+    let text_unknown = text_data
+        .iter()
+        .flatten()
+        .any(|data| data.series.iter().any(|series| series.points.iter().any(|(date, _)| date.is_none())));
+    for (((area, kind), spec), text) in chunks.iter().copied().zip(kinds).zip(image_specs).zip(text_data) {
+        if let (Some(mut spec), Some(axis)) = (spec, image_axis.as_ref())
+            && render_metric_chart_image(frame, app, area, lang, &mut spec, axis)
+        {
+            continue;
+        }
+        let text_axis = text_axis.as_ref().map(|axis| TextTrendAxis { axis, unknown: text_unknown });
+        render_metric_chart_text(frame, &app.analysis_records, area, kind, lang, text, text_axis);
     }
 }
 
-fn render_metric_chart(
+/// The x axis of the text trend charts: the shared [`TrendAxis`], plus a slot
+/// after its end for records whose timestamp could not be read.
+#[derive(Clone, Copy)]
+struct TextTrendAxis<'a> {
+    axis: &'a TrendAxis,
+    unknown: bool,
+}
+
+impl TextTrendAxis<'_> {
+    fn x(&self, date: Option<chrono::NaiveDate>) -> f64 {
+        match date {
+            Some(date) => self.axis.position(date),
+            None => self.axis.span() + TREND_BREAK_WIDTH_DAYS as f64,
+        }
+    }
+
+    fn upper_bound(&self) -> f64 {
+        let end = if self.unknown {
+            self.axis.span() + TREND_BREAK_WIDTH_DAYS as f64
+        } else {
+            self.axis.span()
+        };
+        end.max(1.0)
+    }
+
+    fn crosses_break(&self, a: Option<chrono::NaiveDate>, b: Option<chrono::NaiveDate>) -> bool {
+        match (a, b) {
+            (Some(a), Some(b)) => self.axis.crosses_break(a, b),
+            _ => a != b,
+        }
+    }
+}
+
+/// Marks the axis breaks with `≈` on `axis_row` and writes the first date of
+/// each segment after a break on `label_row` where the row is still blank
+/// (a `≈` counts as blank, so the date may sit right after its mark).
+/// `column_of` maps a fraction of the axis to a terminal column.
+fn overlay_axis_breaks(
     frame: &mut Frame,
-    app: &App,
+    axis: &TrendAxis,
+    to_fraction: impl Fn(f64) -> f64,
+    column_of: impl Fn(f64) -> u16,
+    axis_row: u16,
+    label_row: Option<u16>,
+    right: u16,
+) {
+    let buffer = frame.buffer_mut();
+    let span = axis.span().max(1.0);
+    for (fraction, segment) in axis.break_fractions().into_iter().zip(&axis.segments()[1..]) {
+        let mark = column_of(to_fraction(fraction * span));
+        if let Some(cell) = buffer.cell_mut((mark, axis_row)) {
+            cell.set_symbol("≈");
+        }
+        let Some(label_row) = label_row else {
+            continue;
+        };
+        let label = segment.start.to_string();
+        let width = label.width() as u16;
+        let mut start = column_of(to_fraction(axis.position(segment.start)));
+        if label_row == axis_row {
+            start = start.max(mark + 1);
+        }
+        if start + width > right {
+            continue;
+        }
+        let blank = (start.saturating_sub(1)..(start + width + 1).min(right))
+            .all(|x| buffer.cell((x, label_row)).is_some_and(|cell| matches!(cell.symbol(), " " | "≈")));
+        if !blank {
+            continue;
+        }
+        for (offset, ch) in label.chars().enumerate() {
+            if let Some(cell) = buffer.cell_mut((start + offset as u16, label_row)) {
+                cell.set_char(ch);
+            }
+        }
+    }
+}
+
+fn render_metric_chart_text(
+    frame: &mut Frame,
+    records: &[crate::record::SessionRecord],
     area: Rect,
     kind: MetricKind,
     lang: Lang,
-    spec: Option<TrendChartSpec>,
-    x_range: Option<TrendDateRange>,
+    spec: Option<TextTrendData>,
+    axis: Option<TextTrendAxis<'_>>,
 ) {
-    if let (Some(mut spec), Some(x_range)) = (spec, x_range)
-        && render_metric_chart_image(frame, app, area, lang, &mut spec, x_range)
-    {
-        return;
-    }
-    render_metric_chart_text(frame, &app.analysis_records, area, kind, lang);
-}
-
-fn render_metric_chart_text(frame: &mut Frame, records: &[crate::record::SessionRecord], area: Rect, kind: MetricKind, lang: Lang) {
     let title = match kind {
         MetricKind::NetWpm => Msg::TrendNetWpm.text(lang),
         MetricKind::Accuracy => Msg::TrendAccuracy.text(lang),
         MetricKind::Iki => Msg::TrendIki.text(lang),
     };
-    let Some(spec) = build_text_trend_data(records, kind, lang) else {
+    let (Some(spec), Some(axis)) = (spec, axis) else {
         let current = records
             .iter()
             .rev()
@@ -514,42 +614,43 @@ fn render_metric_chart_text(frame: &mut Frame, records: &[crate::record::Session
         );
         return;
     };
-    let dates = spec
+    // Each series is split into runs that do not cross a break, so that no
+    // line is drawn over a cut-out gap.
+    let runs = spec
         .series
-        .iter()
-        .flat_map(|series| series.points.iter().map(|(date, _)| date.clone()))
-        .collect::<std::collections::BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    let date_indices = dates
         .iter()
         .enumerate()
-        .map(|(index, date)| (date, index as f64))
-        .collect::<BTreeMap<_, _>>();
-    let points = spec
-        .series
-        .iter()
-        .map(|series| {
-            series
-                .points
-                .iter()
-                .map(|(date, value)| (*date_indices.get(date).expect("date index"), *value))
-                .collect::<Vec<_>>()
+        .flat_map(|(index, series)| {
+            let mut runs = Vec::<(usize, Vec<(f64, f64)>)>::new();
+            let mut previous = None;
+            for (date, value) in &series.points {
+                let point = (axis.x(*date), *value);
+                match (runs.last_mut(), previous) {
+                    (Some((_, run)), Some(previous)) if !axis.crosses_break(previous, *date) => run.push(point),
+                    _ => runs.push((index, vec![point])),
+                }
+                previous = Some(*date);
+            }
+            runs
         })
         .collect::<Vec<_>>();
-    let datasets = points
+    let mut named = BTreeSet::new();
+    let datasets = runs
         .iter()
-        .enumerate()
         .map(|(index, values)| {
-            Dataset::default()
-                .name(spec.series[index].name.clone())
+            let dataset = Dataset::default()
                 .marker(symbols::Marker::Braille)
                 .graph_type(GraphType::Line)
-                .style(Style::default().fg(spec.series[index].color))
-                .data(values)
+                .style(Style::default().fg(spec.series[*index].color))
+                .data(values);
+            if named.insert(*index) {
+                dataset.name(spec.series[*index].name.clone())
+            } else {
+                dataset
+            }
         })
         .collect::<Vec<_>>();
-    let values = points.iter().flatten().map(|(_, value)| *value).collect::<Vec<_>>();
+    let values = runs.iter().flat_map(|(_, run)| run).map(|(_, value)| *value).collect::<Vec<_>>();
     let min_y = values.iter().copied().fold(f64::INFINITY, f64::min);
     let max_y = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     let padding = if (max_y - min_y).abs() < f64::EPSILON {
@@ -557,14 +658,19 @@ fn render_metric_chart_text(frame: &mut Frame, records: &[crate::record::Session
     } else {
         0.0
     };
-    let first_date = dates.first().cloned().unwrap_or_default();
-    let last_date = dates.last().cloned().unwrap_or_default();
+    let first_date = axis.axis.start().to_string();
+    let last_date = if axis.unknown {
+        "unknown".to_owned()
+    } else {
+        axis.axis.end().to_string()
+    };
+    let upper = axis.upper_bound();
     let chart = Chart::new(datasets)
         .block(Block::default().title(title.to_owned()))
         .x_axis(
             Axis::default()
                 .title(Msg::TrendDay.text(lang))
-                .bounds([0.0, dates.len().saturating_sub(1) as f64])
+                .bounds([0.0, upper])
                 .labels(vec![Span::raw(first_date), Span::raw(last_date)]),
         )
         .y_axis(
@@ -573,6 +679,36 @@ fn render_metric_chart_text(frame: &mut Frame, records: &[crate::record::Session
                 .labels(vec![Span::raw(format!("{min_y:.1}")), Span::raw(format!("{max_y:.1}"))]),
         );
     frame.render_widget(chart, area);
+    if !axis.axis.has_breaks() {
+        return;
+    }
+    // The chart widget places its graph area itself; find it from the corner
+    // of the two axes it drew — a `└` followed by `─` up to the right edge
+    // (the legend box has a `└` too, but closes with `┘`).
+    let buffer = frame.buffer_mut();
+    let symbol_at = |x: u16, y: u16| buffer.cell((x, y)).map_or("", |cell| cell.symbol());
+    let corner = (area.top()..area.bottom()).rev().find_map(|y| {
+        (area.left()..area.right())
+            .find(|&x| {
+                symbol_at(x, y) == symbols::line::BOTTOM_LEFT && (x + 1..area.right()).all(|right| symbol_at(right, y) == symbols::line::HORIZONTAL)
+            })
+            .map(|x| (x, y))
+    });
+    let Some((corner_x, axis_row)) = corner else {
+        return;
+    };
+    let graph_left = corner_x + 1;
+    let graph_width = area.right().saturating_sub(graph_left);
+    if graph_width < 2 {
+        return;
+    }
+    // Same rounding as the braille canvas (two dots a cell).
+    let column_of = |fraction: f64| {
+        let dots = (fraction.clamp(0.0, 1.0) * f64::from(graph_width * 2 - 1)).round() as u16;
+        graph_left + dots / 2
+    };
+    let label_row = (axis_row + 1 < area.bottom()).then_some(axis_row + 1);
+    overlay_axis_breaks(frame, axis.axis, |units| units / upper, column_of, axis_row, label_row, area.right());
 }
 
 fn trend_forecasts(app: &App) -> Vec<TrendForecast> {
@@ -604,7 +740,7 @@ fn trend_forecasts(app: &App) -> Vec<TrendForecast> {
         .collect()
 }
 
-fn render_metric_chart_image(frame: &mut Frame, app: &App, area: Rect, lang: Lang, spec: &mut TrendChartSpec, x_range: TrendDateRange) -> bool {
+fn render_metric_chart_image(frame: &mut Frame, app: &App, area: Rect, lang: Lang, spec: &mut TrendChartSpec, x_range: &TrendAxis) -> bool {
     if area.width <= 8 || area.height <= 3 {
         return false;
     }
@@ -628,7 +764,7 @@ fn render_metric_chart_image(frame: &mut Frame, app: &App, area: Rect, lang: Lan
         return false;
     };
     let mut images = app.analysis_images.borrow_mut();
-    if images.prepare_chart_with_range(&app.graphics, spec, x_range).is_err() {
+    if images.prepare_chart_with_range(&app.graphics, spec, x_range.clone()).is_err() {
         return false;
     }
     frame.render_widget(
@@ -659,10 +795,34 @@ fn render_metric_chart_image(frame: &mut Frame, app: &App, area: Rect, lang: Lan
         ),
     );
     let label_area = Rect::new(plot_area.x, area.y + area.height.saturating_sub(1), plot_area.width, 1);
-    frame.render_widget(Paragraph::new(x_range.start.to_string()), label_area);
-    frame.render_widget(Paragraph::new(Msg::TrendDay.text(lang)).alignment(Alignment::Center), label_area);
-    frame.render_widget(Paragraph::new(x_range.end.to_string()).alignment(Alignment::Right), label_area);
-    let Some(protocol) = images.chart_protocol_with_range(&app.graphics, spec, x_range) else {
+    let column_of = |fraction: f64| {
+        let column = (fraction.clamp(0.0, 1.0) * f64::from(plot_area.width)).floor() as u16;
+        plot_area.x + column.min(plot_area.width - 1)
+    };
+    let break_columns = x_range.break_fractions().into_iter().map(&column_of).collect::<Vec<_>>();
+    frame.render_widget(Paragraph::new(x_range.start().to_string()), label_area);
+    // The centred «day» caption gives way to a break mark that would land on it.
+    let day = Msg::TrendDay.text(lang);
+    let day_start = label_area.x + label_area.width.saturating_sub(day.width() as u16) / 2;
+    if !break_columns
+        .iter()
+        .any(|&column| (day_start.saturating_sub(1)..=day_start + day.width() as u16).contains(&column))
+    {
+        frame.render_widget(Paragraph::new(day).alignment(Alignment::Center), label_area);
+    }
+    frame.render_widget(Paragraph::new(x_range.end().to_string()).alignment(Alignment::Right), label_area);
+    if x_range.has_breaks() {
+        overlay_axis_breaks(
+            frame,
+            x_range,
+            |units| units / x_range.span().max(1.0),
+            column_of,
+            label_area.y,
+            Some(label_area.y),
+            label_area.right(),
+        );
+    }
+    let Some(protocol) = images.chart_protocol_with_range(&app.graphics, spec, x_range.clone()) else {
         return false;
     };
     frame.render_widget(Image::new(protocol), plot_area);

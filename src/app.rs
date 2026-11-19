@@ -51,9 +51,17 @@ use unicode_segmentation::UnicodeSegmentation;
 /// any key input is dropped (R-06).
 pub const WORD_ENTER_DURATION: Duration = Duration::from_millis(200);
 pub const WORD_EXIT_DURATION: Duration = Duration::from_millis(200);
-/// Tabs of the analysis screen; the «skills» tab (§8.4) is the last.
-pub const ANALYSIS_TAB_COUNT: usize = 7;
-pub const ANALYSIS_SKILLS_TAB: usize = 6;
+/// Tabs of the analysis screen, in display order: «today» first, the
+/// «skills» tab (§8.4) last. The screen opens on the coach tab.
+pub const ANALYSIS_TODAY_TAB: usize = 0;
+pub const ANALYSIS_COACH_TAB: usize = 1;
+pub const ANALYSIS_TREND_TAB: usize = 2;
+pub const ANALYSIS_KEYBOARD_TAB: usize = 3;
+pub const ANALYSIS_TRANSITIONS_TAB: usize = 4;
+pub const ANALYSIS_FINGERS_TAB: usize = 5;
+pub const ANALYSIS_BENCH_TAB: usize = 6;
+pub const ANALYSIS_SKILLS_TAB: usize = 7;
+pub const ANALYSIS_TAB_COUNT: usize = 8;
 
 pub const COUNTDOWN_DURATION: Duration = Duration::from_millis(3000);
 const ABORT_CONFIRMATION_DURATION: Duration = Duration::from_secs(2);
@@ -258,6 +266,9 @@ pub struct App {
     pub settings_selected: usize,
     pub settings_save_error: Option<String>,
     pub mode_selected: usize,
+    /// Practice language of the stand-alone warm-up, switched with `L` on the
+    /// mode-select screen (MYTASK-3629). Not saved.
+    pub warmup_language: Lang,
     pub key_cursor_row: usize,
     pub key_cursor_col: usize,
     pub mode_warning: Option<String>,
@@ -290,6 +301,10 @@ pub struct App {
     /// history, and the selected series language (`L`).
     pub analysis_skills: crate::practice::menu::skills::SkillsTabData,
     pub analysis_skills_lang: Option<String>,
+    /// «Today» tab: today's runs, sessions and totals, read straight from the
+    /// database (independent of `[P]` and `[M]`).
+    pub analysis_today: crate::ui::today::TodayData,
+    pub analysis_today_scroll: u16,
     pub adaptive_focus: Vec<TransitionCost>,
     adaptive_candidates: Vec<TransitionCost>,
     pub adaptive_result: Vec<AdaptiveResultRow>,
@@ -329,6 +344,12 @@ pub struct App {
         crate::config::MenuConfig,
     )>,
     menu_original_config: Option<Config>,
+    /// The configuration before a stand-alone warm-up replaced it
+    /// (MYTASK-3629); restored when the session ends or is aborted.
+    warmup_original_config: Option<Config>,
+    /// The last session shown on the result screen was a stand-alone warm-up,
+    /// so a retry starts the warm-up again.
+    result_was_warmup: bool,
 }
 
 pub struct GameState {
@@ -450,6 +471,7 @@ impl App {
             settings_selected: 0,
             settings_save_error: None,
             mode_selected,
+            warmup_language: Lang::En,
             key_cursor_row: 0,
             key_cursor_col: 0,
             mode_warning: None,
@@ -465,8 +487,8 @@ impl App {
             bench_summary_analysis: crate::analysis::bench_summary::BenchmarkRunAnalysis::default(),
             bench_summary_grades: crate::analysis::grades::GradesAnalysis::default(),
             bench_resume: None,
-            analysis_tab: 0,
-            analysis_period: AnalysisPeriod::All,
+            analysis_tab: ANALYSIS_COACH_TAB,
+            analysis_period: AnalysisPeriod::Days30,
             analysis_mode_filter: None,
             analysis_records: Vec::new(),
             analysis_details: DetailedMetrics::default(),
@@ -480,6 +502,8 @@ impl App {
             analysis_goal_selected: 0,
             analysis_skills: Default::default(),
             analysis_skills_lang: None,
+            analysis_today: crate::ui::today::TodayData::empty(date),
+            analysis_today_scroll: 0,
             adaptive_focus: Vec::new(),
             adaptive_candidates: Vec::new(),
             adaptive_result: Vec::new(),
@@ -512,6 +536,8 @@ impl App {
             abort_confirm_until: None,
             settings_original: None,
             menu_original_config: None,
+            warmup_original_config: None,
+            result_was_warmup: false,
         }
     }
 
@@ -866,6 +892,7 @@ impl App {
                         self.abort_benchmark();
                     } else {
                         self.game = None;
+                        self.restore_warmup_config();
                         self.screen = Screen::Title;
                     }
                 }
@@ -943,6 +970,53 @@ impl App {
         self.mode_selected = mode_index(self.config.mode.kind);
         self.refresh_mode_grade();
         self.screen = Screen::ModeSelect;
+    }
+
+    /// The row under the cursor on the mode-select screen.
+    pub fn selected_mode_entry(&self) -> ModeEntry {
+        MODE_ENTRIES.get(self.mode_selected).copied().unwrap_or(ModeEntry::Warmup)
+    }
+
+    /// Start the menu's warm-up on its own (MYTASK-3629): the catalog's
+    /// `fixed.warmup` step (mode, minutes and settings) in
+    /// [`Self::warmup_language`], applied to an in-memory copy of the
+    /// configuration. The copy is dropped when the session ends or is
+    /// aborted; nothing is written to the configuration file, and the session
+    /// is not part of a menu run.
+    fn start_warmup(&mut self) {
+        let step = crate::practice::menu::bundled_catalog()
+            .and_then(|catalog| crate::practice::menu::warmup_step(catalog, self.config.general.lang, self.warmup_language));
+        let step = match step {
+            Ok(step) => step,
+            Err(error) => {
+                self.mode_warning = Some(error);
+                return;
+            }
+        };
+        let base = self.warmup_original_config.take().unwrap_or_else(|| self.config.clone());
+        match crate::practice::menu::config_for_menu_step(&base, &step) {
+            Ok(mut config) => {
+                config.session.duration_seconds = u64::from(step.minutes) * 60;
+                self.config = config;
+                self.warmup_original_config = Some(base);
+                self.start_countdown();
+            }
+            Err(error) => {
+                self.config = base;
+                self.mode_warning = Some(error);
+            }
+        }
+    }
+
+    /// Whether the session being set up or played is a stand-alone warm-up.
+    pub fn warmup_active(&self) -> bool {
+        self.warmup_original_config.is_some()
+    }
+
+    fn restore_warmup_config(&mut self) {
+        if let Some(config) = self.warmup_original_config.take() {
+            self.config = config;
+        }
     }
 
     fn handle_menu_key(&mut self, key: KeyEvent, action: InputAction) {
@@ -1164,10 +1238,12 @@ impl App {
     fn handle_mode_select_key(&mut self, key: KeyEvent, action: InputAction) {
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => self.mode_selected = self.mode_selected.saturating_sub(1),
-            KeyCode::Down | KeyCode::Char('j') => self.mode_selected = (self.mode_selected + 1).min(MODES.len() - 1),
+            KeyCode::Down | KeyCode::Char('j') => self.mode_selected = (self.mode_selected + 1).min(MODE_ENTRIES.len() - 1),
             KeyCode::Char('p') | KeyCode::Char('P') => {
-                let selected = MODES[self.mode_selected];
-                if matches!(selected, ModeKind::Words | ModeKind::Sentence | ModeKind::Phrase | ModeKind::Adaptive) {
+                if matches!(
+                    self.selected_mode_entry().mode(),
+                    Some(ModeKind::Words | ModeKind::Sentence | ModeKind::Phrase | ModeKind::Adaptive)
+                ) {
                     self.config.pacer.enabled = !self.config.pacer.enabled;
                 }
             }
@@ -1179,13 +1255,19 @@ impl App {
                 }
                 .to_owned();
             }
-            KeyCode::Char('l') | KeyCode::Char('L') if MODES[self.mode_selected] == ModeKind::Adaptive => {
+            KeyCode::Char('l') | KeyCode::Char('L') if self.selected_mode_entry() == ModeEntry::Warmup => {
+                self.warmup_language = match self.warmup_language {
+                    Lang::En => Lang::Ja,
+                    Lang::Ja => Lang::En,
+                };
+            }
+            KeyCode::Char('l') | KeyCode::Char('L') if self.selected_mode_entry() == ModeEntry::Mode(ModeKind::Adaptive) => {
                 self.config.adaptive.lang = if self.config.adaptive.lang == "en" { "ja" } else { "en" }.to_owned();
             }
-            KeyCode::Char('l') | KeyCode::Char('L') if MODES[self.mode_selected] == ModeKind::Phrase => {
+            KeyCode::Char('l') | KeyCode::Char('L') if self.selected_mode_entry() == ModeEntry::Mode(ModeKind::Phrase) => {
                 self.config.mode.phrase.lang = if self.config.mode.phrase.lang == "en" { "ja" } else { "en" }.to_owned();
             }
-            KeyCode::Char('c') | KeyCode::Char('C') if MODES[self.mode_selected] == ModeKind::Phrase => {
+            KeyCode::Char('c') | KeyCode::Char('C') if self.selected_mode_entry() == ModeEntry::Mode(ModeKind::Phrase) => {
                 self.config.mode.phrase.course = match self.config.mode.phrase.course.as_str() {
                     "short" => "normal",
                     "normal" => "long",
@@ -1201,7 +1283,11 @@ impl App {
                 self.config.session.preview_items = self.config.session.preview_items.saturating_sub(1);
             }
             KeyCode::Enter | KeyCode::Char(' ') => {
-                self.config.mode.kind = MODES[self.mode_selected];
+                let Some(kind) = self.selected_mode_entry().mode() else {
+                    self.start_warmup();
+                    return;
+                };
+                self.config.mode.kind = kind;
                 if self.config.mode.kind == ModeKind::Burst && self.burst_series.complete() {
                     self.burst_series = BurstSeries::default();
                 }
@@ -1271,14 +1357,14 @@ impl App {
 
     fn handle_analysis_key(&mut self, key: KeyEvent, action: InputAction) {
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') if self.analysis_tab == 0 && self.analysis_goal_picker => {
+            KeyCode::Up | KeyCode::Char('k') if self.analysis_tab == ANALYSIS_COACH_TAB && self.analysis_goal_picker => {
                 self.analysis_goal_selected = self.analysis_goal_selected.saturating_sub(1);
             }
-            KeyCode::Down | KeyCode::Char('j') if self.analysis_tab == 0 && self.analysis_goal_picker => {
+            KeyCode::Down | KeyCode::Char('j') if self.analysis_tab == ANALYSIS_COACH_TAB && self.analysis_goal_picker => {
                 let count = self.analysis_coach.as_ref().map_or(0, |report| report.goals.len());
                 self.analysis_goal_selected = (self.analysis_goal_selected + 1).min(count.saturating_sub(1));
             }
-            KeyCode::Enter if self.analysis_tab == 0 && self.analysis_goal_picker => {
+            KeyCode::Enter if self.analysis_tab == ANALYSIS_COACH_TAB && self.analysis_goal_picker => {
                 if let Some(goal) = self
                     .analysis_coach
                     .as_ref()
@@ -1290,13 +1376,13 @@ impl App {
                 self.analysis_goal_picker = false;
                 self.reload_analysis();
             }
-            KeyCode::Esc if self.analysis_tab == 0 && self.analysis_goal_picker => {
+            KeyCode::Esc if self.analysis_tab == ANALYSIS_COACH_TAB && self.analysis_goal_picker => {
                 self.analysis_goal_picker = false;
             }
-            KeyCode::Left if self.analysis_tab == 2 && self.analysis_keyboard_view == 3 => {
+            KeyCode::Left if self.analysis_tab == ANALYSIS_KEYBOARD_TAB && self.analysis_keyboard_view == 3 => {
                 self.analysis_confusion_selected = self.analysis_confusion_selected.saturating_sub(1);
             }
-            KeyCode::Right if self.analysis_tab == 2 && self.analysis_keyboard_view == 3 => {
+            KeyCode::Right if self.analysis_tab == ANALYSIS_KEYBOARD_TAB && self.analysis_keyboard_view == 3 => {
                 let count = self.analysis_coach.as_ref().map_or(0, |report| {
                     report
                         .diagnosis
@@ -1319,10 +1405,10 @@ impl App {
                     self.analysis_skills_lang = Some(languages[(index + 1) % languages.len()].clone());
                 }
             }
-            KeyCode::Up | KeyCode::Char('k') if self.analysis_tab == 0 => {
+            KeyCode::Up | KeyCode::Char('k') if self.analysis_tab == ANALYSIS_COACH_TAB => {
                 self.analysis_summary_scroll = self.analysis_summary_scroll.saturating_sub(1);
             }
-            KeyCode::Down | KeyCode::Char('j') if self.analysis_tab == 0 => {
+            KeyCode::Down | KeyCode::Char('j') if self.analysis_tab == ANALYSIS_COACH_TAB => {
                 let maximum = self
                     .analysis_coach
                     .as_ref()
@@ -1331,10 +1417,16 @@ impl App {
                     .min(u16::MAX as usize) as u16;
                 self.analysis_summary_scroll = (self.analysis_summary_scroll + 1).min(maximum);
             }
-            KeyCode::Up | KeyCode::Char('k') if self.analysis_tab == 3 => {
+            KeyCode::Up | KeyCode::Char('k') if self.analysis_tab == ANALYSIS_TODAY_TAB => {
+                self.analysis_today_scroll = self.analysis_today_scroll.saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') if self.analysis_tab == ANALYSIS_TODAY_TAB => {
+                self.analysis_today_scroll = self.analysis_today_scroll.saturating_add(1).min(200);
+            }
+            KeyCode::Up | KeyCode::Char('k') if self.analysis_tab == ANALYSIS_TRANSITIONS_TAB => {
                 self.analysis_transition_selected = self.analysis_transition_selected.saturating_sub(1);
             }
-            KeyCode::Down | KeyCode::Char('j') if self.analysis_tab == 3 => {
+            KeyCode::Down | KeyCode::Char('j') if self.analysis_tab == ANALYSIS_TRANSITIONS_TAB => {
                 let eligible = self
                     .analysis_details
                     .bigrams
@@ -1343,12 +1435,12 @@ impl App {
                     .count();
                 self.analysis_transition_selected = (self.analysis_transition_selected + 1).min(eligible.saturating_sub(1));
             }
-            KeyCode::Enter if self.analysis_tab == 3 => self.practice_selected_transition(),
-            KeyCode::Enter if self.analysis_tab == 2 => {
+            KeyCode::Enter if self.analysis_tab == ANALYSIS_TRANSITIONS_TAB => self.practice_selected_transition(),
+            KeyCode::Enter if self.analysis_tab == ANALYSIS_KEYBOARD_TAB => {
                 self.analysis_keyboard_view = (self.analysis_keyboard_view + 1) % 4;
                 self.analysis_confusion_selected = 0;
             }
-            KeyCode::Char('t') | KeyCode::Char('T') if self.analysis_tab == 0 => {
+            KeyCode::Char('t') | KeyCode::Char('T') if self.analysis_tab == ANALYSIS_COACH_TAB => {
                 if self.analysis_coach.as_ref().is_some_and(|report| !report.goals.is_empty()) {
                     self.analysis_goal_picker = !self.analysis_goal_picker;
                     self.analysis_goal_selected = 0;
@@ -1391,8 +1483,9 @@ impl App {
     }
 
     fn open_analysis(&mut self) {
-        self.analysis_tab = 0;
-        self.analysis_period = AnalysisPeriod::All;
+        self.analysis_tab = ANALYSIS_COACH_TAB;
+        self.analysis_today_scroll = 0;
+        self.analysis_period = AnalysisPeriod::Days30;
         self.analysis_mode_filter = None;
         self.analysis_transition_selected = 0;
         self.analysis_keyboard_view = 0;
@@ -1448,6 +1541,8 @@ impl App {
         if self.analysis_mode_filter.as_deref().is_some_and(|mode| mode != "adaptive") {
             prescriptions.clear();
         }
+        self.analysis_today = crate::ui::today::build_today(&self.db_path(), today, self.config.general.lang)
+            .unwrap_or_else(|_| crate::ui::today::TodayData::empty(today));
         let selected_goal = db::load_selected_goal(&self.db_path()).unwrap_or_default();
         self.analysis_coach = crate::analysis::coach::build(
             &self.analysis_records,
@@ -1916,6 +2011,7 @@ impl App {
             KeyCode::Char(' ') | KeyCode::Enter => match self.result_origin {
                 ResultOrigin::JustPlayed if self.menu_active_step.is_some() => self.continue_menu(),
                 ResultOrigin::JustPlayed if self.bench_run.is_some() => self.continue_benchmark(now),
+                ResultOrigin::JustPlayed if self.result_was_warmup => self.start_warmup(),
                 ResultOrigin::JustPlayed if self.config.mode.kind == ModeKind::Burst && self.burst_series.complete() => {
                     self.screen = Screen::Title;
                 }
@@ -2147,6 +2243,7 @@ impl App {
                         self.abort_benchmark();
                     } else {
                         self.game = None;
+                        self.restore_warmup_config();
                         self.screen = Screen::Title;
                     }
                 }
@@ -2159,14 +2256,26 @@ impl App {
         }
     }
 
+    /// Which reading report F2 files for the prompt on screen, if any. A
+    /// Japanese menu step of a word-pool mode (`words`, `ngram`, `unlock`,
+    /// `rhythm`, `burst`) is fed Japanese words and counts as romaji
+    /// (MYTASK-3628).
+    pub fn reading_report_kind(&self) -> Option<ReadingReportKind> {
+        let japanese_word = self.game.as_ref().is_some_and(|game| game.current_prompt.reading.is_some());
+        match self.config.mode.kind {
+            ModeKind::Romaji => Some(ReadingReportKind::Romaji),
+            ModeKind::Sentence if self.config.mode.sentence.lang == "ja" => Some(ReadingReportKind::Sentence),
+            ModeKind::Words | ModeKind::Ngram | ModeKind::Unlock | ModeKind::Rhythm | ModeKind::Burst if japanese_word => {
+                Some(ReadingReportKind::Romaji)
+            }
+            _ => None,
+        }
+    }
+
     fn report_current_reading(&mut self, now: Instant) {
         let Some(game) = self.game.as_ref() else { return };
         let Some(reading) = game.current_prompt.reading.clone() else { return };
-        let kind = match self.config.mode.kind {
-            ModeKind::Romaji => ReadingReportKind::Romaji,
-            ModeKind::Sentence if self.config.mode.sentence.lang == "ja" => ReadingReportKind::Sentence,
-            _ => return,
-        };
+        let Some(kind) = self.reading_report_kind() else { return };
         let text = game.current_prompt.text.clone();
         let db_path = self.db_path();
         let directory = db_path.parent().unwrap_or_else(|| std::path::Path::new("."));
@@ -2568,6 +2677,11 @@ impl App {
             self.unlock_state = Some(state);
         } else {
             self.unlock_state = None;
+        }
+        if self.warmup_active() {
+            // MYTASK-3629: a Japanese stand-alone warm-up is fed Japanese
+            // words, as the menu's Japanese warm-up step is.
+            generator_config.kind = crate::practice::menu::generator_kind_for_step(generator_config.kind, self.warmup_language);
         }
         if let Some(step) = active_menu_step.as_ref() {
             // These modes use the English word pool by default. Keep their
@@ -3185,6 +3299,8 @@ impl App {
         self.legacy_wpm = None;
         self.result_origin = ResultOrigin::JustPlayed;
         self.restore_menu_config();
+        self.result_was_warmup = self.warmup_active();
+        self.restore_warmup_config();
         self.screen = Screen::Result;
         self.abort_confirm_until = None;
         self.begin_result_input_delay(now);
@@ -3434,18 +3550,39 @@ fn posterior_from_metrics(metrics: &DetailedMetrics, from: &str, to: &str, fallb
     )
 }
 
-const MODES: [ModeKind; 11] = [
-    ModeKind::Random,
-    ModeKind::Words,
-    ModeKind::Romaji,
-    ModeKind::Sentence,
-    ModeKind::Phrase,
-    ModeKind::Ngram,
-    ModeKind::Adaptive,
-    ModeKind::Unlock,
-    ModeKind::Rhythm,
-    ModeKind::Burst,
-    ModeKind::Endurance,
+/// One row of the mode-select screen: a training mode, or the menu's warm-up
+/// played on its own (MYTASK-3629). The warm-up is not a mode of its own; it
+/// runs `words` with the catalog's warm-up settings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModeEntry {
+    Warmup,
+    Mode(ModeKind),
+}
+
+impl ModeEntry {
+    /// The training mode of this row, or `None` for the warm-up.
+    pub fn mode(self) -> Option<ModeKind> {
+        match self {
+            Self::Warmup => None,
+            Self::Mode(kind) => Some(kind),
+        }
+    }
+}
+
+/// The rows of the mode-select screen, in display order.
+pub const MODE_ENTRIES: [ModeEntry; 12] = [
+    ModeEntry::Warmup,
+    ModeEntry::Mode(ModeKind::Random),
+    ModeEntry::Mode(ModeKind::Words),
+    ModeEntry::Mode(ModeKind::Romaji),
+    ModeEntry::Mode(ModeKind::Sentence),
+    ModeEntry::Mode(ModeKind::Phrase),
+    ModeEntry::Mode(ModeKind::Ngram),
+    ModeEntry::Mode(ModeKind::Adaptive),
+    ModeEntry::Mode(ModeKind::Unlock),
+    ModeEntry::Mode(ModeKind::Rhythm),
+    ModeEntry::Mode(ModeKind::Burst),
+    ModeEntry::Mode(ModeKind::Endurance),
 ];
 
 fn daily_data_kind(config: &Config) -> Option<DataKind> {
@@ -3511,7 +3648,7 @@ fn allowed_practice_characters(mode: &ModeConfig, layout: &KeyboardLayout) -> St
 }
 
 fn mode_index(mode: ModeKind) -> usize {
-    MODES.iter().position(|candidate| *candidate == mode).unwrap_or(0)
+    MODE_ENTRIES.iter().position(|candidate| *candidate == ModeEntry::Mode(mode)).unwrap_or(1)
 }
 
 fn replay_mode_kind(name: &str) -> ModeKind {

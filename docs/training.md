@@ -118,7 +118,7 @@ bell = false
 
 ## Burst and endurance
 
-`burst` runs three short sprints and keeps the highest net WPM. The initial length is 12 words, configurable from 10 through 15. `endurance` uses sentences for an initial four minutes, configurable from three through five. Its result compares first- and second-half median IKI and error rate. It recommends a break when the second half is at least 15% slower or its error rate is at least 1.5 times the first half.
+`burst` runs three all-out sprints over a short stretch of 10–15 words and keeps the net WPM of the fastest one. Today's training places it last, as the finish step, to check that you can type fast in the day's technique while staying relaxed. The initial length is 12 words, configurable from 10 through 15. `endurance` uses sentences for an initial four minutes, configurable from three through five. Its result compares first- and second-half median IKI and error rate. It recommends a break when the second half is at least 15% slower or its error rate is at least 1.5 times the first half.
 
 ```toml
 [burst]
@@ -151,30 +151,30 @@ The menu for a day is fixed once its first step starts (for the same layout, pra
 
 | # | Step | Content | 10 min | 15 min (default) | 20 min |
 |---|---|---|---:|---:|---:|
-| 1 | Warm-up | `words`, pacer off, gate off | 2 | 2 | 2 |
-| 2 | Primary A | the first-ranked prescription at its current level | level (4) | level (5) | level (5) |
+| 1 | Warm-up | `words`, pacer off, gate off | 1 | 1 | 1 |
+| 2 | Primary A | the first-ranked prescription at its current level, plus the warm-up's spare minute | level (4) + 1 | level (5) + 1 | level (5) + 1 |
 | 3 | Primary B | the second-ranked prescription at its current level | — | level (4) | level (4) |
 | 4 | Check | `sentence` without aids: one preview item, pacer off; the keyboard follows your own setting | 3 | 3 | 3 |
 | 5 | Finish | three `burst` sprints | 1 | 1 | 1 |
 
-`[menu] minutes` selects 10, 15 or 20 (see [Configuration](configuration.md#practice-menu)). “level (n)” means that a prescription step runs for the `minutes` of its catalog level; n is only the slot default for a level that gives no `minutes`. The difference is not redistributed to other steps, so the menu screen and `stats --menu` show the actual total, followed by the configured length when they differ, for example `14 min (set: 15)`.
+`[menu] minutes` selects 10, 15 or 20 (see [Configuration](configuration.md#practice-menu)). “level (n)” means that a prescription step runs for the `minutes` of its catalog level; n is only the slot default for a level that gives no `minutes`. The menu sets aside 2 minutes for the warm-up; the warm-up takes 1, and the spare minute goes to primary A (“+ 1”) unless that would take primary A over its step limit (below), in which case the menu is a minute shorter. The difference is not redistributed to other steps, so the menu screen and `stats --menu` show the actual total, followed by the configured length when they differ, for example `14 min (set: 15)`.
 
-No step runs longer than **5 minutes**, and a step that types long text — `sentence` or `endurance` — no longer than **3 minutes**, because long text tires the arms sooner. The limits apply to every way a step gets its time: a catalog level, the slot default (the 20-minute menu's 7-minute slot becomes 5, or 3 for long text) and the check step (3 minutes in every length; the 20-minute menu's fourth minute is not redistributed). The catalog is checked against the limits when it is loaded, so a level or fixed step over its limit is a catalog error rather than something cut silently. Every level of `menu-v1` gives `minutes`: 4 for most levels, 5 for `transition.adaptive` ① and ②, and 3 for the `sentence` levels and every `endurance.split` level. With two 4-minute prescriptions the 10-, 15- and 20-minute plans therefore total 10, 14 and 14 minutes. A level that sets a mode's own duration (`endurance.minutes`) must agree with its `minutes`, and the step runs the mode for exactly the step time. The settings of a step override the configuration for that session only and are never written back to the configuration file.
+No step runs longer than **5 minutes**, and a step that types long text — `sentence` or `endurance` — no longer than **3 minutes**, because long text tires the arms sooner. The limits apply to every way a step gets its time: a catalog level, the slot default (the 20-minute menu's 7-minute slot becomes 5, or 3 for long text) and the check step (3 minutes in every length; the 20-minute menu's fourth minute is not redistributed). The catalog is checked against the limits when it is loaded, so a level or fixed step over its limit is a catalog error rather than something cut silently. Every level of `menu-v1` gives `minutes`: 4 for most levels, 5 for `transition.adaptive` ① and ②, and 3 for the `sentence` levels and every `endurance.split` level. With two 4-minute prescriptions (primary A becomes 5 with the spare minute) the 10-, 15- and 20-minute plans therefore total 10, 14 and 14 minutes; a `sentence` or 5-minute primary A cannot take the spare minute, so such a plan is a minute shorter. A level that sets a mode's own duration (`endurance.minutes`) must agree with its `minutes`, and the step runs the mode for exactly the step time. The settings of a step override the configuration for that session only and are never written back to the configuration file.
 
 The check step is the daily small measurement. It removes every aid so that its keystrokes can be compared across days; the skill records and most graduation conditions are taken from it, because the prescription steps run with aids.
 
 ```text
- 0      2          6          10     13 14 min
- ├──────┼──────────┼──────────┼──────┼──┤
- │Warm- │ Primary A│ Primary B│Check │F │
- │up    │ (level)  │ (level)  │      │  │
- └──────┴──────────┴──────────┴──────┴──┘
+ 0  1           6          10     13 14 min
+ ├──┼───────────┼──────────┼──────┼──┤
+ │W │ Primary A │ Primary B│Check │F │
+ │  │ (level+1) │ (level)  │      │  │
+ └──┴───────────┴──────────┴──────┴──┘
           ▲ step-source graduation (e.g. accuracy.gate, endurance.split)
                                   ▲ check-source graduation, reference
                                     verdicts and the skill records
 ```
 
-A 15-minute menu with two 4-minute prescriptions (the actual total is 14 minutes; see the previous paragraph). Prescription steps run with assistance, so most graduation conditions, every reference verdict and the skill records come from the unassisted check step; only `advance.source = "step"` conditions use the prescription step itself. Transitions and recovery in the skill records also pool the same-language warm-up and finish.
+A 15-minute menu with two 4-minute prescriptions (W = warm-up, F = finish; primary A takes the warm-up's spare minute, and the actual total is 14 minutes; see the previous paragraph). Prescription steps run with assistance, so most graduation conditions, every reference verdict and the skill records come from the unassisted check step; only `advance.source = "step"` conditions use the prescription step itself. Transitions and recovery in the skill records also pool the same-language warm-up and finish.
 
 ### How weaknesses are chosen
 
@@ -191,15 +191,19 @@ Reaction time is not used for ranking. A preview step only adds it to the reason
 
 ### Introductory menu
 
-When no practice language has enough data, the menu is: warm-up (2 min), transition steps for the remaining time, check (3 min) and finish (2 min), with the reason `Introductory menu: fewer than 2,000 logged keystrokes or no overall grade`. The menu keeps its length: the remaining time is split into the fewest steps of at most 5 minutes, as evenly as possible with the longer steps first. The transition steps alternate between `transition.adaptive` and `transition.ngram`, starting with `transition.adaptive`, each at its current level. All of them are primary A.
+When no practice language has enough data, the menu is: warm-up (1 min), transition steps for the remaining time, check (3 min) and finish (2 min), with the reason `Introductory menu: fewer than 2,000 logged keystrokes or no overall grade`. The menu keeps its length: the remaining time is split into the fewest steps of at most 5 minutes, as evenly as possible with the longer steps first. The transition steps alternate between `transition.adaptive` and `transition.ngram`, starting with `transition.adaptive`, each at its current level. All of them are primary A.
 
 | Length | Steps (minutes) |
 |---|---|
-| 10 min | warm-up 2 · `transition.adaptive` 3 · check 3 · finish 2 |
-| 15 min | warm-up 2 · `transition.adaptive` 4 · `transition.ngram` 4 · check 3 · finish 2 |
-| 20 min | warm-up 2 · `transition.adaptive` 5 · `transition.ngram` 4 · `transition.adaptive` 4 · check 3 · finish 2 |
+| 10 min | warm-up 1 · `transition.adaptive` 4 · check 3 · finish 2 |
+| 15 min | warm-up 1 · `transition.adaptive` 5 · `transition.ngram` 4 · check 3 · finish 2 |
+| 20 min | warm-up 1 · `transition.adaptive` 5 · `transition.ngram` 5 · `transition.adaptive` 4 · check 3 · finish 2 |
 
 `ngram` drills come from the English word pool, and a Japanese `ngram` step would only be a plain romaji word list, so a Japanese introductory menu uses `transition.adaptive` for every transition step. Before the player model has a target transition, an English `ngram` step builds its drills from `mode.keys` and its reason says `no target transition yet` (see [Targets in the prompts](#targets-in-the-prompts)). With two practice languages and neither ready, the introductory menu alternates the language daily and is split the same way in the language of the day.
+
+### Warm-up on its own
+
+Individual training lists `warmup — 1-minute warm-up` at the top of the mode selection. It plays the menu's warm-up step by itself: the same mode, length and settings as `fixed.warmup` in the catalog (`words` for 1 minute, pacer off, accuracy gate off). `L` switches its practice language; a Japanese warm-up gets Japanese words typed in romaji and shows the surface / kana / romaji rows, as the menu's Japanese warm-up does. The session is recorded as `words` and is not part of the day's menu run. Its settings apply to that session only: your configuration file is not changed, and the next ordinary session uses your own settings again. `Enter` on its result screen plays the warm-up once more.
 
 ### Two practice languages
 

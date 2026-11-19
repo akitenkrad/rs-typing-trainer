@@ -29,9 +29,9 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | Title | `M` | Open today's practice menu |
 | Title | `S` | Open settings |
 | Title | `Q` / `Esc` | Quit |
-| Mode selection | `↑` / `↓` (`k` / `j`) | Select any practice mode |
+| Mode selection | `↑` / `↓` (`k` / `j`) | Select any practice mode, or the 1-minute warm-up at the top |
 | Mode selection | `P` | Toggle the pacer on supported modes |
-| Mode selection | `L` | Switch the language for phrase or adaptive practice |
+| Mode selection | `L` | Switch the language for phrase or adaptive practice, or for the warm-up |
 | Mode selection | `C` | Cycle the phrase course: short / normal / long / mixed |
 | Mode selection | `[` / `]` | Decrease/increase preview items |
 | Mode selection | `Z` | Switch the prompt text between large and normal (saved when the mode starts) |
@@ -58,6 +58,7 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | Benchmark part result | `H` / `Q` | No action |
 | Benchmark summary | Any key during `session.result_input_delay_ms` | Ignore the input; the hint shows the approximate remaining delay |
 | Benchmark summary | `Enter` / `Space` / `Esc` / `Q` | Return to the title screen after the input delay |
+| Today | `↑` / `↓` (`k` / `j`) | Scroll the text version |
 | Coach | `↑` / `↓` (`k` / `j`) | Scroll the report |
 | Coach | `T` | Open or close goal candidates |
 | Goal candidates | `↑` / `↓`, `Enter` | Select and save a goal |
@@ -103,7 +104,7 @@ The playing screen shows, from top to bottom: the header (time, WPM, item count 
 **Large text** draws the item being typed with the bundled Shinonome bitmap font. Four font dots become one terminal quadrant-block cell, so a 12-dot fullwidth character occupies 6×6 cells and a 16-dot character occupies 8×8 cells. One blank row separates each large block from the normal-size rows around it, and labels sit in a column to the left of the block they name, on its top row:
 
 - English item modes, including phrases: the large item and its `▔` cursor, then a blank row and a helper row (locking, mistype details, mistypes in this item, or the result) when there is room.
-- Romaji, including Japanese phrases: the large written form, a blank row, the kana (bold, accent colour, the kana being typed reversed), a blank row, then the large romanization and its cursor. The labels (Surface / Kana / Romaji) line up in the left column and the blocks start at the same column.
+- Romaji, including Japanese phrases and the Japanese steps of today's training that borrow a word mode (`words`, `ngram`, `unlock`, `rhythm`, `burst`, such as the warm-up): the large written form, a blank row, the kana (bold, accent colour, the kana being typed reversed), a blank row, then the large romanization and its cursor. The labels (Surface / Kana / Romaji) line up in the left column and the blocks start at the same column.
 - Sentence and endurance: a large window around the current position and its cursor, a blank row, then the full sentence at normal size with the current position reversed. Japanese sentences show the romaji layout above, then a blank row and the surface / kana / romaji rows of the whole sentence.
 
 When the area is short, blank rows are given up first; glyphs are never cut. Pacer and ghost markers are placed above the corresponding large character. Blind mode leaves completed large glyphs blank. Large prompts keep one blank column inside the frame on each side. They need a terminal font that contains the quadrant block elements (U+2596–U+259F and U+2580–U+2590); if the terminal substitutes a fallback font whose glyphs are wider than one cell, the large rows can look wider than the frame, and `display.prompt_style = "normal"` avoids them. A character outside the bundled font (outside JIS X 0208 and ASCII/halfwidth kana) is drawn at normal size in the middle of its large cell.
@@ -143,10 +144,10 @@ When you leave the run after at least one finished step — with `Esc`, or by fi
 The countdown before each step and the result screen after it show the whole menu on one line: every step by a short name (the practice component of a prescription step, such as `Transition`, or the role of a fixed step) and its minutes, `✓` on finished steps and `▶` on the step about to start — on the result screen, the step that `Enter` starts next. The line ends with the position and the minutes left, which count the steps not finished yet, including the marked one:
 
 ```text
-✓Warm-up 2 › ▶Transition 4 › Transition 4 › Check 3 › Finish 2  Step 2/5 · 13 min left
+✓Warm-up 1 › ▶Transition 5 › Transition 4 › Check 3 › Finish 2  Step 2/5 · 14 min left
 ```
 
-When the window is too narrow, the minutes of finished steps are dropped first, then every step's minutes, and last the line shrinks to `Step 2/5 ▶Transition · 13 min left`. Width is measured as terminal columns, so Japanese names count double. A session started from Individual training shows no such line. The countdown of the first step of a 15-minute introductory menu at 80×24:
+When the window is too narrow, the minutes of finished steps are dropped first, then every step's minutes, and last the line shrinks to `Step 2/5 ▶Transition · 14 min left`. Width is measured as terminal columns, so Japanese names count double. A session started from Individual training shows no such line. The countdown of the first step of a 15-minute introductory menu at 80×24:
 
 ```text
 ┌ Get ready! ──────────────────────────────────────────────────────────────────┐
@@ -164,7 +165,7 @@ When the window is too narrow, the minutes of finished steps are dropped first, 
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-(Blank rows above and below are trimmed. At 80 columns the English line drops the minutes; the Japanese one keeps them: `▶ウォームアップ 2 › 遷移 4 › 遷移 4 › 確認 3 › 仕上げ 2  段 1/5 · 残り 15 分`.)
+(Blank rows above and below are trimmed. At 80 columns the English line drops the minutes; the Japanese one keeps them: `▶ウォームアップ 1 › 遷移 5 › 遷移 4 › 確認 3 › 仕上げ 2  段 1/5 · 残り 15 分`.)
 
 ### The menu line on the result screen
 
@@ -173,7 +174,7 @@ The result screen of a menu step adds two lines above the key hint — the menu 
 ```text
 │  💾 Saved to DB → row #1                                                     │
 │                                                                              │
-│  ✓Warm-up › ▶Transition › Transition › Check › Finish  Step 2/5 · 13 min left│
+│  ✓Warm-up › ▶Transition › Transition › Check › Finish  Step 2/5 · 14 min left│
 │  [Enter] Next step    [Esc] Menu                                             │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -257,7 +258,7 @@ The detail keeps the original result charts and adds the recorded mode, language
 
 ## Coaching and grades
 
-Press `A` to open the analysis screen. Its first tab is Coach: current English and Japanese grades, the latest adaptive prescription result, one to three concrete opportunities, and stable habit findings. Large terminals draw the overall grade as a coloured badge; compact terminals keep the grade letter and value in normal text. The report always names its source (official, interim, provisional, or provisional with difficulty uncorrected), keeps evidence counts, and states when evidence is insufficient. `T` opens goal candidates derived from recent records; `Enter` persists the selected goal and its remaining gap is shown in the first section.
+Press `A` to open the analysis screen. Its tabs are Today, Coach, Trend, Keyboard, Transitions, Fingers/Hands, Bench and Skills. Today, the first tab, sums up today's menu steps, individual sessions and totals against the last practice day ([Today tab](analysis.md#today-tab)). The screen opens on Coach: current English and Japanese grades, the latest adaptive prescription result, one to three concrete opportunities, and stable habit findings. Large terminals draw the overall grade as a coloured badge; compact terminals keep the grade letter and value in normal text. The report always names its source (official, interim, provisional, or provisional with difficulty uncorrected), keeps evidence counts, and states when evidence is insufficient. `T` opens goal candidates derived from recent records; `Enter` persists the selected goal and its remaining gap is shown in the first section.
 
 The mode-selection heading carries a compact English/Japanese grade. Completing benchmark A or C shows that language's official or interim grade and any promotion or demotion on the result screen; ordinary practice does not show a grade change. After any completed session, the result screen may show the clearest session-specific observation. `[display].feedback = "summary"` limits this to one line, while `"detailed"` allows up to three; nothing is displayed when the session lacks usable evidence.
 

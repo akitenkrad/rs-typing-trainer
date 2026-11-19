@@ -173,16 +173,18 @@ fn seeded(lang: Lang, graphics: GraphicsMode) -> (tempfile::TempDir, common::Tes
 fn open_skills(app: &mut rs_typing_trainer::app::App) {
     app.handle_key(key(KeyCode::Char('a')));
     assert_eq!(app.screen, Screen::Analysis);
-    // ← from the first tab wraps to the last tab, the skills tab.
+    // The screen opens on the coach tab; ← reaches «today» (the first tab)
+    // and wraps from there to the last tab, the skills tab.
+    app.handle_key(key(KeyCode::Left));
     app.handle_key(key(KeyCode::Left));
     assert_eq!(app.analysis_tab, ANALYSIS_SKILLS_TAB);
 }
 
 #[test]
-fn skills_tab_is_the_seventh_tab_and_tab_cycles_through_it() {
+fn skills_tab_is_the_last_tab_and_tab_cycles_through_it() {
     let (_directory, mut app) = seeded(Lang::Ja, GraphicsMode::Off);
     app.handle_key(key(KeyCode::Char('a')));
-    for _ in 0..ANALYSIS_SKILLS_TAB {
+    for _ in rs_typing_trainer::app::ANALYSIS_COACH_TAB..ANALYSIS_SKILLS_TAB {
         app.handle_key(key(KeyCode::Tab));
     }
     assert_eq!(app.analysis_tab, ANALYSIS_SKILLS_TAB);
@@ -232,9 +234,10 @@ fn l_switches_the_series_language() {
     assert!(japanese.contains("[L] language: Japanese"), "{japanese}");
     app.handle_key(key(KeyCode::Char('L')));
     assert!(text(&render_buffer(&app, 80, 24)).contains("[L] language: English"));
-    // `L` on another tab keeps its meaning there (nothing on the coach tab).
+    // `L` on another tab keeps its meaning there (nothing on the «today» tab,
+    // which follows the skills tab when Tab wraps).
     app.handle_key(key(KeyCode::Tab));
-    assert_eq!(app.analysis_tab, 0);
+    assert_eq!(app.analysis_tab, rs_typing_trainer::app::ANALYSIS_TODAY_TAB);
     app.handle_key(key(KeyCode::Char('l')));
     assert_eq!(app.screen, Screen::Analysis);
 }
@@ -243,10 +246,10 @@ fn l_switches_the_series_language() {
 fn p_limits_the_period_including_the_prescription_history() {
     let (_directory, mut app) = seeded(Lang::En, GraphicsMode::Off);
     open_skills(&mut app);
-    let all = compact(&text(&render_buffer(&app, 80, 24)));
-    assert!(all.contains("Widenpreview"), "{all}");
-    assert!(all.contains("Accuracygate"), "{all}");
-    app.handle_key(key(KeyCode::Char('p')));
+    // Analysis opens on 30 days (MYTASK-3630); the seeded history fits in it.
+    let month = compact(&text(&render_buffer(&app, 80, 24)));
+    assert!(month.contains("Widenpreview"), "{month}");
+    assert!(month.contains("Accuracygate"), "{month}");
     app.handle_key(key(KeyCode::Char('p')));
     // 7 days: day 3 onwards — preview.wide (days 0–1) is out of the period.
     let week = compact(&text(&render_buffer(&app, 80, 24)));

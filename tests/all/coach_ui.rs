@@ -113,7 +113,11 @@ fn keyboard_tab_cycles_four_views_and_confusion_selects_a_key() {
     assert!(labels[3].contains("Confusion"), "{}", labels[3]);
 
     app.handle_key(key(KeyCode::Left));
-    assert_eq!(app.analysis_tab, 2, "arrow keys select confusion keys instead of changing tabs");
+    assert_eq!(
+        app.analysis_tab,
+        rs_typing_trainer::app::ANALYSIS_KEYBOARD_TAB,
+        "arrow keys select confusion keys instead of changing tabs"
+    );
 }
 
 #[test]

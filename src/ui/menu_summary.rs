@@ -171,7 +171,7 @@ pub fn is_improvement(difference: f64, direction: Direction) -> Option<bool> {
 /// The colored difference: green ▲ when it is an improvement, red ▼ when it is
 /// a decline, muted ± when unchanged — the result screen's rule, with the
 /// direction taken from the component.
-fn difference_span(difference: Option<f64>, direction: Direction, text: impl Fn(f64) -> String, theme: &Theme) -> Span<'static> {
+pub(crate) fn difference_span(difference: Option<f64>, direction: Direction, text: impl Fn(f64) -> String, theme: &Theme) -> Span<'static> {
     let Some(difference) = difference.filter(|value| value.is_finite()) else {
         return Span::styled("—", Style::default().fg(theme.muted));
     };
@@ -182,13 +182,13 @@ fn difference_span(difference: Option<f64>, direction: Direction, text: impl Fn(
     }
 }
 
-fn pad(value: &str, width: usize) -> String {
+pub(crate) fn pad(value: &str, width: usize) -> String {
     let value = truncate(value, width);
     let padding = width.saturating_sub(value.width());
     format!("{value}{}", " ".repeat(padding))
 }
 
-fn truncate(value: &str, width: usize) -> String {
+pub(crate) fn truncate(value: &str, width: usize) -> String {
     if value.width() <= width {
         return value.to_owned();
     }
@@ -209,18 +209,18 @@ fn truncate(value: &str, width: usize) -> String {
 }
 
 /// Pad a span's text to a display width (truncating when needed).
-fn padded(span: Span<'static>, width: usize) -> Span<'static> {
+pub(crate) fn padded(span: Span<'static>, width: usize) -> Span<'static> {
     Span::styled(pad(&span.content, width), span.style)
 }
 
-fn circled(level: u8) -> String {
+pub(crate) fn circled(level: u8) -> String {
     match level {
         1..=20 => char::from_u32(0x2460 + u32::from(level) - 1).map_or_else(|| level.to_string(), String::from),
         _ => level.to_string(),
     }
 }
 
-fn role_label(role: MenuRole, lang: Lang) -> &'static str {
+pub(crate) fn role_label(role: MenuRole, lang: Lang) -> &'static str {
     match (role, lang) {
         (MenuRole::Warmup, Lang::En) => "Warm-up",
         (MenuRole::Warmup, Lang::Ja) => "ウォームアップ",
@@ -235,7 +235,7 @@ fn role_label(role: MenuRole, lang: Lang) -> &'static str {
     }
 }
 
-fn practice_language_label(language: Lang, lang: Lang) -> &'static str {
+pub(crate) fn practice_language_label(language: Lang, lang: Lang) -> &'static str {
     match (language, lang) {
         (Lang::En, Lang::En) => "EN",
         (Lang::Ja, Lang::En) => "JA",
@@ -253,7 +253,7 @@ fn series_language_label(language: &str, lang: Lang) -> &'static str {
     }
 }
 
-fn is_pass_fail(metric: MenuMetric) -> bool {
+pub(crate) fn is_pass_fail(metric: MenuMetric) -> bool {
     matches!(
         metric,
         MenuMetric::AccuracyGatePassed | MenuMetric::PacerTargetReached | MenuMetric::BlindAssistanceRemovable | MenuMetric::PrescriptionR3
@@ -262,7 +262,7 @@ fn is_pass_fail(metric: MenuMetric) -> bool {
 
 /// The step's main value (§7.1: the catalog's `advance.metric`; net WPM for
 /// warm-up, check and finish).
-fn step_value_text(step: &StepSummary, lang: Lang) -> String {
+pub(crate) fn step_value_text(step: &StepSummary, lang: Lang) -> String {
     let Some(value) = step.value else {
         return "—".to_owned();
     };
@@ -278,7 +278,7 @@ fn step_value_text(step: &StepSummary, lang: Lang) -> String {
     }
 }
 
-fn metric_text(metric: MenuMetric, value: f64, signed: bool) -> String {
+pub(crate) fn metric_text(metric: MenuMetric, value: f64, signed: bool) -> String {
     let (scaled, digits, suffix) = match metric {
         MenuMetric::WordOnsetRatio | MenuMetric::FarHomeIkiRatio => (value, 2, ""),
         MenuMetric::WithinWordIkiCv => (value, 3, ""),
@@ -294,7 +294,23 @@ fn metric_text(metric: MenuMetric, value: f64, signed: bool) -> String {
     }
 }
 
-fn step_difference_span(step: &StepSummary, theme: &Theme) -> Span<'static> {
+/// The difference from the previous run as text, with whether it is an
+/// improvement (`None` when unchanged). `None` for pass/fail metrics and when
+/// there is no previous value. The image of the «today» tab draws it with the
+/// same rule as [`step_difference_span`].
+pub(crate) fn step_difference(step: &StepSummary) -> Option<(String, Option<bool>)> {
+    if step.metric.is_some_and(is_pass_fail) {
+        return None;
+    }
+    let difference = step.difference().filter(|value| value.is_finite())?;
+    let text = match step.metric {
+        None | Some(MenuMetric::NetWpm) => format!("{difference:+.0}"),
+        Some(metric) => metric_text(metric, difference, true),
+    };
+    Some((text, is_improvement(difference, step.direction)))
+}
+
+pub(crate) fn step_difference_span(step: &StepSummary, theme: &Theme) -> Span<'static> {
     if step.metric.is_some_and(is_pass_fail) {
         return Span::styled("—", Style::default().fg(theme.muted));
     }
@@ -310,12 +326,18 @@ fn step_difference_span(step: &StepSummary, theme: &Theme) -> Span<'static> {
     )
 }
 
+/// (met, required) of the graduation condition: the sessions in a row that
+/// met it so far, capped at `advance.sessions`. `None` for fixed steps.
+pub(crate) fn graduation_progress(step: &StepSummary) -> Option<(u8, u8)> {
+    let required = step.required?;
+    Some((step.consecutive.unwrap_or(0).min(required), required))
+}
+
 /// «●●○ 2/3», «●●● → ② へ», «●●● → 維持».
-fn graduation_text(step: &StepSummary, lang: Lang) -> String {
-    let Some(required) = step.required else {
+pub(crate) fn graduation_text(step: &StepSummary, lang: Lang) -> String {
+    let Some((filled, required)) = graduation_progress(step) else {
         return String::new();
     };
-    let filled = step.consecutive.unwrap_or(0).min(required);
     let dots = format!(
         "{}{}",
         "●".repeat(usize::from(filled)),
@@ -567,7 +589,11 @@ pub fn render(frame: &mut Frame, app: &App) {
     let (sparkline_images, badge_image) = image_level(app, inner);
     let width = usize::from(body.width);
 
-    let mut lines = upper_lines(data, lang, &theme, width);
+    let not_played = match lang {
+        Lang::En => "not played",
+        Lang::Ja => "未実施",
+    };
+    let mut lines = upper_lines(&data.steps, lang, &theme, width, not_played);
     let middle_start = lines.len() + 1;
     lines.push(section_rule(
         match (lang, data.skills.as_ref()) {
@@ -651,7 +677,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
 }
 
-fn section_rule(label: String, width: usize, theme: &Theme) -> Line<'static> {
+pub(crate) fn section_rule(label: String, width: usize, theme: &Theme) -> Line<'static> {
     let label = truncate(&format!("── {label} "), width);
     let rest = width.saturating_sub(label.width());
     Line::from(Span::styled(format!("{label}{}", "─".repeat(rest)), Style::default().fg(theme.muted)))
@@ -688,7 +714,10 @@ fn upper_widths(lang: Lang, width: usize) -> UpperWidths {
     }
 }
 
-fn upper_lines(data: &MenuSummaryData, lang: Lang, theme: &Theme, width: usize) -> Vec<Line<'static>> {
+/// The upper section (one row per planned step). `not_played` labels the
+/// steps not played yet; the «today» tab of the analysis screen shows the same
+/// rows.
+pub(crate) fn upper_lines(steps: &RunStepsSummary, lang: Lang, theme: &Theme, width: usize, not_played: &str) -> Vec<Line<'static>> {
     let widths = upper_widths(lang, width);
     let header = match lang {
         Lang::En => ["Step", "", "Prescription · level", "This time", "Prev", "Graduation"],
@@ -706,7 +735,7 @@ fn upper_lines(data: &MenuSummaryData, lang: Lang, theme: &Theme, width: usize) 
         ),
         Style::default().fg(theme.muted),
     ))];
-    for step in &data.steps.steps {
+    for step in &steps.steps {
         let role = format!("{} {}", step.index + 1, role_label(step.role, lang));
         let title = match step.level {
             Some(level) => format!("{} {}", step.title, circled(level)),
@@ -721,13 +750,7 @@ fn upper_lines(data: &MenuSummaryData, lang: Lang, theme: &Theme, width: usize) 
             Span::raw(format!("{} ", pad(&title, widths.title))),
         ];
         if !step.done {
-            spans.push(Span::styled(
-                match lang {
-                    Lang::En => "not played",
-                    Lang::Ja => "未実施",
-                },
-                Style::default().fg(theme.muted),
-            ));
+            spans.push(Span::styled(not_played.to_owned(), Style::default().fg(theme.muted)));
             lines.push(Line::from(spans));
             continue;
         }

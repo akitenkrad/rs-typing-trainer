@@ -533,9 +533,7 @@ fn render_footer(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     } else {
         ""
     };
-    let reading_report = if app.config.mode.kind == crate::config::ModeKind::Romaji
-        || app.config.mode.kind == crate::config::ModeKind::Sentence && app.config.mode.sentence.lang == "ja"
-    {
+    let reading_report = if app.reading_report_kind().is_some() {
         match app.config.general.lang {
             crate::i18n::Lang::En => "[F2] Reading is wrong    ",
             crate::i18n::Lang::Ja => "[F2] 読みが違う    ",

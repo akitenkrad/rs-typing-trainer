@@ -588,9 +588,13 @@ fn result_notice_lines(app: &App, theme: &Theme, lang: Lang) -> Vec<Line<'static
     }
     if result_mode_is(app, crate::config::ModeKind::Burst) {
         lines.push(Line::from(match lang {
-            Lang::En => format!("Burst: {} / 3    best: {:.1} WPM", app.burst_series.run_count(), app.burst_series.best()),
+            Lang::En => format!(
+                "Sprint (burst): {} / 3    best: {:.1} WPM",
+                app.burst_series.run_count(),
+                app.burst_series.best()
+            ),
             Lang::Ja => format!(
-                "バースト: {} / 3 本    最高: {:.1} WPM",
+                "短距離（バースト）: {} / 3 本    最高: {:.1} WPM",
                 app.burst_series.run_count(),
                 app.burst_series.best()
             ),
@@ -1234,9 +1238,13 @@ fn render_secondary_box(frame: &mut Frame, app: &App, r: &GameResult, theme: &Th
     }
     if result_mode_is(app, crate::config::ModeKind::Burst) && app.result_origin == ResultOrigin::JustPlayed {
         lines.push(Line::from(match lang {
-            Lang::En => format!("Burst: {} / 3    best: {:.1} WPM", app.burst_series.run_count(), app.burst_series.best()),
+            Lang::En => format!(
+                "Sprint (burst): {} / 3    best: {:.1} WPM",
+                app.burst_series.run_count(),
+                app.burst_series.best()
+            ),
             Lang::Ja => format!(
-                "バースト: {} / 3 本    最高: {:.1} WPM",
+                "短距離（バースト）: {} / 3 本    最高: {:.1} WPM",
                 app.burst_series.run_count(),
                 app.burst_series.best()
             ),

@@ -135,10 +135,11 @@ The benchmark tab reports sustained speed, accuracy, rhythm, transitions, reach,
 
 ## Analysis screen
 
-Press `A` on the title screen. `Tab` or `←/→` changes tabs. `P` cycles all time, 30 days and 7 days; `M` cycles the mode filter. Every tab, including Coach, uses the records left by these filters, except that the Skills tab reads only menu check steps (see below). The expensive player model, diagnosis, progress, habits and grade calculations run once when the screen opens and again only when either filter changes; redraws use the cached report.
+Press `A` on the title screen. `Tab` or `←/→` changes tabs. The tabs are Today, Coach, Trend, Keyboard, Transitions, Fingers/Hands, Bench and Skills; the screen opens on Coach, and `←` from Coach reaches Today. The screen opens on the last 30 days (ending today); `P` steps to 7 days, then all time, then back to 30 days. `M` cycles the mode filter. Every tab, including Coach, uses the records left by these filters, except that the Today tab reads today's records and the last earlier practice day directly (see [Today tab](#today-tab)) and the Skills tab reads only menu check steps (see below). The expensive player model, diagnosis, progress, habits and grade calculations run once when the screen opens and again only when either filter changes; redraws use the cached report.
 
+- Today: today's menu steps, individual sessions and totals against the last earlier practice day (see [Today tab](#today-tab)).
 - Coach: a scrollable four-part report. With terminal images, each language starts with a G-to-S ladder: the darker, outlined step is the current grade and the triangle locates the continuous 0–8 score. The radar chart below uses the same scale on every component axis; the outer rings are higher grades, the axis suffix is that component's grade, and a labelled axis without a vertex has no data. The radar is omitted in short areas, and the existing prose continues below all graphics. “Where you are now” combines the S-to-G grade, component values and next-grade gaps, promotion/demotion, four-week speed/accuracy slopes, difficulty-adjusted form and the selected goal. “Last prescription” reports the target and matched-control changes in milliseconds with the R3 verdict. “Best opportunities” starts with the component that most raises overall and adds up to two concrete diagnoses, evidence counts, assumptions and a practice mode. Error advice is specific to anticipation, repeated-previous, adjacent-key, same-finger and opposite-hand errors; a total below 20 first errors is marked as a reference. Transition evidence is an effective count and is therefore shown as a rounded `n≈`, while observed counts use `n=`. Only `suggested` spelling rows appear. “Habits” includes only supported H1–H3/H5 findings; H4 is marked exploratory. Data coverage and benchmark reminders remain at the end. `T` opens goal candidates; `↑`/`↓` and `Enter` save one.
-- Trend: daily medians for net WPM, accuracy and median IKI, separated by mode or benchmark series and part. Charts show endpoint dates and value bounds after two valid days have accumulated; before that they show the current value. With terminal images, horizontal distance represents calendar time, including days without records. The translucent fan on the speed chart narrows to the latest language-level daily speed and widens to the fitted 28-day forecast interval; it is omitted when no learning curve is available.
+- Trend: daily medians for net WPM, accuracy and median IKI, separated by mode or benchmark series and part. Charts show endpoint dates and value bounds after two valid days have accumulated; before that they show the current value. Horizontal distance represents calendar time, including days without records, in both the image and the text charts, and the three charts share one axis. A gap of more than 14 days between two recorded days is cut out of the axis and squeezed to the width of 3 days: the cut is marked `≈` on the axis (below the image with terminal images), no line is drawn across it, and the first date after it is labelled when there is room. Axis labels are always real dates, and the forecast fan follows the same axis. The translucent fan on the speed chart narrows to the latest language-level daily speed and widens to the fitted 28-day forecast interval; it is omitted when no learning curve is available.
 - Keyboard: error rate, median IKI, relative speed (personal median = 1.0), and confusion. `Enter` cycles the four views. In confusion view, `←`/`→` selects the expected key and the keyboard highlights the keys pressed instead. The legend below the keyboard maps the dark-to-bright red scale to each view's values; relative speed runs from fast at 0.0 to slow at 2.0+, with `(1.0 = personal median)` kept as a separate note. The uncoloured sample means no data.
 - Transitions: the 20 slowest and 20 most error-prone shrunk estimates. With terminal images, the selected slow transition is drawn as an arrow between key centres; a repeated key is a loop and a character absent from the active layout has no arrow. The lower two columns use bar length for estimated IKI and estimated error rate. Their dark-to-bright colour uses error rate within that column, and the selected slow bar has an outline. Counts and values remain terminal text, with insufficient rows below the bars. Select a slow transition and press `Enter` to prepare two-key `ngram` practice.
 - Fingers/Hands: finger accuracy/IKI and same-finger versus alternating-hand timing. With terminal images, the finger chart orders left pinky through left index, one shared thumb, then right index through right pinky; the thumb splits into two bars only when separate left/right thumb data is available. IKI bars rise and error-rate bars fall; their colours match the keyboard finger guide, and samples below 30 are translucent. The adjacent four bars compare left hand, right hand, different keys on one finger, and alternating hands on one millisecond scale. Missing fingers are marked `—`, and all original numeric rows continue below the figures.
@@ -146,6 +147,75 @@ Press `A` on the title screen. `Tab` or `←/→` changes tabs. `P` cycles all t
 - Skills: the seven components measured by the practice menu's check steps, one small chart per component, stacked vertically (see [Skill trends](#skill-trends)).
 
 The four-week slope uses benchmark A when it is available, then another available benchmark part. A/C select v2 when present and otherwise v1; B/D combine both versions. Without a benchmark it uses practice records and explicitly warns that practice WPM is not evidence of improvement. Slopes above `+0.5 WPM/week` are upward, below `-0.5 WPM/week` are downward, and values in between are flat. Recommendations follow fixed rules: low accuracy selects a 95% accuracy gate with the pacer off; a slow transition selects `adaptive` and names the pair; weak reach selects `unlock` or `ngram`; weak reaction increases look-ahead; weak rhythm selects `rhythm`; second-half endurance deterioration selects `endurance` plus a break; and weak Japanese selects `romaji`.
+
+The text version of the Trend tab at 80×24 with all time selected (sample data: three days at the end of April and four days in November):
+
+```text
+┌ ANALYSIS ────────────────────────────────────────────────────────────────────┐
+│   Today  Coach  Trend  Keyboard  Transitions  Fingers/Hands  Bench  Skills   │
+│                                                                              │
+│net WPM / daily median                                                        │
+│47.0     │                           ⢀⣀⣀⣀⣀⠤⠤⠤⠤⠤⠤⢄⣀⣀⣀⣀⣀⣀⣀⡀      ⣀⣀⣀⣀⠤⠤⠤⠤⠔⠒⠒⠒⠊⠉⠉│
+│         │                    ⠐⠒⠒⠉⠉⠉⠉⠁                  ⠈⠉⠉⠉⠉⠉⠉               │
+│30.0     │⣀⣀⠤⠤⠤⠤⠤⠤⠤⠤⠄                                                      day│
+│         └───────────────≈────────────────────────────────────────────────────│
+│2026-04-27                    2026-11-01                            2026-11-15│
+│accuracy % / daily median                                                     │
+│100.0    │                                                                    │
+│         │⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠄         ⠠⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤│
+│100.0    │                                                                 day│
+│         └───────────────≈────────────────────────────────────────────────────│
+│2026-04-27                    2026-11-01                            2026-11-15│
+│IKI ms / daily median                                                         │
+│100.0    │                                                                    │
+│         │⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠄         ⠠⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤│
+│100.0    │                                                                 day│
+│         └───────────────≈────────────────────────────────────────────────────│
+│2026-04-27                    2026-11-01                            2026-11-15│
+│          [Tab/←→] tab   [P] period: all   [M] mode: all   [ESC] back         │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Today tab
+
+The first tab sums up today (the local date). It reads the database directly, so the period (`P`) and mode (`M`) filters do not apply: with the 7-day period selected, the comparison with a practice day 9 days ago is still shown. The footer says so instead of showing the period and mode. `↑`/`↓` (`k`/`j`) scroll the text version.
+
+- Today's training: for each menu run of today with at least one played step, newest first (for example after changing the practice languages), one row per planned step with the same figures as the upper section of the [menu summary](training.md#practice-menu): step, prescription and level, this time's value, the difference from the previous run of the same prescription at the same level, and the graduation condition (`●●○ 2/3`, `●●● → Lv 2`). Steps not played yet are marked `not yet`. When no run of today has a played step, the latest run is shown as `not played`; without any run the tab says that there is no menu for today yet.
+- Individual practice: today's sessions that are not menu steps, with start time, mode, language, length, net WPM and accuracy. Benchmark parts are included and marked `[bench A]`.
+- Today's totals: practice time, sessions and keystrokes, and per language the median net WPM (with `▁▂▃▄▅▆▇` bars of the day's sessions in time order) and the median accuracy. Each value is compared with the last earlier day that has any record; the difference uses the result screen's colours and arrows (green `▲` higher, red `▼` lower, `±0` unchanged), and `—` when there is nothing to compare with.
+- Without any session today the tab shows `No practice recorded today yet`.
+
+With terminal images and at least 120×37 cells (120×29 for a compact version with lower cards), the three sections are figures: the steps with a done/not-yet badge, a bar for the step's minutes (filled when played), the value and difference, the graduation condition as circles, and level-ups highlighted with an up-arrow; a timeline of today's sessions (horizontal = time of day, vertical = net WPM, colour = language, filled circle = menu step, ring = individual, diamond = benchmark, marker size and the label above it = accuracy), with the list of individual sessions as text beside it; and big-number cards for practice time, sessions, keystrokes, and net WPM and accuracy per language, each with its difference from the last practice day. Without terminal images, without a known cell size, or in a smaller window, the tab falls back to the text version in the result screen's order.
+
+The text version at 80×24 (sample data: two of five menu steps played, the accuracy gate moving up to level 2, a Japanese romaji session and benchmark part A; the last practice day was 11/10):
+
+```text
+┌ ANALYSIS ────────────────────────────────────────────────────────────────────┐
+│   Today  Coach  Trend  Keyboard  Transitions  Fingers/Hands  Bench  Skills   │
+│                                                                              │
+│  ── Today's training 2026-11-19 ───────────────────────────────────────────  │
+│  Menu (English, 15 min) — 2 of 5 steps                                       │
+│  Step           Prescription · level        This time Prev     Graduation    │
+│  1 Warm-up   EN words                       62 WPM    ▲+3                    │
+│  2 Primary A EN Accuracy gate ①             met       —        ●●● → Lv 2    │
+│  3 Primary B EN Widen preview ①             not yet                          │
+│  4 Check     EN sentence                    not yet                          │
+│  5 Finish    EN burst                       not yet                          │
+│  ── Individual practice (2 sessions) ──────────────────────────────────────  │
+│  Time  Mode         Lang     Length net WPM  Accuracy                        │
+│  20:30 romaji       Japanese 1:00      48.5   93.0%                          │
+│  21:15 [bench A]    English  1:00      64.0   98.0%                          │
+│  ── Today's totals — vs the last practice day (11/10) ─────────────────────  │
+│  Time 4.0 min ▲+2.0   Sessions 4 ▲+2   Keystrokes 1,170 ▲+670                │
+│  English   net WPM 62.0 ▲+5.0   ▄▁▇       accuracy 97.0% ▲+1.0pt             │
+│  Japanese  net WPM 48.5 —       ▄         accuracy 93.0% —                   │
+│                                                                              │
+│                                                                              │
+│                   [Tab/←→] tab   [↑/↓] scroll   [Esc] back                   │
+│         Today only: the period [P] and mode [M] filters do not apply         │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
 
 ## Skill trends
 
@@ -181,7 +251,7 @@ The text version of the Skills tab at 80×24 (sample data; with terminal images 
 
 ```text
 ┌ ANALYSIS ────────────────────────────────────────────────────────────────────┐
-│       Coach  Trend  Keyboard  Transitions  Fingers/Hands  Bench  Skills      │
+│   Today  Coach  Trend  Keyboard  Transitions  Fingers/Hands  Bench  Skills   │
 │                                                                              │
 │English — · run (faint)  ━ 7-run median  █ bench (speed, accuracy)  bands F–S │
 │Prescriptions (ref.)▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀│
@@ -201,14 +271,14 @@ The text version of the Skills tab at 80×24 (sample data; with terminal images 
 │Overlap                                                                       │
 │— (no data)                                                                   │
 │                                                                              │
-│          [Tab/←→] tab   [P] period: all   [M] mode: all   [ESC] back         │
+│        [Tab/←→] tab   [P] period: 30 days   [M] mode: all   [ESC] back       │
 │                             [L] language: English                            │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 The analysis screen's last tab, Skills, draws the series of one language. Its header reads `English — · run (faint)  ━ 7-run median  ◆ bench (speed, accuracy)  bands F–S`.
 
-- Each component has a label column — name, grade and latest value, then `med` with the moving median and the gap to the next grade (for example `→B +0.12`) — and a chart. Each run is a faint point and the 7-run moving median is a bold line. The F–S grade boundaries are drawn behind them as faint bands, so the distance from the line to the next band shows how close the next grade is. The horizontal axis is calendar time, as in the Trend tab.
+- Each component has a label column — name, grade and latest value, then `med` with the moving median and the gap to the next grade (for example `→B +0.12`) — and a chart. Each run is a faint point and the 7-run moving median is a bold line. The F–S grade boundaries are drawn behind them as faint bands, so the distance from the line to the next band shows how close the next grade is. The horizontal axis is calendar time; unlike the Trend tab, long gaps are not cut out.
 - Benchmark results are overlaid only on speed (net WPM) and accuracy, the two components that the benchmark trend records per session (part A for English, part C for Japanese). They use a different mark — `◆` with terminal images, `█` in the text chart — so official and practice values stay distinguishable. The other five components have no benchmark points.
 - The **prescription history** band above the charts shows which prescription was played on each menu day: the upper half of a cell is primary A and the lower half primary B, and each menu day's colour continues until the next menu day. The legend lists each prescription with the levels played. It is labelled `Prescriptions (ref.)` and `upper A / lower B, no control`: comparing the line before and after a prescription started has no control, so it is a reference, not evidence of an effect.
 - `L` switches the series language when both languages have records (by default the interface language, else the first language with records). `P` limits the displayed period to all time, 30 days or 7 days; moving medians are still computed over the whole series, so the first point of a period uses earlier runs. `M` (mode filter) does not change this tab, because its series come only from menu check steps and benchmark points are always taken from benchmark sessions.

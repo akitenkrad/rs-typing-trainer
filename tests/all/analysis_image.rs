@@ -916,12 +916,12 @@ fn image_transition_and_finger_tabs_keep_terminal_values_around_the_figures() {
     app.analysis_details.alternating_hands_median_ms = 170.0;
     app.set_graphics_detection(detection());
 
-    app.analysis_tab = 3;
+    app.analysis_tab = rs_typing_trainer::app::ANALYSIS_TRANSITIONS_TAB;
     let transitions = rendered_rows(&app).join("\n");
     assert!(transitions.contains("a→s"), "transition labels disappeared:\n{transitions}");
     assert!(transitions.contains("400.0 ms"), "transition values disappeared:\n{transitions}");
 
-    app.analysis_tab = 4;
+    app.analysis_tab = rs_typing_trainer::app::ANALYSIS_FINGERS_TAB;
     let finger_rows = rendered_rows(&app);
     let shared_label_row = &finger_rows[finger_rows
         .iter()
@@ -965,7 +965,7 @@ fn transition_tab_transmits_one_keyboard_image_containing_keycaps_and_arrow() {
         ratatui::crossterm::event::KeyCode::Char('a'),
         ratatui::crossterm::event::KeyModifiers::NONE,
     ));
-    app.analysis_tab = 3;
+    app.analysis_tab = rs_typing_trainer::app::ANALYSIS_TRANSITIONS_TAB;
     app.analysis_details.bigrams = vec![
         bigram("a", "s", 400.0, 0.00, 100),
         bigram("s", "d", 300.0, 0.05, 100),
@@ -1012,7 +1012,7 @@ fn finger_labels_are_at_every_bar_centre_in_a_160_by_50_terminal() {
             ratatui::crossterm::event::KeyCode::Char('a'),
             ratatui::crossterm::event::KeyModifiers::NONE,
         ));
-        app.analysis_tab = 4;
+        app.analysis_tab = rs_typing_trainer::app::ANALYSIS_FINGERS_TAB;
         app.analysis_details.fingers = vec![
             group("left-pinky", 250.0, 0.95, 100),
             group("left-index", 180.0, 0.99, 100),
@@ -1095,7 +1095,7 @@ fn graphics_off_and_goal_picker_keep_the_text_only_coach_and_bench_buffers() {
         app
     };
 
-    for tab in [0, 5] {
+    for tab in [rs_typing_trainer::app::ANALYSIS_COACH_TAB, rs_typing_trainer::app::ANALYSIS_BENCH_TAB] {
         let mut baseline = make_app();
         baseline.analysis_tab = tab;
         let mut explicit_off = make_app();
@@ -1123,7 +1123,7 @@ fn image_bench_adds_a_sparkline_row_and_keeps_the_existing_part_value_row() {
         ratatui::crossterm::event::KeyCode::Char('a'),
         ratatui::crossterm::event::KeyModifiers::NONE,
     ));
-    app.analysis_tab = 5;
+    app.analysis_tab = rs_typing_trainer::app::ANALYSIS_BENCH_TAB;
     app.analysis_records = (1..=4)
         .map(|day| {
             let mut row = record(day, 30.0 + f64::from(day));
@@ -1146,12 +1146,12 @@ fn image_bench_adds_a_sparkline_row_and_keeps_the_existing_part_value_row() {
 fn graphics_off_keeps_the_existing_analysis_text_buffer() {
     let mut baseline = common::test_app(Config::default());
     baseline.screen = rs_typing_trainer::app::Screen::Analysis;
-    baseline.analysis_tab = 1;
+    baseline.analysis_tab = rs_typing_trainer::app::ANALYSIS_TREND_TAB;
     baseline.analysis_records = vec![record(1, 20.0), record(3, 30.0)];
 
     let mut explicit_off = common::test_app(Config::default());
     explicit_off.screen = rs_typing_trainer::app::Screen::Analysis;
-    explicit_off.analysis_tab = 1;
+    explicit_off.analysis_tab = rs_typing_trainer::app::ANALYSIS_TREND_TAB;
     explicit_off.analysis_records = baseline.analysis_records.clone();
     explicit_off.config.display.big_font = "shinonome".into();
     explicit_off.set_graphics_detection(GraphicsDetection {
@@ -1167,7 +1167,7 @@ fn graphics_off_keeps_the_existing_analysis_text_buffer() {
 fn image_chart_keeps_title_legend_and_both_endpoint_dates_as_terminal_text() {
     let mut app = common::test_app(Config::default());
     app.screen = rs_typing_trainer::app::Screen::Analysis;
-    app.analysis_tab = 1;
+    app.analysis_tab = rs_typing_trainer::app::ANALYSIS_TREND_TAB;
     app.analysis_records = vec![record(1, 20.0), record(10, 30.0)];
     app.set_graphics_detection(detection());
 
@@ -1183,7 +1183,7 @@ fn image_chart_keeps_title_legend_and_both_endpoint_dates_as_terminal_text() {
 fn text_chart_keeps_the_existing_unknown_bucket_for_an_invalid_timestamp() {
     let mut app = common::test_app(Config::default());
     app.screen = rs_typing_trainer::app::Screen::Analysis;
-    app.analysis_tab = 1;
+    app.analysis_tab = rs_typing_trainer::app::ANALYSIS_TREND_TAB;
     let mut invalid = record(10, 30.0);
     invalid.header.finished_at = "not-a-timestamp".into();
     app.analysis_records = vec![record(1, 20.0), invalid];

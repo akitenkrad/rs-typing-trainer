@@ -250,7 +250,7 @@ fn key_picker_and_analysis_use_keycap_when_the_terminal_is_large() {
 
     let mut analysis = test_app(Config::default());
     analysis.screen = rs_typing_trainer::app::Screen::Analysis;
-    analysis.analysis_tab = 2;
+    analysis.analysis_tab = rs_typing_trainer::app::ANALYSIS_KEYBOARD_TAB;
     let mut analysis_terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
     analysis_terminal.draw(|frame| ui::render(frame, &analysis)).unwrap();
     assert!(text(&analysis_terminal).contains('┬'), "{}", text(&analysis_terminal));

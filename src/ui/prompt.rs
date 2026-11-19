@@ -57,6 +57,9 @@ fn prompt_kind(app: &App, game: &GameState) -> PromptKind {
         ModeKind::Adaptive if japanese => PromptKind::Japanese { sentence: false },
         ModeKind::Sentence | ModeKind::Endurance if japanese => PromptKind::Japanese { sentence: true },
         ModeKind::Sentence | ModeKind::Endurance => PromptKind::Sentence,
+        // A Japanese menu step of a word-pool mode (`words`, `ngram`,
+        // `unlock`, `rhythm`, `burst`) is fed Japanese words (MYTASK-3628).
+        _ if japanese => PromptKind::Japanese { sentence: false },
         _ => PromptKind::Word,
     }
 }

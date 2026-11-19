@@ -6,24 +6,61 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
-use crate::app::App;
+use crate::app::{App, MODE_ENTRIES, ModeEntry};
 use crate::config::ModeKind;
 use crate::i18n::Lang;
 use crate::ui::{left_inset, theme::Theme};
 
-const MODES: [(ModeKind, &str, &str); 11] = [
-    (ModeKind::Random, "random — random character groups", "random — ランダム文字列"),
-    (ModeKind::Words, "words — English words", "words — 英単語"),
-    (ModeKind::Romaji, "romaji — Japanese words", "romaji — 日本語の単語"),
-    (ModeKind::Sentence, "sentence — complete sentences", "sentence — 短文"),
-    (ModeKind::Phrase, "phrase — Phrases", "phrase — 句"),
-    (ModeKind::Ngram, "ngram — repeated transitions", "ngram — 文字の組み合わせ"),
-    (ModeKind::Adaptive, "adaptive — focus weak transitions", "adaptive — 弱い遷移を重点練習"),
-    (ModeKind::Unlock, "unlock — gradually add keys", "unlock — キーを段階的に解放"),
-    (ModeKind::Rhythm, "rhythm — metronome timing", "rhythm — メトロノーム"),
-    (ModeKind::Burst, "burst — three short sprints", "burst — 短距離を 3 本"),
-    (ModeKind::Endurance, "endurance — sustained sentences", "endurance — 短文の持久練習"),
+const MODES: [(ModeEntry, &str, &str); 12] = [
+    // The warm-up's length comes from the menu catalog; see `warmup_label`.
+    (ModeEntry::Warmup, "", ""),
+    (
+        ModeEntry::Mode(ModeKind::Random),
+        "random — random character groups",
+        "random — ランダム文字列",
+    ),
+    (ModeEntry::Mode(ModeKind::Words), "words — English words", "words — 英単語"),
+    (ModeEntry::Mode(ModeKind::Romaji), "romaji — Japanese words", "romaji — 日本語の単語"),
+    (ModeEntry::Mode(ModeKind::Sentence), "sentence — complete sentences", "sentence — 短文"),
+    (ModeEntry::Mode(ModeKind::Phrase), "phrase — Phrases", "phrase — 句"),
+    (
+        ModeEntry::Mode(ModeKind::Ngram),
+        "ngram — repeated transitions",
+        "ngram — 文字の組み合わせ",
+    ),
+    (
+        ModeEntry::Mode(ModeKind::Adaptive),
+        "adaptive — focus weak transitions",
+        "adaptive — 弱い遷移を重点練習",
+    ),
+    (
+        ModeEntry::Mode(ModeKind::Unlock),
+        "unlock — gradually add keys",
+        "unlock — キーを段階的に解放",
+    ),
+    (ModeEntry::Mode(ModeKind::Rhythm), "rhythm — metronome timing", "rhythm — メトロノーム"),
+    (
+        ModeEntry::Mode(ModeKind::Burst),
+        "burst — three all-out short sprints",
+        "burst — 短距離を全力で 3 本",
+    ),
+    (
+        ModeEntry::Mode(ModeKind::Endurance),
+        "endurance — sustained sentences",
+        "endurance — 短文の持久練習",
+    ),
 ];
+
+/// The warm-up row, with the length of the catalog's warm-up (MYTASK-3629).
+fn warmup_label(lang: Lang) -> String {
+    let minutes = crate::practice::menu::bundled_catalog()
+        .and_then(|catalog| crate::practice::menu::warmup_step(catalog, lang, lang))
+        .map_or(1, |step| step.minutes);
+    match lang {
+        Lang::En => format!("warmup — {minutes}-minute warm-up"),
+        Lang::Ja => format!("warmup — {minutes} 分のウォームアップ"),
+    }
+}
 
 pub fn render(frame: &mut Frame, app: &App) {
     let theme = Theme::from_name(&app.config.ui.theme);
@@ -39,7 +76,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     frame.render_widget(block, area);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Fill(1), Constraint::Length(12), Constraint::Length(4), Constraint::Fill(1)])
+        .constraints([Constraint::Fill(1), Constraint::Length(13), Constraint::Length(4), Constraint::Fill(1)])
         .split(inner);
     if let Some(grade) = &app.mode_grade_line {
         frame.render_widget(
@@ -49,18 +86,24 @@ pub fn render(frame: &mut Frame, app: &App) {
             chunks[0],
         );
     }
+    debug_assert!(MODES.iter().map(|(entry, _, _)| *entry).eq(MODE_ENTRIES));
     let lines = MODES
         .iter()
         .enumerate()
-        .map(|(index, (_, en, ja))| {
+        .map(|(index, (entry, en, ja))| {
             let selected = index == app.mode_selected;
+            let label = if *entry == ModeEntry::Warmup {
+                warmup_label(app.config.general.lang)
+            } else {
+                match app.config.general.lang {
+                    Lang::En => (*en).to_owned(),
+                    Lang::Ja => (*ja).to_owned(),
+                }
+            };
             Line::from(vec![
                 Span::styled(if selected { "▶ " } else { "  " }, Style::default().fg(theme.accent)),
                 Span::styled(
-                    match app.config.general.lang {
-                        Lang::En => *en,
-                        Lang::Ja => *ja,
-                    },
+                    label,
                     Style::default()
                         .fg(if selected { theme.warning } else { theme.fg })
                         .add_modifier(if selected { Modifier::BOLD } else { Modifier::empty() }),
@@ -69,10 +112,11 @@ pub fn render(frame: &mut Frame, app: &App) {
         })
         .collect::<Vec<_>>();
     frame.render_widget(Paragraph::new(lines), left_inset(chunks[1]));
-    let selected_mode = MODES[app.mode_selected].0;
+    let selected_entry = app.selected_mode_entry();
+    let selected_mode = selected_entry.mode();
     let pacer_available = matches!(
         selected_mode,
-        ModeKind::Words | ModeKind::Sentence | ModeKind::Phrase | ModeKind::Adaptive
+        Some(ModeKind::Words | ModeKind::Sentence | ModeKind::Phrase | ModeKind::Adaptive)
     );
     let pacer = if pacer_available {
         match (app.config.general.lang, app.config.pacer.enabled) {
@@ -84,15 +128,24 @@ pub fn render(frame: &mut Frame, app: &App) {
     } else {
         ""
     };
-    let adaptive_language = if selected_mode == ModeKind::Adaptive {
-        match app.config.general.lang {
-            Lang::En => format!("[L] Practice language: {}", app.config.adaptive.lang.to_uppercase()),
-            Lang::Ja => format!("[L] 練習言語: {}", app.config.adaptive.lang.to_uppercase()),
-        }
-    } else {
-        String::new()
+    let practice_language = match selected_entry {
+        ModeEntry::Mode(ModeKind::Adaptive) => Some(app.config.adaptive.lang.to_uppercase()),
+        ModeEntry::Warmup => Some(
+            match app.warmup_language {
+                Lang::En => "EN",
+                Lang::Ja => "JA",
+            }
+            .to_owned(),
+        ),
+        ModeEntry::Mode(_) => None,
     };
-    let phrase_options = if selected_mode == ModeKind::Phrase {
+    let adaptive_language = practice_language
+        .map(|language| match app.config.general.lang {
+            Lang::En => format!("[L] Practice language: {language}"),
+            Lang::Ja => format!("[L] 練習言語: {language}"),
+        })
+        .unwrap_or_default();
+    let phrase_options = if selected_mode == Some(ModeKind::Phrase) {
         match app.config.general.lang {
             Lang::En => format!(
                 "[L] Language: {}  [C] Course: {}",

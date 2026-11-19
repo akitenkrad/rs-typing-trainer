@@ -51,13 +51,13 @@ fn config(lang: Lang) -> Config {
     config
 }
 
-/// A new player: the 15-minute introductory menu (2 + 4 + 4 + 3 + 2).
+/// A new player: the 15-minute introductory menu (1 + 5 + 4 + 3 + 2).
 fn menu_app(lang: Lang) -> TestApp {
     let mut app = test_app_at(config(lang), chrono::NaiveDate::from_ymd_opt(2026, 11, 19).unwrap());
     app.handle_key(key(KeyCode::Char('m')));
     assert_eq!(app.screen, Screen::Menu);
     let minutes = app.daily_menu.as_ref().unwrap().steps.iter().map(|step| step.minutes).collect::<Vec<_>>();
-    assert_eq!(minutes, vec![2, 4, 4, 3, 2]);
+    assert_eq!(minutes, vec![1, 5, 4, 3, 2]);
     app
 }
 
@@ -92,7 +92,7 @@ fn countdown_and_result_show_the_whole_menu_in_japanese_at_80_by_24() {
     let band = band_rows(&rows, "段 1/5");
     assert_eq!(band.len(), 1, "{text}");
     assert!(
-        band[0].contains("▶ウォームアップ 2 › 遷移 4 › 遷移 4 › 確認 3 › 仕上げ 2  段 1/5 · 残り 15 分"),
+        band[0].contains("▶ウォームアップ 1 › 遷移 5 › 遷移 4 › 確認 3 › 仕上げ 2  段 1/5 · 残り 15 分"),
         "{text}"
     );
     println!("countdown (ja, 80x24):\n{text}");
@@ -104,7 +104,7 @@ fn countdown_and_result_show_the_whole_menu_in_japanese_at_80_by_24() {
     let band = band_rows(&rows, "段 2/5");
     assert_eq!(band.len(), 1, "{text}");
     assert!(
-        band[0].contains("✓ウォームアップ › ▶遷移 4 › 遷移 4 › 確認 3 › 仕上げ 2  段 2/5 · 残り 13 分"),
+        band[0].contains("✓ウォームアップ › ▶遷移 5 › 遷移 4 › 確認 3 › 仕上げ 2  段 2/5 · 残り 14 分"),
         "{text}"
     );
     // The existing rows keep their place: the hint and the save line.
@@ -120,7 +120,7 @@ fn countdown_and_result_show_the_whole_menu_in_japanese_at_80_by_24() {
     assert!(matches!(app.screen, Screen::Countdown { .. }));
     let text = render(&app, 80, 24).join("\n");
     assert!(
-        text.contains("✓ウォームアップ 2 › ▶遷移 4 › 遷移 4 › 確認 3 › 仕上げ 2  段 2/5 · 残り 13 分"),
+        text.contains("✓ウォームアップ 1 › ▶遷移 5 › 遷移 4 › 確認 3 › 仕上げ 2  段 2/5 · 残り 14 分"),
         "{text}"
     );
 }
@@ -147,7 +147,7 @@ fn countdown_and_result_show_the_whole_menu_in_english_at_80_by_24() {
     let band = band_rows(&rows, "Step 2/5");
     assert_eq!(band.len(), 1, "{text}");
     assert!(
-        band[0].contains("✓Warm-up › ▶Transition › Transition › Check › Finish  Step 2/5 · 13 min left"),
+        band[0].contains("✓Warm-up › ▶Transition › Transition › Check › Finish  Step 2/5 · 14 min left"),
         "{text}"
     );
     assert_eq!(rows.iter().filter(|row| row.contains("[Enter] Next step")).count(), 1, "{text}");
@@ -157,7 +157,7 @@ fn countdown_and_result_show_the_whole_menu_in_english_at_80_by_24() {
     // Wide enough, the minutes come back.
     let wide = render(&app, 120, 30).join("\n");
     assert!(
-        wide.contains("✓Warm-up 2 › ▶Transition 4 › Transition 4 › Check 3 › Finish 2  Step 2/5 · 13 min left"),
+        wide.contains("✓Warm-up 1 › ▶Transition 5 › Transition 4 › Check 3 › Finish 2  Step 2/5 · 14 min left"),
         "{wide}"
     );
 }
@@ -193,13 +193,13 @@ fn the_band_fits_the_given_width_at_every_step() {
     // The minutes left count every step not done yet plus the marked one.
     let completed = BTreeSet::from([0, 2]);
     let band = ui::menu::progress_band(menu, &completed, Some(1), 2, Lang::Ja, 200);
-    assert_eq!(band, "✓ウォームアップ 2 › ▶遷移 4 › ✓遷移 4 › 確認 3 › 仕上げ 2  段 2/5 · 残り 9 分");
+    assert_eq!(band, "✓ウォームアップ 1 › ▶遷移 5 › ✓遷移 4 › 確認 3 › 仕上げ 2  段 2/5 · 残り 10 分");
     // After the last step nothing is marked and nothing is left.
     let all = (0..menu.steps.len()).collect::<BTreeSet<_>>();
     let band = ui::menu::progress_band(menu, &all, None, 5, Lang::En, 200);
     assert_eq!(
         band,
-        "✓Warm-up 2 › ✓Transition 4 › ✓Transition 4 › ✓Check 3 › ✓Finish 2  Step 5/5 · 0 min left"
+        "✓Warm-up 1 › ✓Transition 5 › ✓Transition 4 › ✓Check 3 › ✓Finish 2  Step 5/5 · 0 min left"
     );
 }
 

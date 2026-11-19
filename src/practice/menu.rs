@@ -1441,8 +1441,10 @@ pub fn build_menu_for_languages(
         }
     });
 
-    let mut steps = vec![fixed_step(catalog.fixed(MenuRole::Warmup)?, display, a_plan.language, "-")];
-    steps.push(primary_step(
+    let warmup = fixed_step(catalog.fixed(MenuRole::Warmup)?, display, a_plan.language, "-");
+    let spare_minutes = WARMUP_SLOT_MINUTES.saturating_sub(warmup.minutes);
+    let mut steps = vec![warmup];
+    let mut primary_a = primary_step(
         catalog,
         a_plan,
         a_candidate,
@@ -1450,7 +1452,13 @@ pub fn build_menu_for_languages(
         primary_minutes(menu.minutes),
         display,
         multi || a_plan.language != display,
-    )?);
+    )?;
+    // MYTASK-3629: the minutes the warm-up leaves go to primary A, but only
+    // when the step stays within its limit; otherwise the menu is shorter.
+    if spare_minutes > 0 && primary_a.minutes + spare_minutes <= max_step_minutes(&primary_a.mode) {
+        primary_a.minutes += spare_minutes;
+    }
+    steps.push(primary_a);
     if let Some(plan) = b_plan {
         steps.push(primary_step(
             catalog,
@@ -1723,12 +1731,12 @@ fn introductory_menu(
         Lang::En => "Introductory menu: fewer than 2,000 logged keystrokes or no overall grade",
         Lang::Ja => "入門メニュー: 打鍵ログ 2,000 未満または総合なし",
     };
-    let mut steps = vec![fixed_step(
+    let warmup = fixed_step(
         catalog.fixed(MenuRole::Warmup)?,
         display,
         practice,
         &reason_with_language(intro_reason, practice, display, show_label),
-    )];
+    );
     let adaptive = available_prescription(catalog, "transition.adaptive", states)
         .or_else(|| available_prescription(catalog, "transition.ngram", states))
         .ok_or_else(|| "no introductory transition prescription is available".to_owned())?;
@@ -1745,7 +1753,20 @@ fn introductory_menu(
         Lang::Ja => "入門ルーチン: 基準データを集めながら弱い遷移を練習",
     };
     let reason = reason_with_language(reason, practice, display, show_label);
-    for (index, minutes) in introductory_transition_minutes(menu.minutes.saturating_sub(7)).into_iter().enumerate() {
+    let mut check = fixed_step(catalog.fixed(MenuRole::Check)?, display, practice, &reason);
+    check.minutes = cap_step_minutes(&check.mode, INTRODUCTORY_CHECK_MINUTES);
+    let mut finish = fixed_step(catalog.fixed(MenuRole::Finish)?, display, practice, &reason);
+    finish.minutes = cap_step_minutes(&finish.mode, INTRODUCTORY_FINISH_MINUTES);
+    // MYTASK-3629: the transition steps take whatever the warm-up, check and
+    // finish leave of the configured length, so the menu adds up to it
+    // (15 minutes: 1 + [5, 4] + 3 + 2).
+    let transition_total = menu
+        .minutes
+        .saturating_sub(warmup.minutes)
+        .saturating_sub(check.minutes)
+        .saturating_sub(finish.minutes);
+    let mut steps = vec![warmup];
+    for (index, minutes) in introductory_transition_minutes(transition_total).into_iter().enumerate() {
         let selected = if index % 2 == 0 { &adaptive } else { &ngram };
         steps.push(prescription_step_with_reason(
             selected,
@@ -1756,11 +1777,7 @@ fn introductory_menu(
             &reason,
         ));
     }
-    let mut check = fixed_step(catalog.fixed(MenuRole::Check)?, display, practice, &reason);
-    check.minutes = 3;
     steps.push(check);
-    let mut finish = fixed_step(catalog.fixed(MenuRole::Finish)?, display, practice, &reason);
-    finish.minutes = 2;
     steps.push(finish);
     Ok(DailyMenu {
         date: input.as_of,
@@ -1772,6 +1789,15 @@ fn introductory_menu(
         steps,
     })
 }
+
+/// Minutes of the introductory menu's check step (§4.2).
+const INTRODUCTORY_CHECK_MINUTES: u8 = 3;
+/// Minutes of the introductory menu's finish step (§4.2).
+const INTRODUCTORY_FINISH_MINUTES: u8 = 2;
+/// The share of a personalized menu set aside for the warm-up (§4.2). A
+/// catalog warm-up shorter than this hands the minutes it leaves to primary A
+/// (MYTASK-3629: the warm-up became 1 minute), within the step limit.
+const WARMUP_SLOT_MINUTES: u8 = 2;
 
 /// The introductory transition time split into the fewest steps of at most
 /// [`MAX_STEP_MINUTES`], as evenly as possible with the longer steps first
@@ -1791,6 +1817,13 @@ fn primary_minutes(minutes: u8) -> u8 {
         20 => 7,
         _ => 5,
     }
+}
+
+/// The catalog's warm-up as a step of its own, for the stand-alone warm-up of
+/// the mode-select screen (MYTASK-3629). It has the same mode, minutes and
+/// settings as the menu's warm-up; apply it with [`config_for_menu_step`].
+pub fn warmup_step(catalog: &MenuCatalog, display: Lang, practice: Lang) -> Result<MenuStep, String> {
+    Ok(fixed_step(catalog.fixed(MenuRole::Warmup)?, display, practice, "-"))
 }
 
 fn fixed_step(step: &FixedStep, display: Lang, practice: Lang, reason: &str) -> MenuStep {

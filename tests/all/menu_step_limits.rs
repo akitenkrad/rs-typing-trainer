@@ -99,16 +99,17 @@ fn the_introductory_transition_time_is_split_into_steps_of_at_most_five_minutes(
 fn introductory_menus_keep_their_total_and_every_step_within_the_limits() {
     let transition = |id: &str, minutes: u8| (MenuRole::PrimaryA, id.to_owned(), minutes);
     let fixed = |role: MenuRole, id: &str, minutes: u8| (role, id.to_owned(), minutes);
-    let head = [fixed(MenuRole::Warmup, "fixed.warmup", 2)];
+    // MYTASK-3629: a one-minute warm-up; the transitions take the rest.
+    let head = [fixed(MenuRole::Warmup, "fixed.warmup", 1)];
     let tail = [fixed(MenuRole::Check, "fixed.check", 3), fixed(MenuRole::Finish, "fixed.finish", 2)];
     let english = [
-        (10, vec![transition("transition.adaptive", 3)]),
-        (15, vec![transition("transition.adaptive", 4), transition("transition.ngram", 4)]),
+        (10, vec![transition("transition.adaptive", 4)]),
+        (15, vec![transition("transition.adaptive", 5), transition("transition.ngram", 4)]),
         (
             20,
             vec![
                 transition("transition.adaptive", 5),
-                transition("transition.ngram", 4),
+                transition("transition.ngram", 5),
                 transition("transition.adaptive", 4),
             ],
         ),
@@ -132,7 +133,7 @@ fn introductory_menus_keep_their_total_and_every_step_within_the_limits() {
         assert_within_limits(&menu);
         assert_eq!(menu.total_minutes(), u32::from(minutes));
         let transitions = menu.steps.iter().filter(|step| step.role == MenuRole::PrimaryA).collect::<Vec<_>>();
-        assert_eq!(transitions.len(), usize::from((minutes - 7).div_ceil(MAX_STEP_MINUTES)));
+        assert_eq!(transitions.len(), usize::from((minutes - 6).div_ceil(MAX_STEP_MINUTES)));
         assert!(transitions.iter().all(|step| step.prescription_id == "transition.adaptive"));
         assert!(transitions.iter().all(|step| step.language == Lang::Ja));
     }
@@ -166,7 +167,7 @@ fn a_two_language_introductory_menu_splits_the_chosen_language_the_same_way() {
         .filter(|step| step.role == MenuRole::PrimaryA)
         .map(|step| step.minutes)
         .collect::<Vec<_>>();
-    assert_eq!(transitions, vec![4, 4]);
+    assert_eq!(transitions, vec![5, 4]);
     assert!(menu.steps[1].reason.starts_with(if language == Lang::En { "EN:" } else { "JA:" }));
 }
 

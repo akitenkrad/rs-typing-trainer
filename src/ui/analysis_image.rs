@@ -225,6 +225,141 @@ pub struct TrendDateRange {
     pub end: NaiveDate,
 }
 
+/// Gaps between consecutive recorded days longer than this many days are cut
+/// out of the trend tab's x axis.
+pub const TREND_BREAK_MIN_GAP_DAYS: i64 = 14;
+/// Width, in days, that a cut-out gap keeps on the x axis.
+pub const TREND_BREAK_WIDTH_DAYS: i64 = 3;
+
+/// The trend tab's x axis: calendar days, with long empty stretches cut out.
+///
+/// The axis is a list of segments (inclusive date ranges). Inside a segment a
+/// day is one unit wide; between two segments the gap is squeezed to
+/// [`TREND_BREAK_WIDTH_DAYS`] units, whatever its real length. Lines must not
+/// be drawn across a break, and the break is marked with `≈`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct TrendAxis {
+    segments: Vec<TrendDateRange>,
+}
+
+impl From<TrendDateRange> for TrendAxis {
+    fn from(range: TrendDateRange) -> Self {
+        Self {
+            segments: vec![TrendDateRange {
+                start: range.start.min(range.end),
+                end: range.start.max(range.end),
+            }],
+        }
+    }
+}
+
+impl TrendAxis {
+    /// Builds an axis from the recorded days, cutting every gap longer than
+    /// [`TREND_BREAK_MIN_GAP_DAYS`]. Returns `None` when there is no date.
+    pub fn from_dates(dates: impl IntoIterator<Item = NaiveDate>) -> Option<Self> {
+        let dates = dates.into_iter().collect::<BTreeSet<_>>();
+        let mut segments = Vec::<TrendDateRange>::new();
+        for date in dates {
+            match segments.last_mut() {
+                Some(last) if (date - last.end).num_days() <= TREND_BREAK_MIN_GAP_DAYS => last.end = date,
+                _ => segments.push(TrendDateRange { start: date, end: date }),
+            }
+        }
+        (!segments.is_empty()).then_some(Self { segments })
+    }
+
+    /// Extends the last segment up to `date` (used for forecasts, which run
+    /// on from the last record and must not be cut).
+    pub fn extend_to(&mut self, date: NaiveDate) {
+        if let Some(last) = self.segments.last_mut()
+            && date > last.end
+        {
+            last.end = date;
+        }
+    }
+
+    pub fn segments(&self) -> &[TrendDateRange] {
+        &self.segments
+    }
+
+    pub fn start(&self) -> NaiveDate {
+        self.segments[0].start
+    }
+
+    pub fn end(&self) -> NaiveDate {
+        self.segments[self.segments.len() - 1].end
+    }
+
+    /// Bounding dates of the axis.
+    pub fn range(&self) -> TrendDateRange {
+        TrendDateRange {
+            start: self.start(),
+            end: self.end(),
+        }
+    }
+
+    pub fn has_breaks(&self) -> bool {
+        self.segments.len() > 1
+    }
+
+    /// Length of the axis in units (days inside segments plus the squeezed gaps).
+    pub fn span(&self) -> f64 {
+        let days = self.segments.iter().map(|segment| (segment.end - segment.start).num_days()).sum::<i64>();
+        (days + TREND_BREAK_WIDTH_DAYS * (self.segments.len() as i64 - 1)) as f64
+    }
+
+    /// Position of `date` in units from the start of the axis. Continuous and
+    /// monotone: a date inside a cut gap is placed proportionally inside the
+    /// squeezed gap, and dates outside the axis extrapolate by one unit a day.
+    pub fn position(&self, date: NaiveDate) -> f64 {
+        let mut offset = 0.0;
+        for (index, segment) in self.segments.iter().enumerate() {
+            if date <= segment.end || index + 1 == self.segments.len() {
+                if index > 0 && date < segment.start {
+                    let previous = self.segments[index - 1];
+                    let gap = (segment.start - previous.end).num_days() as f64;
+                    let into = (date - previous.end).num_days() as f64;
+                    return offset - TREND_BREAK_WIDTH_DAYS as f64 * (1.0 - into / gap);
+                }
+                return offset + (date - segment.start).num_days() as f64;
+            }
+            offset += (segment.end - segment.start).num_days() as f64 + TREND_BREAK_WIDTH_DAYS as f64;
+        }
+        offset
+    }
+
+    /// Position of `date` as a fraction of the axis (0 = start, 1 = end).
+    pub fn fraction(&self, date: NaiveDate) -> f64 {
+        self.position(date) / self.span().max(1.0)
+    }
+
+    /// Positions (as fractions of the axis) of the middle of each break.
+    pub fn break_fractions(&self) -> Vec<f64> {
+        let span = self.span().max(1.0);
+        let mut offset = 0.0;
+        let mut breaks = Vec::new();
+        for (index, segment) in self.segments.iter().enumerate() {
+            offset += (segment.end - segment.start).num_days() as f64;
+            if index + 1 < self.segments.len() {
+                breaks.push((offset + TREND_BREAK_WIDTH_DAYS as f64 / 2.0) / span);
+                offset += TREND_BREAK_WIDTH_DAYS as f64;
+            }
+        }
+        breaks
+    }
+
+    /// Index of the segment that `date` falls in, or the last segment before
+    /// it when it falls in a gap.
+    pub fn segment_index(&self, date: NaiveDate) -> usize {
+        self.segments.iter().rposition(|segment| segment.start <= date).unwrap_or(0)
+    }
+
+    /// Whether a line from `a` to `b` would cross a break.
+    pub fn crosses_break(&self, a: NaiveDate, b: NaiveDate) -> bool {
+        self.segment_index(a) != self.segment_index(b)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum AggregatedDate {
     Known(NaiveDate),
@@ -234,7 +369,8 @@ enum AggregatedDate {
 pub(crate) struct TextTrendSeries {
     pub(crate) name: String,
     pub(crate) color: Color,
-    pub(crate) points: Vec<(String, f64)>,
+    /// `None` is the bucket of records whose timestamp could not be read.
+    pub(crate) points: Vec<(Option<NaiveDate>, f64)>,
 }
 
 pub(crate) struct TextTrendData {
@@ -272,18 +408,22 @@ impl TrendChartSpec {
 }
 
 pub fn shared_trend_date_range<'a>(specs: impl IntoIterator<Item = &'a TrendChartSpec>) -> Option<TrendDateRange> {
-    let mut start = None::<NaiveDate>;
-    let mut end = None::<NaiveDate>;
-    for spec in specs {
-        for date in spec.series.iter().flat_map(|series| series.points.iter().map(|point| point.date)) {
-            start = Some(start.map_or(date, |current| current.min(date)));
-            end = Some(end.map_or(date, |current| current.max(date)));
-        }
-        for forecast in &spec.forecasts {
-            end = Some(end.map_or(forecast.end_date, |current| current.max(forecast.end_date)));
-        }
+    shared_trend_axis(specs).map(|axis| axis.range())
+}
+
+/// The x axis shared by the trend tab's charts: every recorded day of every
+/// chart, long gaps cut out, and the last segment extended to the furthest
+/// forecast.
+pub fn shared_trend_axis<'a>(specs: impl IntoIterator<Item = &'a TrendChartSpec>) -> Option<TrendAxis> {
+    let specs = specs.into_iter().collect::<Vec<_>>();
+    let dates = specs
+        .iter()
+        .flat_map(|spec| spec.series.iter().flat_map(|series| series.points.iter().map(|point| point.date)));
+    let mut axis = TrendAxis::from_dates(dates)?;
+    for forecast in specs.iter().flat_map(|spec| &spec.forecasts) {
+        axis.extend_to(forecast.end_date);
     }
-    Some(TrendDateRange { start: start?, end: end? })
+    Some(axis)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -357,7 +497,7 @@ enum AnalysisImageKey {
     Chart {
         kind: MetricKind,
         cells: Size,
-        x_range: Option<TrendDateRange>,
+        x_range: Option<TrendAxis>,
         series: Vec<SeriesKey>,
         forecasts: Vec<ForecastKey>,
     },
@@ -416,6 +556,14 @@ enum AnalysisImageKey {
         colors: [[u8; 3]; 4],
         cells: Size,
     },
+    /// The «today» tab's figures, keyed by their spec's debug text (the specs
+    /// carry floats and nested rows; the text is exact for equal specs).
+    Today {
+        kind: &'static str,
+        font: Option<FontIdentity>,
+        spec: String,
+        cells: Size,
+    },
 }
 
 pub struct AnalysisImageCache {
@@ -450,16 +598,23 @@ impl AnalysisImageCache {
     }
 
     pub fn prepare_chart(&mut self, detection: &GraphicsDetection, spec: &TrendChartSpec) -> Result<(), String> {
-        let x_range = spec.dates().map(|(start, end)| TrendDateRange { start, end });
-        let key = chart_key(spec, x_range);
+        let key = chart_key(spec, shared_trend_axis(std::iter::once(spec)));
         self.cache
             .prepare(detection, key, spec.cells, |cell_pixels| render_trend_chart(cell_pixels, spec))
     }
 
-    pub fn prepare_chart_with_range(&mut self, detection: &GraphicsDetection, spec: &TrendChartSpec, x_range: TrendDateRange) -> Result<(), String> {
-        let key = chart_key(spec, Some(x_range));
+    /// Prepares a trend chart drawn over `x_range` — a [`TrendAxis`] (with
+    /// breaks) or a plain [`TrendDateRange`] (one segment, no breaks).
+    pub fn prepare_chart_with_range(
+        &mut self,
+        detection: &GraphicsDetection,
+        spec: &TrendChartSpec,
+        x_range: impl Into<TrendAxis>,
+    ) -> Result<(), String> {
+        let axis = x_range.into();
+        let key = chart_key(spec, Some(axis.clone()));
         self.cache.prepare(detection, key, spec.cells, |cell_pixels| {
-            render_trend_chart_with_range(cell_pixels, spec, x_range)
+            render_trend_chart_with_range(cell_pixels, spec, axis.clone())
         })
     }
 
@@ -515,13 +670,58 @@ impl AnalysisImageCache {
         })
     }
 
+    pub fn prepare_today_card(&mut self, detection: &GraphicsDetection, font: &ResolvedBigFont, spec: &TodayCardSpec) -> Result<(), String> {
+        self.cache.prepare(detection, today_card_key(font, spec), spec.cells, |cell_pixels| {
+            render_today_card(font, cell_pixels, spec)
+        })
+    }
+
+    pub(crate) fn today_card_protocol<'a>(
+        &'a mut self,
+        detection: &GraphicsDetection,
+        font: &ResolvedBigFont,
+        spec: &TodayCardSpec,
+    ) -> Option<&'a Protocol> {
+        self.cache.protocol(detection, &today_card_key(font, spec))
+    }
+
+    pub fn prepare_today_steps(&mut self, detection: &GraphicsDetection, font: &ResolvedBigFont, spec: &TodayStepsSpec) -> Result<(), String> {
+        self.cache.prepare(detection, today_steps_key(font, spec), spec.cells, |cell_pixels| {
+            render_today_steps(font, cell_pixels, spec)
+        })
+    }
+
+    pub(crate) fn today_steps_protocol<'a>(
+        &'a mut self,
+        detection: &GraphicsDetection,
+        font: &ResolvedBigFont,
+        spec: &TodayStepsSpec,
+    ) -> Option<&'a Protocol> {
+        self.cache.protocol(detection, &today_steps_key(font, spec))
+    }
+
+    pub fn prepare_today_timeline(&mut self, detection: &GraphicsDetection, font: &ResolvedBigFont, spec: &TodayTimelineSpec) -> Result<(), String> {
+        self.cache.prepare(detection, today_timeline_key(font, spec), spec.cells, |cell_pixels| {
+            render_today_timeline(font, cell_pixels, spec)
+        })
+    }
+
+    pub(crate) fn today_timeline_protocol<'a>(
+        &'a mut self,
+        detection: &GraphicsDetection,
+        font: &ResolvedBigFont,
+        spec: &TodayTimelineSpec,
+    ) -> Option<&'a Protocol> {
+        self.cache.protocol(detection, &today_timeline_key(font, spec))
+    }
+
     pub(crate) fn chart_protocol_with_range<'a>(
         &'a mut self,
         detection: &GraphicsDetection,
         spec: &TrendChartSpec,
-        x_range: TrendDateRange,
+        x_range: impl Into<TrendAxis>,
     ) -> Option<&'a Protocol> {
-        self.cache.protocol(detection, &chart_key(spec, Some(x_range)))
+        self.cache.protocol(detection, &chart_key(spec, Some(x_range.into())))
     }
 
     pub(crate) fn badge_protocol<'a>(
@@ -585,7 +785,7 @@ fn badge_key(font: &ResolvedBigFont, spec: &GradeBadgeSpec) -> AnalysisImageKey 
     }
 }
 
-fn chart_key(spec: &TrendChartSpec, x_range: Option<TrendDateRange>) -> AnalysisImageKey {
+fn chart_key(spec: &TrendChartSpec, x_range: Option<TrendAxis>) -> AnalysisImageKey {
     let point_key = |point: &TrendPoint| PointKey {
         date: point.date,
         value: point.value.to_bits(),
@@ -1329,28 +1529,23 @@ pub fn render_skill_chart(cell_pixels: CellPixels, spec: &SkillChartSpec) -> Res
     rgba_image(pixmap)
 }
 
+/// Renders a trend chart over its own axis (long gaps between its own
+/// records cut out).
 pub fn render_trend_chart(cell_pixels: CellPixels, spec: &TrendChartSpec) -> Result<RgbaImage, String> {
-    let x_range = spec.dates().map(|(start, end)| TrendDateRange { start, end });
-    render_trend_chart_with_optional_range(cell_pixels, spec, x_range)
+    render_trend_chart_with_optional_range(cell_pixels, spec, shared_trend_axis(std::iter::once(spec)))
 }
 
-pub fn render_trend_chart_with_range(cell_pixels: CellPixels, spec: &TrendChartSpec, x_range: TrendDateRange) -> Result<RgbaImage, String> {
-    render_trend_chart_with_optional_range(cell_pixels, spec, Some(x_range))
+/// Renders a trend chart over `x_range` — a [`TrendAxis`] (with breaks) or a
+/// plain [`TrendDateRange`] (one segment, no breaks).
+pub fn render_trend_chart_with_range(cell_pixels: CellPixels, spec: &TrendChartSpec, x_range: impl Into<TrendAxis>) -> Result<RgbaImage, String> {
+    render_trend_chart_with_optional_range(cell_pixels, spec, Some(x_range.into()))
 }
 
-fn render_trend_chart_with_optional_range(
-    cell_pixels: CellPixels,
-    spec: &TrendChartSpec,
-    x_range: Option<TrendDateRange>,
-) -> Result<RgbaImage, String> {
+fn render_trend_chart_with_optional_range(cell_pixels: CellPixels, spec: &TrendChartSpec, axis: Option<TrendAxis>) -> Result<RgbaImage, String> {
     let width = u32::from(spec.cells.width) * u32::from(cell_pixels.width);
     let height = u32::from(spec.cells.height) * u32::from(cell_pixels.height);
     let mut pixmap = Pixmap::new(width.max(1), height.max(1)).ok_or_else(|| "chart dimensions are too large".to_owned())?;
-    let Some(TrendDateRange {
-        start: first_date,
-        end: last_date,
-    }) = x_range
-    else {
+    let Some(axis) = axis else {
         return rgba_image(pixmap);
     };
     let Some((min_y, max_y)) = spec.y_bounds() else {
@@ -1360,8 +1555,7 @@ fn render_trend_chart_with_optional_range(
     let right = (width as f32 - 3.0).max(left);
     let top = 2.0_f32;
     let bottom = (height as f32 - 3.0).max(top);
-    let total_days = (last_date - first_date).num_days().max(1) as f64;
-    let x = |date: NaiveDate| left + ((date - first_date).num_days() as f64 / total_days) as f32 * (right - left);
+    let x = |date: NaiveDate| left + axis.fraction(date) as f32 * (right - left);
     let y = |value: f64| {
         let fraction = ((max_y - value) / (max_y - min_y)).clamp(0.0, 1.0) as f32;
         top + fraction * (bottom - top)
@@ -1370,6 +1564,34 @@ fn render_trend_chart_with_optional_range(
     for index in 0..4 {
         let row = top + (bottom - top) * index as f32 / 3.0;
         stroke_line(&mut pixmap, (left, row), (right, row), GRID_COLOR, 55, 1.0, None);
+    }
+
+    // Axis breaks: a faint dashed vertical line through the plot and a «≈»
+    // drawn as two slanted strokes at the bottom edge.
+    for fraction in axis.break_fractions() {
+        let bx = left + fraction as f32 * (right - left);
+        stroke_line(
+            &mut pixmap,
+            (bx, top),
+            (bx, bottom),
+            GRID_COLOR,
+            110,
+            1.0,
+            StrokeDash::new(vec![3.0, 3.0], 0.0),
+        );
+        let half = (f32::from(cell_pixels.width) * 0.45).clamp(2.0, 6.0);
+        for offset in [-2.0_f32, 2.0] {
+            let cy = bottom - half - 1.0 + offset;
+            stroke_line(
+                &mut pixmap,
+                (bx - half, cy + half * 0.5),
+                (bx + half, cy - half * 0.5),
+                GRID_COLOR,
+                230,
+                1.5,
+                None,
+            );
+        }
     }
 
     for forecast in &spec.forecasts {
@@ -1400,8 +1622,13 @@ fn render_trend_chart_with_optional_range(
             let mut path = PathBuilder::new();
             if let Some(first) = series.points.first() {
                 path.move_to(x(first.date), y(first.value));
-                for point in &series.points[1..] {
-                    path.line_to(x(point.date), y(point.value));
+                for pair in series.points.windows(2) {
+                    let point = &pair[1];
+                    if axis.crosses_break(pair[0].date, point.date) {
+                        path.move_to(x(point.date), y(point.value));
+                    } else {
+                        path.line_to(x(point.date), y(point.value));
+                    }
                 }
                 if let Some(path) = path.finish() {
                     let mut paint = Paint::default();
@@ -1483,11 +1710,11 @@ pub(crate) fn build_text_trend_data(records: &[SessionRecord], kind: MetricKind,
             points: days
                 .into_iter()
                 .map(|(date, values)| {
-                    let label = match date {
-                        AggregatedDate::Known(date) => date.to_string(),
-                        AggregatedDate::Unknown => "unknown".to_owned(),
+                    let date = match date {
+                        AggregatedDate::Known(date) => Some(date),
+                        AggregatedDate::Unknown => None,
                     };
-                    (label, median(&values))
+                    (date, median(&values))
                 })
                 .collect(),
         })
@@ -1858,4 +2085,713 @@ fn rgba_image(pixmap: Pixmap) -> Result<RgbaImage, String> {
     let width = pixmap.width();
     let height = pixmap.height();
     RgbaImage::from_raw(width, height, pixmap.take_demultiplied()).ok_or_else(|| "pixmap dimensions do not match its data".to_owned())
+}
+
+// ---------------------------------------------------------------------------
+// «Today» tab (MYTASK-3631)
+// ---------------------------------------------------------------------------
+
+/// The marker of one session in the «today» timeline.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TodayPointShape {
+    /// A step of the practice menu: filled circle.
+    Menu,
+    /// Individual practice: ring.
+    Individual,
+    /// A benchmark session: diamond.
+    Bench,
+}
+
+/// A big-number card of the «today» totals: the label, the value, and the
+/// difference from the previous practice day drawn with the result screen's
+/// rule (green ▲ better, red ▼ worse, muted ± unchanged; higher is better).
+#[derive(Clone, Debug, PartialEq)]
+pub struct TodayCardSpec {
+    pub label: String,
+    pub value: String,
+    /// The signed difference; only its sign picks the color and the arrow.
+    pub delta: Option<f64>,
+    /// The difference as shown, e.g. «11/18 比 +3.0».
+    pub delta_text: String,
+    pub cells: Size,
+    pub colors: crate::ui::result_image::ResultImageColors,
+}
+
+/// One planned step of a menu run in the «today» steps figure.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TodayStepRow {
+    /// «1 ウォームアップ».
+    pub label: String,
+    /// Prescription and level, e.g. «先読みを広げる Lv2».
+    pub title: String,
+    pub minutes: u8,
+    pub done: bool,
+    pub value: String,
+    /// The difference from the previous run and whether it is an improvement
+    /// (`None` when unchanged).
+    pub difference: Option<(String, Option<bool>)>,
+    /// `advance.sessions` of the level, and how many are met so far.
+    pub required: Option<u8>,
+    pub met: u8,
+    /// «レベル 2 へ», «維持へ» when the run graduated the level (drawn after an
+    /// up-arrow; plain digits because the image font has no circled ones).
+    pub graduation: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum TodayStepsLine {
+    /// A run's heading.
+    Run(String),
+    Step(TodayStepRow),
+}
+
+/// The «today's training» figure: one cell row per line, with a done/not-yet
+/// badge, a bar for the step's minutes, the value and difference, the
+/// graduation condition as circles, and level-ups highlighted.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TodayStepsSpec {
+    pub lines: Vec<TodayStepsLine>,
+    /// The label of a step not played yet («未»).
+    pub not_played: String,
+    pub cells: Size,
+    pub colors: crate::ui::result_image::ResultImageColors,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TodayTimelinePoint {
+    /// Minutes since local midnight when the session started and ended.
+    pub start_minute: f64,
+    pub end_minute: f64,
+    pub wpm: f64,
+    /// 0..1.
+    pub accuracy: f64,
+    pub color: Color,
+    pub shape: TodayPointShape,
+}
+
+/// Today's sessions in time order: x = time of day, y = net WPM, color =
+/// language, shape = menu step / individual / bench, marker size and the
+/// note above it = accuracy.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TodayTimelineSpec {
+    pub points: Vec<TodayTimelinePoint>,
+    /// Legend entries for the colors (language name, color).
+    pub languages: Vec<(String, Color)>,
+    /// Legend labels of the three shapes and the size note.
+    pub shape_labels: [String; 3],
+    pub size_note: String,
+    pub cells: Size,
+    pub colors: crate::ui::result_image::ResultImageColors,
+}
+
+fn today_card_key(font: &ResolvedBigFont, spec: &TodayCardSpec) -> AnalysisImageKey {
+    AnalysisImageKey::Today {
+        kind: "card",
+        font: Some(font.identity()),
+        spec: format!("{spec:?}"),
+        cells: spec.cells,
+    }
+}
+
+fn today_steps_key(font: &ResolvedBigFont, spec: &TodayStepsSpec) -> AnalysisImageKey {
+    AnalysisImageKey::Today {
+        kind: "steps",
+        font: Some(font.identity()),
+        spec: format!("{spec:?}"),
+        cells: spec.cells,
+    }
+}
+
+fn today_timeline_key(font: &ResolvedBigFont, spec: &TodayTimelineSpec) -> AnalysisImageKey {
+    AnalysisImageKey::Today {
+        kind: "timeline",
+        font: Some(font.identity()),
+        spec: format!("{spec:?}"),
+        cells: spec.cells,
+    }
+}
+
+fn delta_color(delta: Option<f64>, improvement: Option<bool>, colors: crate::ui::result_image::ResultImageColors) -> [u8; 3] {
+    let good = improvement.or_else(|| delta.filter(|value| *value != 0.0 && value.is_finite()).map(|value| value > 0.0));
+    color_rgb(
+        match good {
+            Some(true) => colors.correct,
+            Some(false) => colors.mistype,
+            None => colors.muted,
+        },
+        [255, 255, 255],
+    )
+}
+
+/// ▲ (better) or ▼ (worse) at `(x, y)` with side `size`.
+fn fill_triangle(pixmap: &mut Pixmap, x: f32, y: f32, size: f32, up: bool, color: [u8; 3]) {
+    let points = if up {
+        [(x, y + size), (x + size, y + size), (x + size / 2.0, y)]
+    } else {
+        [(x, y), (x + size, y), (x + size / 2.0, y + size)]
+    };
+    if let Some(path) = polygon_path(points) {
+        fill_path(pixmap, &path, color, 255);
+    }
+}
+
+fn fill_circle(pixmap: &mut Pixmap, x: f32, y: f32, radius: f32, color: [u8; 3], alpha: u8) {
+    if let Some(circle) = PathBuilder::from_circle(x, y, radius.max(0.5)) {
+        fill_path(pixmap, &circle, color, alpha);
+    }
+}
+
+fn stroke_circle(pixmap: &mut Pixmap, x: f32, y: f32, radius: f32, color: [u8; 3], alpha: u8, width: f32) {
+    if let Some(circle) = PathBuilder::from_circle(x, y, radius.max(0.5)) {
+        stroke_path(pixmap, &circle, color, alpha, width);
+    }
+}
+
+/// Text truncated to `cells` display cells (with «…»).
+fn fit_cells(text: &str, cells: usize) -> String {
+    crate::ui::menu_summary::truncate(text, cells)
+}
+
+pub fn render_today_card(font: &ResolvedBigFont, cell_pixels: CellPixels, spec: &TodayCardSpec) -> Result<RgbaImage, String> {
+    let width = u32::from(spec.cells.width) * u32::from(cell_pixels.width);
+    let height = u32::from(spec.cells.height) * u32::from(cell_pixels.height);
+    let mut pixmap = Pixmap::new(width.max(1), height.max(1)).ok_or_else(|| "today card dimensions are too large".to_owned())?;
+    let (w, h) = (width as f32, height as f32);
+    let panel = color_rgb(spec.colors.panel, BADGE_FACE);
+    let muted = color_rgb(spec.colors.muted, GRID_COLOR);
+    let accent = color_rgb(spec.colors.accent, [41, 184, 219]);
+    fill_round_rect(&mut pixmap, [1.0, 1.0, w - 1.0, h - 1.0], 8.0, panel, 245);
+    let mut paint_border = PathBuilder::new();
+    paint_border.push_rect(tiny_skia::Rect::from_ltrb(1.5, 1.5, (w - 1.5).max(2.0), (h - 1.5).max(2.0)).ok_or("card bounds")?);
+    if let Some(path) = paint_border.finish() {
+        stroke_path(&mut pixmap, &path, muted, 150, 1.5);
+    }
+    let mut glyphs = HashMap::new();
+    let cell_h = u32::from(cell_pixels.height);
+    let label_height = (cell_h * 4 / 5).max(8);
+    let label_cells = usize::from(spec.cells.width.saturating_sub(2)) * 5 / 4;
+    draw_small_text(
+        &mut pixmap,
+        font,
+        &fit_cells(&spec.label, label_cells),
+        8.0,
+        5.0,
+        label_height,
+        muted,
+        true,
+        TextAlign::Left,
+        cell_pixels,
+        &mut glyphs,
+    )?;
+    // The value: as tall as the card allows while fitting its width.
+    let value_cells = spec
+        .value
+        .chars()
+        .map(|c| UnicodeWidthChar::width(c).unwrap_or(1).max(1))
+        .sum::<usize>()
+        .max(1) as f32;
+    let by_width = (w - 16.0) / value_cells * u32::from(cell_pixels.height) as f32 / u32::from(cell_pixels.width).max(1) as f32;
+    let by_height = h * 0.42;
+    let value_height = by_width.min(by_height).max(8.0) as u32;
+    let value_top = 5.0 + label_height as f32 + ((h * 0.66 - 5.0 - label_height as f32) - value_height as f32).max(0.0) / 2.0;
+    draw_small_text(
+        &mut pixmap,
+        font,
+        &spec.value,
+        w / 2.0,
+        value_top,
+        value_height,
+        accent,
+        true,
+        TextAlign::Center,
+        cell_pixels,
+        &mut glyphs,
+    )?;
+    if !spec.delta_text.is_empty() {
+        let color = delta_color(spec.delta, None, spec.colors);
+        let size = (cell_h * 4 / 5).max(8);
+        let y = h - size as f32 - 6.0;
+        let mut x = 8.0;
+        if let Some(delta) = spec.delta.filter(|value| *value != 0.0 && value.is_finite()) {
+            let icon = size as f32 * 0.8;
+            fill_triangle(&mut pixmap, x, y + (size as f32 - icon) / 2.0, icon, delta > 0.0, color);
+            x += icon + 4.0;
+        }
+        let text_cells = ((w - x - 6.0) / (u32::from(cell_pixels.width) as f32 * size as f32 / cell_h as f32)).max(1.0) as usize;
+        draw_small_text(
+            &mut pixmap,
+            font,
+            &fit_cells(&spec.delta_text, text_cells),
+            x,
+            y,
+            size,
+            color,
+            false,
+            TextAlign::Left,
+            cell_pixels,
+            &mut glyphs,
+        )?;
+    }
+    rgba_image(pixmap)
+}
+
+/// Column offsets (in cells) of the steps figure.
+struct TodayStepColumns {
+    badge: f32,
+    label: f32,
+    title: f32,
+    bar: f32,
+    value: f32,
+    difference: f32,
+    graduation: f32,
+    end: f32,
+}
+
+fn today_step_columns(cells: f32) -> TodayStepColumns {
+    // Fixed columns; the title and the bar share what is left.
+    let fixed = 3.0 + 20.0 + 11.0 + 10.0 + 18.0;
+    let free = (cells - fixed).max(8.0);
+    let title = (free * 0.6).clamp(6.0, 30.0);
+    let bar = (free - title).clamp(2.0, 24.0);
+    let badge = 0.0;
+    let label = badge + 3.0;
+    let title_x = label + 20.0;
+    let bar_x = title_x + title;
+    let value = bar_x + bar + 1.0;
+    let difference = value + 11.0;
+    let graduation = difference + 10.0;
+    TodayStepColumns {
+        badge,
+        label,
+        title: title_x,
+        bar: bar_x,
+        value,
+        difference,
+        graduation,
+        end: graduation + 18.0,
+    }
+}
+
+pub fn render_today_steps(font: &ResolvedBigFont, cell_pixels: CellPixels, spec: &TodayStepsSpec) -> Result<RgbaImage, String> {
+    let width = u32::from(spec.cells.width) * u32::from(cell_pixels.width);
+    let height = u32::from(spec.cells.height) * u32::from(cell_pixels.height);
+    let mut pixmap = Pixmap::new(width.max(1), height.max(1)).ok_or_else(|| "today steps dimensions are too large".to_owned())?;
+    let cw = f32::from(cell_pixels.width);
+    let ch = f32::from(cell_pixels.height);
+    let colors = spec.colors;
+    let foreground = color_rgb(colors.foreground, [230, 230, 230]);
+    let muted = color_rgb(colors.muted, GRID_COLOR);
+    let accent = color_rgb(colors.accent, [41, 184, 219]);
+    let correct = color_rgb(colors.correct, [13, 188, 121]);
+    let warning = color_rgb(colors.warning, [229, 229, 16]);
+    let columns = today_step_columns(f32::from(spec.cells.width));
+    let text_height = (ch * 0.8).max(8.0) as u32;
+    let text_y = |row: usize| row as f32 * ch + (ch - text_height as f32) / 2.0;
+    let mut glyphs = HashMap::new();
+    let max_minutes = spec
+        .lines
+        .iter()
+        .filter_map(|line| match line {
+            TodayStepsLine::Step(step) => Some(step.minutes),
+            TodayStepsLine::Run(_) => None,
+        })
+        .max()
+        .unwrap_or(1)
+        .max(1);
+    for (row, line) in spec.lines.iter().enumerate() {
+        let top = row as f32 * ch;
+        if top >= height as f32 {
+            break;
+        }
+        let center_y = top + ch / 2.0;
+        match line {
+            TodayStepsLine::Run(title) => {
+                fill_rect(&mut pixmap, [0.0, top + ch * 0.2, cw * 0.4, top + ch * 0.8], accent, 255);
+                draw_small_text(
+                    &mut pixmap,
+                    font,
+                    &fit_cells(title, usize::from(spec.cells.width).saturating_sub(2)),
+                    cw,
+                    text_y(row),
+                    text_height,
+                    foreground,
+                    true,
+                    TextAlign::Left,
+                    cell_pixels,
+                    &mut glyphs,
+                )?;
+            }
+            TodayStepsLine::Step(step) => {
+                let level_up = step.graduation.is_some();
+                if level_up {
+                    fill_rect(&mut pixmap, [0.0, top + 1.0, width as f32, top + ch - 1.0], warning, 40);
+                }
+                // Badge: filled with a check when done, a ring when not yet.
+                let badge_x = (columns.badge + 1.2) * cw;
+                let radius = (ch * 0.36).min(cw * 1.1);
+                if step.done {
+                    fill_circle(&mut pixmap, badge_x, center_y, radius, if level_up { warning } else { correct }, 255);
+                    let mut check = PathBuilder::new();
+                    check.move_to(badge_x - radius * 0.5, center_y);
+                    check.line_to(badge_x - radius * 0.1, center_y + radius * 0.4);
+                    check.line_to(badge_x + radius * 0.55, center_y - radius * 0.45);
+                    if let Some(path) = check.finish() {
+                        stroke_path(&mut pixmap, &path, BADGE_FACE, 255, (radius * 0.28).max(1.5));
+                    }
+                } else {
+                    stroke_circle(&mut pixmap, badge_x, center_y, radius * 0.85, muted, 220, 1.6);
+                }
+                let text_color = if step.done { foreground } else { muted };
+                draw_small_text(
+                    &mut pixmap,
+                    font,
+                    &fit_cells(&step.label, 24),
+                    columns.label * cw,
+                    text_y(row),
+                    text_height,
+                    text_color,
+                    false,
+                    TextAlign::Left,
+                    cell_pixels,
+                    &mut glyphs,
+                )?;
+                let title_cells = ((columns.bar - columns.title - 1.0) * 1.25) as usize;
+                draw_small_text(
+                    &mut pixmap,
+                    font,
+                    &fit_cells(&step.title, title_cells),
+                    columns.title * cw,
+                    text_y(row),
+                    text_height,
+                    text_color,
+                    false,
+                    TextAlign::Left,
+                    cell_pixels,
+                    &mut glyphs,
+                )?;
+                // The step's minutes as a bar: filled when done, outlined when not yet.
+                let bar_full = (columns.value - 1.0 - columns.bar) * cw;
+                let bar_width = (bar_full * f32::from(step.minutes) / f32::from(max_minutes)).max(cw * 0.5);
+                let bar = [columns.bar * cw, top + ch * 0.25, columns.bar * cw + bar_width, top + ch * 0.75];
+                if step.done {
+                    fill_round_rect(&mut pixmap, bar, ch * 0.2, if level_up { warning } else { accent }, 230);
+                } else {
+                    fill_round_rect(&mut pixmap, bar, ch * 0.2, muted, 50);
+                    stroke_rect(&mut pixmap, bar, muted, 160, 1.0);
+                }
+                let value = if step.done { step.value.as_str() } else { spec.not_played.as_str() };
+                draw_small_text(
+                    &mut pixmap,
+                    font,
+                    &fit_cells(value, 12),
+                    columns.value * cw,
+                    text_y(row),
+                    text_height,
+                    if step.done { foreground } else { muted },
+                    step.done,
+                    TextAlign::Left,
+                    cell_pixels,
+                    &mut glyphs,
+                )?;
+                if step.done
+                    && let Some((text, improvement)) = &step.difference
+                {
+                    let color = delta_color(None, *improvement, colors);
+                    let mut x = columns.difference * cw;
+                    if let Some(up) = improvement {
+                        let icon = text_height as f32 * 0.7;
+                        fill_triangle(&mut pixmap, x, center_y - icon / 2.0, icon, *up, color);
+                        x += icon + 3.0;
+                    }
+                    draw_small_text(
+                        &mut pixmap,
+                        font,
+                        &fit_cells(text, 10),
+                        x,
+                        text_y(row),
+                        text_height,
+                        color,
+                        false,
+                        TextAlign::Left,
+                        cell_pixels,
+                        &mut glyphs,
+                    )?;
+                }
+                // Graduation condition: one circle per required session.
+                if let Some(required) = step.required.filter(|required| *required > 0) {
+                    let step_x = (cw * 1.6).min(ch * 0.9);
+                    let circle_radius = (step_x * 0.36).min(ch * 0.3);
+                    let mut x = columns.graduation * cw + circle_radius + 1.0;
+                    for index in 0..required {
+                        if index < step.met {
+                            fill_circle(&mut pixmap, x, center_y, circle_radius, if level_up { warning } else { correct }, 255);
+                        } else {
+                            stroke_circle(&mut pixmap, x, center_y, circle_radius, muted, 230, 1.5);
+                        }
+                        x += step_x;
+                    }
+                    let label = match &step.graduation {
+                        Some(graduation) => {
+                            // The level-up mark is drawn, not a font glyph.
+                            let icon = text_height as f32 * 0.7;
+                            fill_triangle(&mut pixmap, x - circle_radius + cw * 0.3, center_y - icon / 2.0, icon, true, warning);
+                            x += icon + cw * 0.3;
+                            graduation.clone()
+                        }
+                        None => format!("{}/{}", step.met.min(required), required),
+                    };
+                    let room = ((columns.end * cw - x) / cw).max(1.0) as usize;
+                    draw_small_text(
+                        &mut pixmap,
+                        font,
+                        &fit_cells(&label, room + room / 4),
+                        x,
+                        text_y(row),
+                        text_height,
+                        if level_up { warning } else { muted },
+                        level_up,
+                        TextAlign::Left,
+                        cell_pixels,
+                        &mut glyphs,
+                    )?;
+                }
+            }
+        }
+    }
+    rgba_image(pixmap)
+}
+
+/// The visible time range of the timeline (minutes since local midnight):
+/// the sessions plus a margin of 5% of their span, at least 10 minutes, on
+/// each side so no marker sits on the edge; at least one hour in all.
+pub fn today_timeline_range(points: &[TodayTimelinePoint]) -> (f64, f64) {
+    let start = points.iter().map(|point| point.start_minute).fold(f64::INFINITY, f64::min);
+    let end = points
+        .iter()
+        .map(|point| point.end_minute.max(point.start_minute))
+        .fold(f64::NEG_INFINITY, f64::max);
+    if !start.is_finite() || !end.is_finite() {
+        return (0.0, 24.0 * 60.0);
+    }
+    let margin = ((end - start) * 0.05).max(10.0);
+    let (mut first, mut last) = (start - margin, end + margin);
+    if last - first < 60.0 {
+        let extra = (60.0 - (last - first)) / 2.0;
+        first -= extra;
+        last += extra;
+    }
+    (first, last)
+}
+
+fn draw_shape(pixmap: &mut Pixmap, shape: TodayPointShape, x: f32, y: f32, radius: f32, color: [u8; 3]) {
+    match shape {
+        TodayPointShape::Menu => fill_circle(pixmap, x, y, radius, color, 255),
+        TodayPointShape::Individual => {
+            fill_circle(pixmap, x, y, radius, BADGE_FACE, 255);
+            stroke_circle(pixmap, x, y, radius - 1.0, color, 255, (radius * 0.35).max(2.0));
+        }
+        TodayPointShape::Bench => {
+            let r = radius * 1.2;
+            if let Some(path) = polygon_path([(x, y - r), (x + r, y), (x, y + r), (x - r, y)]) {
+                fill_path(pixmap, &path, color, 255);
+            }
+        }
+    }
+}
+
+pub fn render_today_timeline(font: &ResolvedBigFont, cell_pixels: CellPixels, spec: &TodayTimelineSpec) -> Result<RgbaImage, String> {
+    let width = u32::from(spec.cells.width) * u32::from(cell_pixels.width);
+    let height = u32::from(spec.cells.height) * u32::from(cell_pixels.height);
+    let mut pixmap = Pixmap::new(width.max(1), height.max(1)).ok_or_else(|| "today timeline dimensions are too large".to_owned())?;
+    let cw = f32::from(cell_pixels.width);
+    let ch = f32::from(cell_pixels.height);
+    let colors = spec.colors;
+    let muted = color_rgb(colors.muted, GRID_COLOR);
+    let foreground = color_rgb(colors.foreground, [230, 230, 230]);
+    let text_height = (ch * 0.75).max(8.0) as u32;
+    let mut glyphs = HashMap::new();
+
+    // Legend on the first row: shapes, then languages, then the size note.
+    let legend_y = (ch - text_height as f32) / 2.0;
+    let legend_center = ch / 2.0;
+    let mut x = cw * 0.5;
+    let legend_radius = ch * 0.25;
+    for (shape, label) in [TodayPointShape::Menu, TodayPointShape::Individual, TodayPointShape::Bench]
+        .into_iter()
+        .zip(spec.shape_labels.iter())
+    {
+        draw_shape(&mut pixmap, shape, x + legend_radius, legend_center, legend_radius, foreground);
+        x += legend_radius * 2.0 + cw * 0.5;
+        draw_small_text(
+            &mut pixmap,
+            font,
+            label,
+            x,
+            legend_y,
+            text_height,
+            muted,
+            false,
+            TextAlign::Left,
+            cell_pixels,
+            &mut glyphs,
+        )?;
+        x += small_text_width(label, text_height, cell_pixels) as f32 + cw * 1.5;
+    }
+    for (label, color) in &spec.languages {
+        let color = color_rgb(*color, [255, 255, 255]);
+        fill_rect(&mut pixmap, [x, legend_center - ch * 0.22, x + cw, legend_center + ch * 0.22], color, 255);
+        x += cw * 1.5;
+        draw_small_text(
+            &mut pixmap,
+            font,
+            label,
+            x,
+            legend_y,
+            text_height,
+            color,
+            true,
+            TextAlign::Left,
+            cell_pixels,
+            &mut glyphs,
+        )?;
+        x += small_text_width(label, text_height, cell_pixels) as f32 + cw * 1.5;
+    }
+    if x + small_text_width(&spec.size_note, text_height, cell_pixels) as f32 <= width as f32 {
+        draw_small_text(
+            &mut pixmap,
+            font,
+            &spec.size_note,
+            x,
+            legend_y,
+            text_height,
+            muted,
+            false,
+            TextAlign::Left,
+            cell_pixels,
+            &mut glyphs,
+        )?;
+    }
+
+    let points = spec
+        .points
+        .iter()
+        .filter(|point| point.wpm.is_finite() && point.start_minute.is_finite())
+        .collect::<Vec<_>>();
+    // Plot area: y labels on the left, time labels at the bottom.
+    let left = cw * 6.0;
+    let right = width as f32 - cw * 2.0;
+    let top = ch * 1.8;
+    let bottom = height as f32 - ch * 1.3;
+    if right <= left + cw || bottom <= top + ch {
+        return rgba_image(pixmap);
+    }
+    let (first, last) = today_timeline_range(&spec.points);
+    let max_wpm = points.iter().map(|point| point.wpm).fold(0.0_f64, f64::max);
+    let min_wpm = points.iter().map(|point| point.wpm).fold(f64::INFINITY, f64::min);
+    // A «nice» grid step (5, 10, 20, 25, 50 WPM) giving at most five lines.
+    let (y_low, y_high, step) = if points.is_empty() {
+        (0.0, 100.0, 25.0)
+    } else {
+        let spread = (max_wpm - min_wpm).max(10.0) + 10.0;
+        let step = [5.0, 10.0, 20.0, 25.0, 50.0, 100.0]
+            .into_iter()
+            .find(|step| spread / step <= 4.0)
+            .unwrap_or(100.0);
+        let low = (((min_wpm - 5.0) / step).floor() * step).max(0.0);
+        let high = ((max_wpm + 5.0) / step).ceil() * step;
+        (low, high.max(low + step), step)
+    };
+    let x_of = |minute: f64| left + (right - left) * ((minute - first) / (last - first)).clamp(0.0, 1.0) as f32;
+    let y_of = |wpm: f64| bottom - (bottom - top) * ((wpm - y_low) / (y_high - y_low)).clamp(0.0, 1.0) as f32;
+
+    // Grid: the WPM levels and the hours.
+    let mut level = y_low;
+    while level <= y_high + 0.01 {
+        let y = y_of(level);
+        stroke_line(&mut pixmap, (left, y), (right, y), GRID_COLOR, 55, 1.0, None);
+        draw_small_text(
+            &mut pixmap,
+            font,
+            &format!("{level:.0}"),
+            left - cw * 0.6,
+            y - text_height as f32 / 2.0,
+            text_height,
+            muted,
+            false,
+            TextAlign::Right,
+            cell_pixels,
+            &mut glyphs,
+        )?;
+        level += step;
+    }
+    // Whole hours inside the range (the range has margins, so it does not
+    // start on an hour).
+    let first_hour = (first / 60.0).ceil() as i64;
+    let last_hour = (last / 60.0).floor() as i64;
+    let hours = (last_hour - first_hour + 1).max(1) as usize;
+    let label_cells = 6.0;
+    let max_labels = (((right - left) / cw) / label_cells).floor().max(1.0) as usize;
+    let every = hours.div_ceil(max_labels).max(1);
+    for (index, hour) in (first_hour..=last_hour).enumerate() {
+        let minute = hour as f64 * 60.0;
+        let x = x_of(minute);
+        stroke_line(
+            &mut pixmap,
+            (x, top),
+            (x, bottom),
+            GRID_COLOR,
+            if index % every == 0 { 45 } else { 20 },
+            1.0,
+            None,
+        );
+        if index % every == 0 {
+            let label = format!("{:02}:00", hour.rem_euclid(24));
+            draw_small_text(
+                &mut pixmap,
+                font,
+                &label,
+                x,
+                bottom + ch * 0.2,
+                text_height,
+                muted,
+                false,
+                TextAlign::Center,
+                cell_pixels,
+                &mut glyphs,
+            )?;
+        }
+    }
+    stroke_line(&mut pixmap, (left, bottom), (right, bottom), GRID_COLOR, 140, 1.0, None);
+
+    // Sessions: the duration as a band on the baseline, a stem up to the
+    // marker, the marker (size by accuracy) and the accuracy above it.
+    let annotate = points.len() <= ((right - left) / (cw * 5.0)).max(1.0) as usize;
+    for point in &points {
+        let color = color_rgb(point.color, [255, 255, 255]);
+        let x0 = x_of(point.start_minute);
+        let x1 = x_of(point.end_minute.max(point.start_minute)).max(x0 + 2.0);
+        fill_rect(&mut pixmap, [x0, bottom - ch * 0.35, x1, bottom - 1.0], color, 120);
+        let x = (x0 + x1) / 2.0;
+        let y = y_of(point.wpm);
+        stroke_line(&mut pixmap, (x, bottom), (x, y), color, 110, (cw * 0.35).max(2.0), None);
+        let fraction = ((point.accuracy - 0.85) / 0.15).clamp(0.0, 1.0) as f32;
+        let radius = ch * (0.18 + 0.22 * fraction);
+        draw_shape(&mut pixmap, point.shape, x, y, radius, color);
+        if annotate {
+            draw_small_text(
+                &mut pixmap,
+                font,
+                &format!("{:.0}%", point.accuracy * 100.0),
+                x,
+                (y - radius - text_height as f32 - 2.0).max(top - ch * 0.5),
+                text_height,
+                color,
+                false,
+                TextAlign::Center,
+                cell_pixels,
+                &mut glyphs,
+            )?;
+        }
+    }
+    rgba_image(pixmap)
 }

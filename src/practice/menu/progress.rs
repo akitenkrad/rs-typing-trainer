@@ -707,6 +707,8 @@ pub struct StepSummary {
     pub prescription_id: String,
     pub title: String,
     pub level: Option<u8>,
+    /// Planned minutes of the step.
+    pub minutes: u8,
     /// Number of levels of the prescription (`None` for fixed steps).
     pub level_count: Option<u8>,
     /// The step has been played in this run.
@@ -1003,6 +1005,7 @@ pub fn run_steps_summary(db_path: &Path, layout: &str, run_id: i64, display: Lan
             prescription_id: step.prescription_id.clone(),
             title: step.title.clone(),
             level: step.level,
+            minutes: step.minutes,
             level_count,
             done: row.is_some(),
             metric,

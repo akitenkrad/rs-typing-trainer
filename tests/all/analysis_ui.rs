@@ -19,7 +19,14 @@ use rs_typing_trainer::ui;
 use tempfile::TempDir;
 
 use crate::common;
-use common::test_app;
+use common::{test_app, test_app_at};
+
+/// The analysis screen opens on the last 30 days (MYTASK-3630), so tests
+/// whose records carry fixed November 2026 dates pin «today» next to them
+/// instead of following the wall clock.
+fn as_of() -> chrono::NaiveDate {
+    chrono::NaiveDate::from_ymd_opt(2026, 11, 19).unwrap()
+}
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
@@ -48,7 +55,7 @@ fn analysis_mode_filter_includes_phrase_sessions() {
     let directory = TempDir::new().unwrap();
     let mut config = Config::default();
     config.storage.db_path = Some(directory.path().join("sessions.db"));
-    let mut app = test_app(config);
+    let mut app = test_app_at(config, as_of());
     save_record(&app.db_path(), ModeKind::Phrase, None, 42.0, 1);
     save_record(&app.db_path(), ModeKind::Words, None, 55.0, 2);
 
@@ -90,7 +97,7 @@ fn keyboard_analysis_app(lang: Lang) -> common::TestApp {
     config.general.lang = lang;
     let mut app = test_app(config);
     app.handle_key(key(KeyCode::Char('a')));
-    app.analysis_tab = 2;
+    app.analysis_tab = rs_typing_trainer::app::ANALYSIS_KEYBOARD_TAB;
     app.analysis_details.keys = vec![
         KeyMetric {
             key: "a".into(),
@@ -274,19 +281,21 @@ fn every_analysis_tab_renders_and_bench_shows_previous_delta() {
     let mut config = Config::default();
     config.general.lang = Lang::Ja;
     config.storage.db_path = Some(path);
-    let mut app = test_app(config);
+    let mut app = test_app_at(config, as_of());
     app.handle_key(key(KeyCode::Char('a')));
     assert_eq!(app.screen, Screen::Analysis);
 
-    // M6 adds the «スキル» tab (§8.4) after «ベンチ»: seven tabs in all.
-    for expected in ["コーチ", "推移", "キーボード", "遷移", "指・手", "ベンチ", "スキル"] {
+    // MYTASK-3631 puts «今日» first; the screen still opens on «コーチ».
+    // M6 adds the «スキル» tab (§8.4) after «ベンチ»: eight tabs in all.
+    assert_eq!(app.analysis_tab, rs_typing_trainer::app::ANALYSIS_COACH_TAB);
+    for expected in ["コーチ", "推移", "キーボード", "遷移", "指・手", "ベンチ", "スキル", "今日"] {
         let output = render(&app);
         let compact = output.chars().filter(|character| !character.is_whitespace()).collect::<String>();
         assert!(compact.contains(expected), "tab {expected}: {output}");
         app.handle_key(key(KeyCode::Tab));
     }
     // Back at the coach tab after a full cycle; five more presses reach «ベンチ».
-    assert_eq!(app.analysis_tab, 0);
+    assert_eq!(app.analysis_tab, rs_typing_trainer::app::ANALYSIS_COACH_TAB);
     for _ in 0..5 {
         app.handle_key(key(KeyCode::Tab));
     }
@@ -304,9 +313,9 @@ fn analysis_bench_tab_combines_v1_and_v2_for_part_b() {
     save_record(&path, ModeKind::Ngram, Some("bench-v2/B/01"), 52.0, 2);
     let mut config = Config::default();
     config.storage.db_path = Some(path);
-    let mut app = test_app(config);
+    let mut app = test_app_at(config, as_of());
     app.handle_key(key(KeyCode::Char('a')));
-    app.analysis_tab = 5;
+    app.analysis_tab = rs_typing_trainer::app::ANALYSIS_BENCH_TAB;
 
     let output = render(&app);
     let compact = output.chars().filter(|character| !character.is_whitespace()).collect::<String>();
@@ -322,7 +331,7 @@ fn selected_transition_creates_an_ngram_practice_configuration() {
     }
     let mut config = Config::default();
     config.storage.db_path = Some(path);
-    let mut app = test_app(config);
+    let mut app = test_app_at(config, as_of());
     app.handle_key(key(KeyCode::Char('a')));
     app.handle_key(key(KeyCode::Tab));
     app.handle_key(key(KeyCode::Tab));
@@ -344,7 +353,7 @@ fn sparse_transition_is_shown_as_insufficient_and_cannot_start_a_drill() {
     let mut config = Config::default();
     config.general.lang = Lang::Ja;
     config.storage.db_path = Some(path);
-    let mut app = test_app(config);
+    let mut app = test_app_at(config, as_of());
     app.handle_key(key(KeyCode::Char('a')));
     for _ in 0..3 {
         app.handle_key(key(KeyCode::Tab));
@@ -450,7 +459,7 @@ fn trend_needs_two_valid_days_and_shows_current_value() {
     let mut config = Config::default();
     config.general.lang = Lang::Ja;
     config.storage.db_path = Some(path);
-    let mut app = test_app(config);
+    let mut app = test_app_at(config, as_of());
     app.handle_key(key(KeyCode::Char('a')));
     app.handle_key(key(KeyCode::Tab));
 
@@ -468,7 +477,7 @@ fn trend_labels_first_last_dates_and_value_range() {
     let mut config = Config::default();
     config.general.lang = Lang::Ja;
     config.storage.db_path = Some(path);
-    let mut app = test_app(config);
+    let mut app = test_app_at(config, as_of());
     app.handle_key(key(KeyCode::Char('a')));
     app.handle_key(key(KeyCode::Tab));
 

@@ -114,7 +114,7 @@ fn menu_step_time_and_level_labels_are_localized_and_fixed_steps_omit_level() {
     open_menu(&mut english, Instant::now());
     let english_fixed = render(&english, 80, 24);
     let english_fixed = english_fixed.iter().find(|row| row.contains("Warm-up")).unwrap();
-    assert!(english_fixed.contains("2 min"), "{english_fixed}");
+    assert!(english_fixed.contains("1 min"), "{english_fixed}");
     assert!(!english_fixed.contains("Lv"), "{english_fixed}");
     english.handle_key(key(KeyCode::Down));
     let english_prescription = render(&english, 80, 24);
@@ -128,7 +128,7 @@ fn menu_step_time_and_level_labels_are_localized_and_fixed_steps_omit_level() {
     let japanese_fixed_title = japanese.daily_menu.as_ref().unwrap().steps[0].title.replace(' ', "");
     let japanese_fixed = render(&japanese, 80, 24).into_iter().map(|row| row.replace(' ', "")).collect::<Vec<_>>();
     let japanese_fixed = japanese_fixed.iter().find(|row| row.contains(&japanese_fixed_title)).unwrap();
-    assert!(japanese_fixed.contains("2分"), "{japanese_fixed}");
+    assert!(japanese_fixed.contains("1分"), "{japanese_fixed}");
     assert!(!japanese_fixed.contains("min"), "{japanese_fixed}");
     assert!(!japanese_fixed.contains("レベル"), "{japanese_fixed}");
     assert!(!japanese_fixed.contains("L–") && !japanese_fixed.contains("L-"), "{japanese_fixed}");
@@ -155,7 +155,7 @@ fn menu_rows_show_practice_language_and_display_language_stays_independent() {
 
     let text = render(&app, 80, 24).join("\n");
     assert!(text.contains("TODAY'S MENU"), "{text}");
-    assert!(text.contains("1 Warm-up — Warm-up · 2 min · JA"), "{text}");
+    assert!(text.contains("1 Warm-up — Warm-up · 1 min · JA"), "{text}");
     assert!(!text.contains("今日のメニュー"), "{text}");
     assert_eq!(app.daily_menu.as_ref().unwrap().steps[0].language, rs_typing_trainer::i18n::Lang::Ja);
     assert!(app.daily_menu.as_ref().unwrap().steps[0].reason.starts_with("JA:"));
@@ -191,7 +191,7 @@ fn japanese_interface_can_show_an_english_practice_menu() {
     let text = render(&app, 80, 24).join("\n");
     let compact = text.chars().filter(|character| !character.is_whitespace()).collect::<String>();
     assert!(compact.contains("今日のメニュー"), "{text}");
-    assert!(compact.contains("1ウォームアップ—ウォームアップ・2分・英語"), "{text}");
+    assert!(compact.contains("1ウォームアップ—ウォームアップ・1分・英語"), "{text}");
     assert!(!text.contains("TODAY'S MENU"), "{text}");
     assert!(app.daily_menu.as_ref().unwrap().steps[0].reason.starts_with("英語:"));
 }
@@ -683,7 +683,9 @@ fn esc_outside_the_menu_keeps_the_existing_confirmation_text() {
 fn menu_shows_the_actual_total_minutes() {
     let mut app = test_app_at(base_config(), chrono::NaiveDate::from_ymd_opt(2026, 11, 18).unwrap());
     open_menu(&mut app, Instant::now());
-    app.daily_menu.as_mut().unwrap().steps[1].minutes = 5;
+    // MYTASK-3629: the first transition step is 5 minutes now (1 + 5 + 4 + 3
+    // + 2); shortening it makes the actual total differ from the setting.
+    app.daily_menu.as_mut().unwrap().steps[1].minutes = 4;
     let total = app.daily_menu.as_ref().unwrap().total_minutes();
     assert_ne!(total, 15);
     let text = render(&app, 80, 24).join("\n");
@@ -750,4 +752,39 @@ fn rhythm_menu_levels_set_the_tempo_from_their_pacer_ratio_and_free_play_keeps_n
         rs_typing_trainer::practice::rhythm::default_bpm(median),
         rs_typing_trainer::practice::rhythm::bpm_for_ratio(median, 0.9)
     );
+}
+
+/// MYTASK-3628: a Japanese warm-up (`words` step fed Japanese words) draws the
+/// surface / kana / romaji rows and offers the F2 reading report, the same as
+/// the stand-alone romaji mode, instead of the English letter-spaced word.
+#[test]
+fn japanese_warm_up_step_shows_surface_kana_and_romaji_rows() {
+    let date = chrono::NaiveDate::from_ymd_opt(2026, 11, 18).unwrap();
+    let mut config = base_config();
+    config.general.lang = rs_typing_trainer::i18n::Lang::Ja;
+    config.menu.languages = Some(vec![rs_typing_trainer::i18n::Lang::Ja]);
+    config.display.prompt_style = "normal".to_owned();
+    let mut app = test_app_at(config, date);
+    let now = Instant::now();
+    open_menu(&mut app, now);
+    assert_eq!(app.daily_menu.as_ref().unwrap().steps[0].mode, "words");
+
+    app.handle_key_at(key(KeyCode::Enter), now + Duration::from_millis(10));
+    app.handle_key_at(key(KeyCode::Char('x')), now + Duration::from_millis(20));
+    app.on_tick_at(Duration::from_secs(3), now + Duration::from_secs(4)).unwrap();
+    assert_eq!(app.screen, Screen::Playing);
+    assert_eq!(app.config.mode.kind, ModeKind::Words);
+    let game = app.game.as_ref().unwrap();
+    let reading = game.current_prompt.reading.clone().expect("Japanese prompt");
+    let surface = game.current_prompt.text.clone();
+
+    let rows = render(&app, 80, 24);
+    let text = rows.join("\n");
+    // Wide characters are followed by a blank cell in the test buffer.
+    let compact = text.replace(' ', "");
+    for label in ["表記", "かな", "ローマ字", "[F2]読みが違う"] {
+        assert!(compact.contains(label), "missing {label:?}:\n{text}");
+    }
+    assert!(compact.contains(&format!("表記{surface}")), "surface {surface:?} not shown:\n{text}");
+    assert!(compact.contains(&format!("かな{reading}")), "kana {reading:?} not shown:\n{text}");
 }

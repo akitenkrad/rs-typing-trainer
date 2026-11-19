@@ -334,6 +334,53 @@ pub fn list(path: &Path) -> AppResult<Vec<SessionSummary>> {
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
+/// Every session's id with the local calendar date it started on, oldest
+/// first. Light (no keystrokes); the analysis «today» tab picks today's
+/// sessions and the last earlier practice day from it, independent of the
+/// analysis period filter.
+pub fn session_local_days(path: &Path) -> AppResult<Vec<(i64, chrono::NaiveDate)>> {
+    let conn = open(path)?;
+    let mut statement = conn.prepare("SELECT id, started_at FROM sessions ORDER BY datetime(started_at), id")?;
+    let rows = statement.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))?;
+    let mut days = Vec::new();
+    for row in rows {
+        let (id, started_at) = row?;
+        // A row whose time does not parse has no day; it is left out rather
+        // than counted as today.
+        if let Ok(time) = DateTime::parse_from_rfc3339(&started_at) {
+            days.push((id, time.with_timezone(&Local).date_naive()));
+        }
+    }
+    Ok(days)
+}
+
+/// Every menu run dated `date`, newest first.
+pub fn load_menu_runs_on(path: &Path, date: chrono::NaiveDate) -> AppResult<Vec<MenuRunRecord>> {
+    let conn = open(path)?;
+    let mut statement = conn.prepare(
+        "SELECT id, date, layout, lang, catalog_version, minutes, plan_json, completed_steps
+         FROM menu_runs
+         WHERE date=?1
+         ORDER BY id DESC",
+    )?;
+    statement
+        .query_map(params![date.format("%Y-%m-%d").to_string()], menu_run_from_row)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(Into::into)
+}
+
+/// The session ids recorded as menu steps, with their run and 1-based step.
+pub fn menu_step_sessions(path: &Path) -> AppResult<Vec<(i64, i64, usize)>> {
+    let conn = open(path)?;
+    let mut statement = conn.prepare("SELECT session_id, run_id, idx FROM menu_steps")?;
+    statement
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?.max(0) as usize))
+        })?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(Into::into)
+}
+
 /// Return the day's run for this identity, creating it when missing.
 ///
 /// A run is identified by the date, layout, configured practice languages,
