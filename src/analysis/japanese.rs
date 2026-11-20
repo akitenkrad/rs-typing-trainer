@@ -94,13 +94,17 @@ pub fn analyze_japanese(
     spelling_suggestions: bool,
     error_cost_ms: f64,
 ) -> JapaneseDiagnosis {
-    let model = build_player_model(records, layout, geometry, settings, ModelView::Recent, as_of);
     let kana = kana_timings(records, settings.pause_ms);
-    let observed_spellings = observed_spellings(records);
     JapaneseDiagnosis {
         kana,
         spelling: if spelling_suggestions {
-            spelling_analysis(corpus, &model, &observed_spellings, min_transition_n, error_cost_ms)
+            spelling_analysis(
+                corpus,
+                &build_player_model(records, layout, geometry, settings, ModelView::Recent, as_of),
+                &observed_spellings(records),
+                min_transition_n,
+                error_cost_ms,
+            )
         } else {
             Vec::new()
         },
@@ -180,6 +184,95 @@ fn kana_timings(records: &[SessionRecord], pause_ms: u64) -> Vec<KanaTiming> {
         .collect()
 }
 
+/// The spelling rows of [`crate::analysis::diagnose`] alone, without the
+/// kana timings, the language comparison and the rest of the diagnosis: the
+/// player model is built once (the diagnosis builds the same one for the
+/// error diagnosis and the Japanese analysis), and the error cost is the
+/// diagnosis's own. The table starts its spelling row with the suggestion
+/// from here (MYTASK-3641).
+pub fn spelling_rows(
+    records: &[SessionRecord],
+    layout: &KeyboardLayout,
+    geometry: &KeyboardGeometry,
+    settings: AnalysisSettings,
+    as_of: DateTime<Utc>,
+    corpus: &[JapaneseText],
+    min_transition_n: u64,
+) -> Vec<SpellingSuggestion> {
+    let model = build_player_model(records, layout, geometry, settings, ModelView::Recent, as_of);
+    let errors = crate::analysis::errors::ErrorDiagnosis {
+        post_error_slowdown: crate::analysis::errors::post_error_slowdown(records, &model),
+        correction: crate::analysis::errors::correction_cost(records),
+        ..Default::default()
+    };
+    let error_cost_ms = crate::analysis::spelling_error_cost_ms(records, &errors);
+    spelling_analysis(corpus, &model, &observed_spellings(records), min_transition_n, error_cost_ms)
+}
+
+/// The analysis's suggestion that the player should switch to: the first
+/// row marked [`SpellingDecision::Suggested`]. Today's menu takes it as the
+/// target of `japanese.spelling`, and the spelling row of the table follows
+/// it (MYTASK-3641).
+pub fn suggested_spelling(rows: &[SpellingSuggestion]) -> Option<&SpellingSuggestion> {
+    rows.iter().find(|row| row.decision == SpellingDecision::Suggested)
+}
+
+/// How often one kana was typed with the suggested spelling (MYTASK-3641).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpellingUsage {
+    /// Occurrences of the kana typed with the suggested spelling.
+    pub used: u64,
+    /// Occurrences of the kana in completed spellings.
+    pub total: u64,
+}
+
+impl SpellingUsage {
+    /// `used / total`; `None` while the kana has not been typed.
+    pub fn rate(&self) -> Option<f64> {
+        (self.total > 0).then(|| self.used as f64 / self.total as f64)
+    }
+}
+
+/// The use of `candidate` for `kana` in `records`: each item's correct
+/// keystrokes are split into kana and spellings exactly as the spelling
+/// analysis observes them ([`RomajiJudge::spelling_segments`]), and every
+/// segment of `kana` counts once. The `spelling-usage-rate` judgment of
+/// `japanese.spelling` and its live display both read this.
+pub fn spelling_usage(records: &[SessionRecord], kana: &str, candidate: &str) -> SpellingUsage {
+    let mut usage = SpellingUsage::default();
+    for record in records.iter().filter(|record| record.header.metrics_version > 0) {
+        for item in &record.log.items {
+            let Some(reading) = item.reading.as_deref() else {
+                continue;
+            };
+            if !reading.contains(kana) {
+                continue;
+            }
+            let Some(segments) = item_spelling_segments(record, item.idx, reading) else {
+                continue;
+            };
+            for (segment, spelling) in segments {
+                if segment == kana {
+                    usage.total += 1;
+                    usage.used += u64::from(spelling == candidate);
+                }
+            }
+        }
+    }
+    usage
+}
+
+fn item_spelling_segments(record: &SessionRecord, item_idx: u32, reading: &str) -> Option<Vec<(String, String)>> {
+    let spelling = record
+        .log
+        .keystrokes
+        .iter()
+        .filter(|key| key.item_idx == item_idx && key.kind == KeystrokeKind::Char && key.correct)
+        .filter_map(|key| key.typed.as_deref())
+        .collect::<String>();
+    RomajiJudge::new(reading).spelling_segments(&spelling)
+}
+
 fn observed_spellings(records: &[SessionRecord]) -> BTreeMap<String, BTreeSet<String>> {
     let mut observed = BTreeMap::<String, BTreeSet<String>>::new();
     for record in records.iter().filter(|record| record.header.metrics_version > 0) {
@@ -187,14 +280,7 @@ fn observed_spellings(records: &[SessionRecord]) -> BTreeMap<String, BTreeSet<St
             let Some(reading) = item.reading.as_deref() else {
                 continue;
             };
-            let spelling = record
-                .log
-                .keystrokes
-                .iter()
-                .filter(|key| key.item_idx == item.idx && key.kind == KeystrokeKind::Char && key.correct)
-                .filter_map(|key| key.typed.as_deref())
-                .collect::<String>();
-            let Some(segments) = RomajiJudge::new(reading).spelling_segments(&spelling) else {
+            let Some(segments) = item_spelling_segments(record, item.idx, reading) else {
                 continue;
             };
             for (kana, spelling) in segments {
@@ -214,6 +300,51 @@ struct SuggestionAccumulator {
     sufficient: bool,
 }
 
+/// One word's (kana, current, candidate) cost pairs, in the order the
+/// spelling analysis adds them.
+fn word_contributions(
+    word: &JapaneseText,
+    model: &PlayerModel,
+    observed_spellings: &BTreeMap<String, BTreeSet<String>>,
+    min_transition_n: u64,
+    error_cost_ms: f64,
+) -> Vec<((String, String, String), Cost, Cost)> {
+    let mut out = Vec::new();
+    let judge = RomajiJudge::new(&word.reading);
+    let preferred = judge.preferred_spelling(&model.spelling_preferences);
+    let Some(segments) = judge.spelling_segments(&preferred) else {
+        return out;
+    };
+    let variants = judge.spelling_variants();
+    for index in 0..segments.len() {
+        let (kana, current) = &segments[index];
+        let Some(observed) = observed_spellings.get(kana) else {
+            continue;
+        };
+        if is_standalone_small_kana(kana) {
+            continue;
+        }
+        let Some((_, candidates)) = variants.get(index) else { continue };
+        let candidates = candidates
+            .iter()
+            .filter(|candidate| {
+                is_common_spelling(kana, candidate, candidates) || (observed.contains(*candidate) && is_separate_small_kana_spelling(kana, candidate))
+            })
+            .collect::<Vec<_>>();
+        if candidates.len() < 2 {
+            continue;
+        }
+        let previous = index.checked_sub(1).and_then(|previous| segments[previous].1.chars().last());
+        let next = segments.get(index + 1).and_then(|next| next.1.chars().next());
+        let current_cost = spelling_cost(&local_sequence(previous, current, next), model, error_cost_ms, min_transition_n);
+        for candidate in candidates.into_iter().filter(|candidate| *candidate != current) {
+            let candidate_cost = spelling_cost(&local_sequence(previous, candidate, next), model, error_cost_ms, min_transition_n);
+            out.push(((kana.clone(), current.clone(), candidate.clone()), current_cost, candidate_cost));
+        }
+    }
+    out
+}
+
 fn spelling_analysis(
     corpus: &[JapaneseText],
     model: &PlayerModel,
@@ -221,55 +352,44 @@ fn spelling_analysis(
     min_transition_n: u64,
     error_cost_ms: f64,
 ) -> Vec<SpellingSuggestion> {
-    let mut values = BTreeMap::<(String, String, String), SuggestionAccumulator>::new();
-    for word in corpus {
-        let judge = RomajiJudge::new(&word.reading);
-        let preferred = judge.preferred_spelling(&model.spelling_preferences);
-        let Some(segments) = judge.spelling_segments(&preferred) else {
-            continue;
-        };
-        let variants = judge.spelling_variants();
-        for index in 0..segments.len() {
-            let (kana, current) = &segments[index];
-            let Some(observed) = observed_spellings.get(kana) else {
-                continue;
-            };
-            if is_standalone_small_kana(kana) {
-                continue;
-            }
-            let Some((_, candidates)) = variants.get(index) else { continue };
-            let candidates = candidates
-                .iter()
-                .filter(|candidate| {
-                    is_common_spelling(kana, candidate, candidates)
-                        || (observed.contains(*candidate) && is_separate_small_kana_spelling(kana, candidate))
+    // Each word's contributions are computed in parallel (they depend only
+    // on the word and the model) and added in corpus order, so the sums are
+    // exactly those of a single pass (MYTASK-3641: the table's spelling row
+    // computes this when it starts).
+    let threads = std::thread::available_parallelism().map_or(1, usize::from).clamp(1, 8);
+    let chunk = corpus.len().div_ceil(threads).max(1);
+    let contributions = std::thread::scope(|scope| {
+        let handles = corpus
+            .chunks(chunk)
+            .map(|words| {
+                scope.spawn(move || {
+                    words
+                        .iter()
+                        .flat_map(|word| word_contributions(word, model, observed_spellings, min_transition_n, error_cost_ms))
+                        .collect::<Vec<_>>()
                 })
-                .collect::<Vec<_>>();
-            if candidates.len() < 2 {
-                continue;
-            }
-            let previous = index.checked_sub(1).and_then(|previous| segments[previous].1.chars().last());
-            let next = segments.get(index + 1).and_then(|next| next.1.chars().next());
-            let current_cost = spelling_cost(&local_sequence(previous, current, next), model, error_cost_ms, min_transition_n);
-            for candidate in candidates.into_iter().filter(|candidate| *candidate != current) {
-                let candidate_cost = spelling_cost(&local_sequence(previous, candidate, next), model, error_cost_ms, min_transition_n);
-                let entry = values
-                    .entry((kana.clone(), current.clone(), candidate.clone()))
-                    .or_insert_with(|| SuggestionAccumulator {
-                        minimum_effective_n: f64::INFINITY,
-                        sufficient: true,
-                        ..SuggestionAccumulator::default()
-                    });
-                entry.current_cost += current_cost.cost_ms;
-                entry.candidate_cost += candidate_cost.cost_ms;
-                entry.contexts += 1;
-                entry.minimum_effective_n = entry
-                    .minimum_effective_n
-                    .min(current_cost.minimum_effective_n)
-                    .min(candidate_cost.minimum_effective_n);
-                entry.sufficient &= current_cost.sufficient && candidate_cost.sufficient;
-            }
-        }
+            })
+            .collect::<Vec<_>>();
+        handles
+            .into_iter()
+            .flat_map(|handle| handle.join().expect("spelling analysis thread"))
+            .collect::<Vec<_>>()
+    });
+    let mut values = BTreeMap::<(String, String, String), SuggestionAccumulator>::new();
+    for (key, current_cost, candidate_cost) in contributions {
+        let entry = values.entry(key).or_insert_with(|| SuggestionAccumulator {
+            minimum_effective_n: f64::INFINITY,
+            sufficient: true,
+            ..SuggestionAccumulator::default()
+        });
+        entry.current_cost += current_cost.cost_ms;
+        entry.candidate_cost += candidate_cost.cost_ms;
+        entry.contexts += 1;
+        entry.minimum_effective_n = entry
+            .minimum_effective_n
+            .min(current_cost.minimum_effective_n)
+            .min(candidate_cost.minimum_effective_n);
+        entry.sufficient &= current_cost.sufficient && candidate_cost.sufficient;
     }
     let mut rows = values
         .into_iter()
@@ -354,6 +474,7 @@ fn is_common_spelling(kana: &str, candidate: &str, accepted: &[String]) -> bool 
     listed.contains(&candidate)
 }
 
+#[derive(Clone, Copy)]
 struct Cost {
     cost_ms: f64,
     minimum_effective_n: f64,

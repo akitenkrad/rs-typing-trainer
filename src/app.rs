@@ -961,7 +961,11 @@ impl App {
         let Some(code) = code else { return };
         let Some(game) = self.game.as_mut() else { return };
         let elapsed = now.saturating_duration_since(game.started_at);
-        game.session.release_key(elapsed, &code);
+        // A release completes a key pair of the rollover row (MYTASK-3641),
+        // so the live goal follows it as the saved session will.
+        if game.session.release_key(elapsed, &code) {
+            self.update_live_goal();
+        }
     }
 
     fn handle_title_key(&mut self, key: KeyEvent, action: InputAction) {
@@ -3078,47 +3082,270 @@ impl App {
             current_is_retry: false,
             last_rhythm_beat: 0,
         });
-        self.menu_live_goal = self.build_live_goal(session_duration);
+        self.menu_live_goal = self.build_live_goal(session_duration, &records);
         self.screen = Screen::Playing;
     }
 
-    /// The live goal of the menu step about to be played (MYTASK-3633). Only
-    /// a menu step whose prescription has a live goal gets one; individual
-    /// training, benchmarks and the stand-alone warm-up never do.
-    fn build_live_goal(&self, planned: Duration) -> Option<crate::practice::menu::live_goal::LiveGoalState> {
+    /// The live goal of the session about to be played (MYTASK-3633,
+    /// MYTASK-3641): a menu step or a session started from the table whose
+    /// row has a goal. Benchmarks, replays and the stand-alone warm-up never
+    /// get one; neither does the «normal» row.
+    fn build_live_goal(&self, planned: Duration, records: &[SessionRecord]) -> Option<crate::practice::menu::live_goal::LiveGoalState> {
         use crate::practice::menu::live_goal::{GoalKind, GoalSetup, LiveGoal, LiveGoalState};
 
-        if self.active_bench_id.is_some() {
+        if self.active_bench_id.is_some() || self.warmup_active() {
             return None;
         }
-        let step = self.daily_menu.as_ref()?.steps.get(self.menu_active_step?)?;
-        let kind = GoalKind::for_step(step)?;
-        let own_median = kind.own_median_metric().and_then(|metric| {
-            let run_id = self.menu_run_id?;
-            let db_path = self.db_path();
-            let context = crate::practice::menu::progress::JudgeContext {
-                db_path: &db_path,
-                home: &self.home_dir,
-                config: &self.config,
-                layout: self.practice_layout(),
-                as_of: self.analysis_as_of,
+        let db_path = self.db_path();
+        let context = crate::practice::menu::progress::JudgeContext {
+            db_path: &db_path,
+            home: &self.home_dir,
+            config: &self.config,
+            layout: self.practice_layout(),
+            as_of: self.analysis_as_of,
+        };
+        let base = self.goal_base(planned);
+        if let Some(index) = self.menu_active_step {
+            let step = self.daily_menu.as_ref()?.steps.get(index)?;
+            let kind = GoalKind::for_step(step)?;
+            let language = crate::practice::menu::language_code(step.language);
+            let targets = crate::practice::menu::StepTargets::of(step);
+            let mut setup = GoalSetup {
+                previous_runs: if kind == GoalKind::Sprint {
+                    self.burst_series.runs().to_vec()
+                } else {
+                    Vec::new()
+                },
+                spelling: targets.spelling.clone(),
+                transitions: if kind == GoalKind::WeakTransition {
+                    self.target_transitions(&targets.transitions, records, language, base.analysis)
+                } else {
+                    Vec::new()
+                },
+                ..base
             };
-            crate::practice::menu::progress::own_median_for_metric(&context, metric, crate::practice::menu::language_code(step.language), run_id)
-                .ok()
-                .flatten()
-        });
-        let setup = GoalSetup {
+            let run_id = self.menu_run_id;
+            setup.own_median = match kind.own_median_metric() {
+                Some(metric) => run_id.and_then(|run_id| {
+                    crate::practice::menu::progress::own_median_for_metric(&context, metric, language, run_id)
+                        .ok()
+                        .flatten()
+                }),
+                // The no-look row is not judged per session: its line is the
+                // accuracy of the earlier check steps.
+                None if kind == GoalKind::Blind => {
+                    let goal = LiveGoal::new(step, setup.clone())?;
+                    run_id.and_then(|run_id| self.check_step_median(&goal, language, run_id.saturating_sub(1)))
+                }
+                None => None,
+            };
+            return LiveGoal::new(step, setup).map(LiveGoalState::new);
+        }
+        self.cell_live_goal(self.cell_active()?, self.practice_lang, planned, records)
+    }
+
+    /// What every goal needs from the configuration when it starts.
+    fn goal_base(&self, planned: Duration) -> crate::practice::menu::live_goal::GoalSetup {
+        crate::practice::menu::live_goal::GoalSetup {
             gate_min_accuracy: self.config.gate.min_accuracy,
             pacer_target_wpm: self.config.pacer.target_wpm,
             planned,
-            own_median,
+            analysis: AnalysisSettings {
+                pause_ms: self.config.analysis.pause_ms,
+                shrinkage_k: self.config.analysis.shrinkage_k,
+                half_life_days: self.config.analysis.half_life_days,
+            },
+            as_of: self.analysis_as_of.and_hms_opt(23, 59, 59).expect("valid end of day").and_utc(),
+            ..Default::default()
+        }
+    }
+
+    /// The live goal of a session started from `cell` of the table in the
+    /// practice language `practice`, given every saved session (`records`,
+    /// as `start_game` loads them): the cell's earlier values, its line, the
+    /// suggested spelling and the target transitions. Public so that the
+    /// timing tests can measure what starting a cell costs (MYTASK-3641).
+    pub fn cell_live_goal(
+        &self,
+        cell: DrillCell,
+        practice: Lang,
+        planned: Duration,
+        records: &[SessionRecord],
+    ) -> Option<crate::practice::menu::live_goal::LiveGoalState> {
+        use crate::practice::menu::live_goal::{GoalKind, GoalSetup, LiveGoal, LiveGoalState};
+
+        let db_path = self.db_path();
+        let context = crate::practice::menu::progress::JudgeContext {
+            db_path: &db_path,
+            home: &self.home_dir,
+            config: &self.config,
+            layout: self.practice_layout(),
+            as_of: self.analysis_as_of,
+        };
+        let base = self.goal_base(planned);
+        let kind = GoalKind::for_skill(cell.skill)?;
+        let lang = if crate::practice::drill::uses_language(cell) {
+            practice
+        } else {
+            Lang::En
+        };
+        let language = crate::practice::menu::language_code(lang);
+        let mut setup = GoalSetup {
             previous_runs: if kind == GoalKind::Sprint {
                 self.burst_series.runs().to_vec()
             } else {
                 Vec::new()
             },
+            spelling: (kind == GoalKind::Spelling)
+                .then(|| self.suggested_spelling(records, base.analysis, base.as_of))
+                .flatten(),
+            transitions: if kind == GoalKind::WeakTransition {
+                self.target_transitions(&[], records, language, base.analysis)
+            } else {
+                Vec::new()
+            },
+            ..base
         };
-        LiveGoal::new(step, setup).map(LiveGoalState::new)
+        // The cell's earlier sessions, measured as this one is.
+        let probe = LiveGoal::for_cell(cell, setup.clone())?;
+        let mut earlier = records
+            .iter()
+            .filter(|record| record.header.metrics_version > 0 && record.header.bench_id.is_none())
+            .filter(|record| record_cell(record) == Some(cell) && crate::analysis::model::session_language(record) == language)
+            .collect::<Vec<_>>();
+        earlier.sort_by(|left, right| left.header.started_at.cmp(&right.header.started_at));
+        let skip = earlier.len().saturating_sub(crate::practice::menu::live_goal::SAME_CELL_HISTORY_LIMIT);
+        let layout = self.practice_layout();
+        setup.history = earlier[skip..]
+            .iter()
+            .filter_map(|record| probe.measure(record, layout).value)
+            .filter(|value| value.is_finite())
+            .collect();
+        if kind.uses_own_median() {
+            let recent = &setup.history[setup
+                .history
+                .len()
+                .saturating_sub(crate::practice::menu::live_goal::SAME_CELL_MEDIAN_RUNS)..];
+            if let Some(median) = median_of(recent) {
+                setup.own_median = Some(median);
+                setup.baseline_runs = Some(recent.len());
+            } else {
+                // No earlier session of the cell: the check steps of today's
+                // menu, as a menu step of the row would use.
+                setup.own_median = match kind.own_median_metric() {
+                    Some(metric) => crate::practice::menu::progress::own_median_for_metric(&context, metric, language, i64::MAX)
+                        .ok()
+                        .flatten(),
+                    None => self.check_step_median(&probe, language, i64::MAX),
+                };
+            }
+        }
+        LiveGoal::for_cell(cell, setup).map(LiveGoalState::new)
+    }
+
+    /// The median of `goal`'s value over the check steps of the runs up to
+    /// `up_to_run_id`.
+    fn check_step_median(&self, goal: &crate::practice::menu::live_goal::LiveGoal, language: &str, up_to_run_id: i64) -> Option<f64> {
+        let rows = db::load_menu_check_records(&self.db_path(), language, up_to_run_id).ok()?;
+        let values = rows
+            .iter()
+            .filter_map(|row| goal.measure(&row.record, self.practice_layout()).value)
+            .collect::<Vec<_>>();
+        median_of(&values)
+    }
+
+    /// The target transitions of the weak-transition row: the adaptive
+    /// plan's focus (with its estimates) when the session has one, otherwise
+    /// the step's targets with the estimates of the player model.
+    fn target_transitions(
+        &self,
+        joined: &[String],
+        records: &[SessionRecord],
+        language: &str,
+        analysis: AnalysisSettings,
+    ) -> Vec<crate::practice::menu::live_goal::TargetTransition> {
+        use crate::practice::menu::live_goal::TargetTransition;
+
+        if !self.adaptive_focus.is_empty() {
+            return self
+                .adaptive_focus
+                .iter()
+                .map(|cost| TargetTransition {
+                    from: cost.from.clone(),
+                    to: cost.to.clone(),
+                    prior_ms: Some(cost.estimated_iki_ms).filter(|value| value.is_finite() && *value > 0.0),
+                })
+                .collect();
+        }
+        let pairs = joined
+            .iter()
+            .filter_map(|pair| {
+                let mut characters = pair.chars();
+                let from = characters.next()?;
+                let to = characters.next()?;
+                characters.next().is_none().then(|| (from.to_string(), to.to_string()))
+            })
+            .collect::<Vec<_>>();
+        if pairs.is_empty() {
+            return Vec::new();
+        }
+        let geometry = crate::layout::geometry::geometry(&self.config.keyboard.geometry).or_else(|| crate::layout::geometry::geometry("ansi"));
+        let language_records = records
+            .iter()
+            .filter(|record| crate::analysis::model::session_language(record) == language)
+            .cloned()
+            .collect::<Vec<_>>();
+        let details = geometry.map(|geometry| analyze_records(&language_records, self.practice_layout(), &geometry, analysis));
+        pairs
+            .into_iter()
+            .map(|(from, to)| {
+                let prior_ms = details.as_ref().and_then(|details| {
+                    details
+                        .bigrams
+                        .iter()
+                        .find(|row| row.from == from && row.to == to)
+                        .map(|row| row.estimated_iki_ms)
+                        .filter(|value| value.is_finite() && *value > 0.0)
+                });
+                TargetTransition { from, to, prior_ms }
+            })
+            .collect()
+    }
+
+    /// The spelling the Japanese analysis suggests now (the target today's
+    /// menu would give `japanese.spelling`).
+    fn suggested_spelling(
+        &self,
+        records: &[SessionRecord],
+        analysis: AnalysisSettings,
+        as_of: chrono::DateTime<chrono::Utc>,
+    ) -> Option<crate::practice::menu::SpellingTarget> {
+        let geometry = crate::layout::geometry::geometry(&self.config.keyboard.geometry).or_else(|| crate::layout::geometry::geometry("ansi"))?;
+        let corpus = DataCatalog::load(&crate::config::DataConfig::default(), &self.home_dir).ok()?;
+        let language_records = records
+            .iter()
+            .filter(|record| crate::analysis::model::session_language(record) == "ja")
+            .cloned()
+            .collect::<Vec<_>>();
+        if !self.config.analysis.spelling_suggestions {
+            return None;
+        }
+        // The spelling part of `analysis::diagnose` alone (the menu takes its
+        // target from the whole diagnosis; the rows are the same).
+        let rows = crate::analysis::japanese::spelling_rows(
+            &language_records,
+            self.practice_layout(),
+            &geometry,
+            analysis,
+            as_of,
+            corpus.words_ja(),
+            self.config.analysis.min_transition_n,
+        );
+        crate::analysis::japanese::suggested_spelling(&rows).map(|row| crate::practice::menu::SpellingTarget {
+            kana: row.kana.clone(),
+            current: row.current.clone(),
+            candidate: row.candidate.clone(),
+        })
     }
 
     /// Re-measure the live goal after a keystroke (MYTASK-3633). The live log
@@ -3130,7 +3357,9 @@ impl App {
             let elapsed_us = game.session.log().keystrokes.last().map_or(0, |key| key.t_us);
             let mut log = game.session.log().clone();
             log.duration_us = state.goal.live_duration_us(elapsed_us);
-            let record = SessionRecord::from_log(&self.config, log, game.started_wall);
+            let mut record = SessionRecord::from_log(&self.config, log, game.started_wall);
+            // As the finished session is saved (the rollover row needs it).
+            record.header.release_events = self.release_events_supported;
             state.update(&record, Duration::from_micros(elapsed_us), self.practice_layout());
         }
         self.menu_live_goal = Some(state);
@@ -3361,11 +3590,11 @@ impl App {
         if self.config.mode.kind == ModeKind::Burst {
             self.burst_series.push(record.header.net_wpm);
         }
+        record.header.release_events = self.release_events_supported;
         if let Some(mut state) = self.menu_live_goal.take() {
             state.finish(&record, self.practice_layout());
             self.menu_live_goal = Some(state);
         }
-        record.header.release_events = self.release_events_supported;
         self.gate_failed = !crate::practice::gate::is_eligible(self.config.gate.min_accuracy, record.header.accuracy);
         self.next_pacer_target_wpm =
             self.config.pacer.target_wpm.map(|target| {
@@ -3837,6 +4066,26 @@ fn allowed_practice_characters(mode: &ModeConfig, layout: &KeyboardLayout) -> St
         characters.push_str(&mode.base_keys);
     }
     characters
+}
+
+/// The table cell a saved session was started from (`mode_params.drill`).
+fn record_cell(record: &SessionRecord) -> Option<DrillCell> {
+    let params = serde_json::from_str::<serde_json::Value>(&record.header.mode_params).ok()?;
+    serde_json::from_value(params.get("drill")?.clone()).ok()
+}
+
+fn median_of(values: &[f64]) -> Option<f64> {
+    let mut sorted = values.iter().copied().filter(|value| value.is_finite()).collect::<Vec<_>>();
+    if sorted.is_empty() {
+        return None;
+    }
+    sorted.sort_by(f64::total_cmp);
+    let middle = sorted.len() / 2;
+    Some(if sorted.len().is_multiple_of(2) {
+        (sorted[middle - 1] + sorted[middle]) / 2.0
+    } else {
+        sorted[middle]
+    })
 }
 
 fn replay_mode_kind(name: &str) -> ModeKind {

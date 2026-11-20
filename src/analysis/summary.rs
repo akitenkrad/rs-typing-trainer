@@ -558,13 +558,35 @@ pub fn session_axis_value(axis: SkillAxis, record: &SessionRecord, layout: &Keyb
     axis_value(axis, record, layout, config)
 }
 
+/// The reach axis of one session: the mean IKI of the remote rows (number,
+/// top, bottom) over the home row's (`far-home-iki-ratio`). The skill axes,
+/// the `reach.*` judgment and the live goal of the unlock row (MYTASK-3641)
+/// all read it from here.
+pub fn session_reach_ratio(record: &SessionRecord, layout: &KeyboardLayout, settings: AnalysisSettings) -> Option<f64> {
+    let keyboard_geometry = geometry(&record.header.geometry).or_else(|| geometry("ansi"))?;
+    let details = analyze_records(std::slice::from_ref(record), layout, &keyboard_geometry, settings);
+    let home = details
+        .rows
+        .iter()
+        .find(|row| row.name == "home" && row.n > 0)
+        .map(|row| row.iki_median_ms)?;
+    let remote = details
+        .rows
+        .iter()
+        .filter(|row| matches!(row.name.as_str(), "number" | "top" | "bottom") && row.n > 0)
+        .map(|row| row.iki_median_ms)
+        .collect::<Vec<_>>();
+    (!remote.is_empty() && home > 0.0).then(|| (remote.iter().sum::<f64>() / remote.len() as f64) / home)
+}
+
 fn axis_value(axis: SkillAxis, record: &SessionRecord, layout: &KeyboardLayout, config: &Config) -> Option<f64> {
     match axis {
         SkillAxis::SustainedSpeed | SkillAxis::Japanese => Some(record.header.net_wpm),
         SkillAxis::Accuracy => Some(record.header.accuracy * 100.0),
         SkillAxis::Rhythm if record.header.metrics_version == 0 => None,
         SkillAxis::Rhythm => Some(record.header.iki_cv),
-        SkillAxis::Transitions | SkillAxis::Reach | SkillAxis::Reaction | SkillAxis::Correction => {
+        SkillAxis::Reach => session_reach_ratio(record, layout, analysis_settings(config)),
+        SkillAxis::Transitions | SkillAxis::Reaction | SkillAxis::Correction => {
             let keyboard_geometry = geometry(&record.header.geometry).or_else(|| geometry("ansi"))?;
             let details = analyze_records(std::slice::from_ref(record), layout, &keyboard_geometry, analysis_settings(config));
             match axis {
@@ -578,20 +600,6 @@ fn axis_value(axis: SkillAxis, record: &SessionRecord, layout: &KeyboardLayout, 
                     values.sort_by(|left, right| right.total_cmp(left));
                     let top = values.iter().take(20).copied().collect::<Vec<_>>();
                     (!top.is_empty()).then(|| top.iter().sum::<f64>() / top.len() as f64 - details.iki_median_ms)
-                }
-                SkillAxis::Reach => {
-                    let home = details
-                        .rows
-                        .iter()
-                        .find(|row| row.name == "home" && row.n > 0)
-                        .map(|row| row.iki_median_ms)?;
-                    let remote = details
-                        .rows
-                        .iter()
-                        .filter(|row| matches!(row.name.as_str(), "number" | "top" | "bottom") && row.n > 0)
-                        .map(|row| row.iki_median_ms)
-                        .collect::<Vec<_>>();
-                    (!remote.is_empty() && home > 0.0).then(|| (remote.iter().sum::<f64>() / remote.len() as f64) / home)
                 }
                 SkillAxis::Reaction => (details.reaction_median_ms > 0.0).then_some(details.reaction_median_ms),
                 SkillAxis::Correction => (details.correction_median_ms > 0.0).then_some(details.correction_median_ms),

@@ -105,19 +105,17 @@ pub fn render(frame: &mut Frame, app: &App) {
         return;
     };
 
-    // MYTASK-3633: a menu step with a live goal puts that goal on top. The
-    // image layouts keep their cards under the (text) headline when there is
-    // room; otherwise the text layout with the headline is used.
+    // MYTASK-3633, MYTASK-3641: a session with a live goal puts that goal on
+    // top. The image layouts draw it as the largest card, with the WPM / CPS
+    // / accuracy cards reduced to one muted line beside the rest; otherwise
+    // the text layout with the headline is used.
     if let Some(report) = crate::ui::live_goal::result_report(app, content.width, &theme) {
-        let hero = report.height().min(content.height);
         if content.width >= 120 {
-            let rest = Rect::new(content.x, content.y + hero, content.width, content.height.saturating_sub(hero));
-            if rest.height >= 37 && render_image_result(frame, app, result, &theme, rest, lang) {
-                crate::ui::live_goal::render_report(frame, &report, &theme, Rect::new(content.x, content.y, content.width, hero));
+            let extra = goal_hero_height(&report) - 8 + 1;
+            if content.height >= 37 + extra && render_image_result(frame, app, result, &theme, content, lang, Some(&report)) {
                 return;
             }
-            if rest.height >= 29 && render_compact_image_result(frame, app, result, &theme, rest, lang) {
-                crate::ui::live_goal::render_report(frame, &report, &theme, Rect::new(content.x, content.y, content.width, hero));
+            if content.height >= 29 + extra && render_compact_image_result(frame, app, result, &theme, content, lang, Some(&report)) {
                 return;
             }
         }
@@ -126,10 +124,10 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
 
     if content.width >= 120 {
-        if content.height >= 37 && render_image_result(frame, app, result, &theme, content, lang) {
+        if content.height >= 37 && render_image_result(frame, app, result, &theme, content, lang, None) {
             return;
         }
-        if content.height >= 29 && render_compact_image_result(frame, app, result, &theme, content, lang) {
+        if content.height >= 29 && render_compact_image_result(frame, app, result, &theme, content, lang, None) {
             return;
         }
     }
@@ -161,6 +159,32 @@ fn render_goal_text_result(
         ])
         .split(area);
     crate::ui::live_goal::render_report(frame, report, theme, rows[0]);
+    render_others_line(frame, result, theme, rows[1], lang);
+    if rows[2].height >= 3 {
+        render_observations(frame, app, theme, rows[2], lang);
+    }
+    frame.render_widget(Paragraph::new(save_line(app, result, theme)), left_inset(rows[3]));
+    render_result_hint(frame, app, theme, rows[4], lang);
+}
+
+/// The goal's rows (the hero and the muted line of the usual numbers) taken
+/// off the top of an image layout, and the area left for the rest.
+fn split_goal_rows(area: Rect, goal: Option<&crate::ui::live_goal::GoalReport>) -> (Rect, Option<(Rect, Rect)>) {
+    let Some(report) = goal else {
+        return (area, None);
+    };
+    let hero = goal_hero_height(report).min(area.height);
+    let hero_area = Rect::new(area.x, area.y, area.width, hero);
+    let others = Rect::new(area.x, area.y + hero, area.width, u16::from(area.height > hero));
+    let used = hero + others.height;
+    (
+        Rect::new(area.x, area.y + used, area.width, area.height.saturating_sub(used)),
+        Some((hero_area, others)),
+    )
+}
+
+/// The usual numbers in one muted line, under a live goal's headline.
+fn render_others_line(frame: &mut Frame, result: &GameResult, theme: &Theme, area: Rect, lang: Lang) {
     let others = format!(
         "{} {:.1} · {} {:.2} · {} {:.1}% · {} {} · {} {} · {} {}",
         Msg::Wpm.text(lang),
@@ -176,16 +200,62 @@ fn render_goal_text_result(
         Msg::MaxCombo.text(lang),
         result.max_combo,
     );
-    let width = usize::from(rows[1].width.saturating_sub(4));
+    let width = usize::from(area.width.saturating_sub(4));
     frame.render_widget(
         Paragraph::new(truncate_display(&others, width)).style(Style::default().fg(theme.muted)),
-        left_inset(rows[1]),
+        left_inset(area),
     );
-    if rows[2].height >= 3 {
-        render_observations(frame, app, theme, rows[2], lang);
+}
+
+/// Rows of the goal's card in the image layouts: eight like the metric
+/// cards, more when its text needs them (at most twelve).
+fn goal_hero_height(report: &crate::ui::live_goal::GoalReport) -> u16 {
+    (report.details.len() + report.chart.len() + 3).clamp(8, 12) as u16
+}
+
+/// The goal on top of an image layout (MYTASK-3641): its value as the
+/// largest card on the left, the verdict and comparisons on the right.
+/// Returns false when the card cannot be drawn.
+fn render_goal_hero(
+    frame: &mut Frame,
+    app: &App,
+    report: &crate::ui::live_goal::GoalReport,
+    theme: &Theme,
+    area: Rect,
+    colors: ResultImageColors,
+    lang: Lang,
+) -> bool {
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Ratio(2, 5), Constraint::Ratio(3, 5)])
+        .split(area);
+    let spec = crate::ui::live_goal::goal_card_spec(report, lang, columns[0].as_size(), colors);
+    let font = app.bigtext_images.borrow_mut().resolved_font(&app.config.display.big_font, &app.home_dir);
+    let mut images = app.result_images.borrow_mut();
+    if images.prepare_metric_card(&app.graphics, &font, &spec).is_err() {
+        return false;
     }
-    frame.render_widget(Paragraph::new(save_line(app, result, theme)), left_inset(rows[3]));
-    render_result_hint(frame, app, theme, rows[4], lang);
+    let Some(protocol) = images.metric_card_protocol(&app.graphics, &font, &spec) else {
+        return false;
+    };
+    frame.render_widget(Image::new(protocol), columns[0]);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(report.title.clone())
+        .border_style(Style::default().fg(match report.tone {
+            crate::practice::menu::live_goal::Tone::Good => theme.correct,
+            crate::practice::menu::live_goal::Tone::Warning => theme.warning,
+            crate::practice::menu::live_goal::Tone::Bad => theme.mistype,
+            crate::practice::menu::live_goal::Tone::Neutral => theme.accent,
+        }))
+        .style(Style::default().fg(theme.fg));
+    let inner = block.inner(columns[1]);
+    frame.render_widget(block, columns[1]);
+    let mut lines = report.details.clone();
+    lines.extend(report.chart.iter().cloned());
+    lines.truncate(usize::from(inner.height));
+    frame.render_widget(Paragraph::new(lines), left_inset(inner));
+    true
 }
 
 fn result_mode_is(app: &App, mode: crate::config::ModeKind) -> bool {
@@ -198,11 +268,20 @@ fn result_mode_is(app: &App, mode: crate::config::ModeKind) -> bool {
     }
 }
 
-fn render_compact_image_result(frame: &mut Frame, app: &App, result: &GameResult, theme: &Theme, area: Rect, lang: Lang) -> bool {
+fn render_compact_image_result(
+    frame: &mut Frame,
+    app: &App,
+    result: &GameResult,
+    theme: &Theme,
+    area: Rect,
+    lang: Lang,
+    goal: Option<&crate::ui::live_goal::GoalReport>,
+) -> bool {
+    let (area, goal_rows) = split_goal_rows(area, goal);
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(8),
+            Constraint::Length(if goal.is_some() { 0 } else { 8 }),
             Constraint::Length(4),
             Constraint::Length(result_hint_height(app)),
             Constraint::Min(12),
@@ -260,7 +339,7 @@ fn render_compact_image_result(frame: &mut Frame, app: &App, result: &GameResult
     let font = app.bigtext_images.borrow_mut().resolved_font(&app.config.display.big_font, &app.home_dir);
     {
         let mut images = app.result_images.borrow_mut();
-        if cards.iter().any(|spec| images.prepare_metric_card(&app.graphics, &font, spec).is_err())
+        if goal.is_none() && cards.iter().any(|spec| images.prepare_metric_card(&app.graphics, &font, spec).is_err())
             || keyboard
                 .as_ref()
                 .is_some_and(|(spec, _, _)| images.prepare_mistype_keyboard(&app.graphics, spec).is_err())
@@ -268,12 +347,19 @@ fn render_compact_image_result(frame: &mut Frame, app: &App, result: &GameResult
             return false;
         }
     }
-    for (spec, card_area) in cards.iter().zip(card_areas.iter().copied()) {
-        let mut images = app.result_images.borrow_mut();
-        let Some(protocol) = images.metric_card_protocol(&app.graphics, &font, spec) else {
+    if let (Some(report), Some((hero, others))) = (goal, goal_rows) {
+        if !render_goal_hero(frame, app, report, theme, hero, colors, lang) {
             return false;
-        };
-        frame.render_widget(Image::new(protocol), card_area);
+        }
+        render_others_line(frame, result, theme, others, lang);
+    } else {
+        for (spec, card_area) in cards.iter().zip(card_areas.iter().copied()) {
+            let mut images = app.result_images.borrow_mut();
+            let Some(protocol) = images.metric_card_protocol(&app.graphics, &font, spec) else {
+                return false;
+            };
+            frame.render_widget(Image::new(protocol), card_area);
+        }
     }
     render_secondary_box(frame, app, result, theme, rows[1], lang);
     let points = app.result_record.as_ref().map_or_else(Vec::new, item_speed_points);
@@ -303,11 +389,20 @@ fn render_compact_image_result(frame: &mut Frame, app: &App, result: &GameResult
     true
 }
 
-fn render_image_result(frame: &mut Frame, app: &App, result: &GameResult, theme: &Theme, area: Rect, lang: Lang) -> bool {
+fn render_image_result(
+    frame: &mut Frame,
+    app: &App,
+    result: &GameResult,
+    theme: &Theme,
+    area: Rect,
+    lang: Lang,
+    goal: Option<&crate::ui::live_goal::GoalReport>,
+) -> bool {
+    let (area, goal_rows) = split_goal_rows(area, goal);
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(8),
+            Constraint::Length(if goal.is_some() { 0 } else { 8 }),
             Constraint::Length(4),
             Constraint::Ratio(5, 9),
             Constraint::Ratio(4, 9),
@@ -385,7 +480,7 @@ fn render_image_result(frame: &mut Frame, app: &App, result: &GameResult, theme:
     let font = app.bigtext_images.borrow_mut().resolved_font(&app.config.display.big_font, &app.home_dir);
     {
         let mut images = app.result_images.borrow_mut();
-        if cards.iter().any(|spec| images.prepare_metric_card(&app.graphics, &font, spec).is_err())
+        if goal.is_none() && cards.iter().any(|spec| images.prepare_metric_card(&app.graphics, &font, spec).is_err())
             || speed.points.len() >= 2 && images.prepare_speed_chart(&app.graphics, &font, &speed).is_err()
             || images.prepare_reaction_histogram(&app.graphics, &font, &reaction).is_err()
             || keyboard
@@ -396,12 +491,19 @@ fn render_image_result(frame: &mut Frame, app: &App, result: &GameResult, theme:
         }
     }
 
-    for (spec, card_area) in cards.iter().zip(card_areas.iter().copied()) {
-        let mut images = app.result_images.borrow_mut();
-        let Some(protocol) = images.metric_card_protocol(&app.graphics, &font, spec) else {
+    if let (Some(report), Some((hero, others))) = (goal, goal_rows) {
+        if !render_goal_hero(frame, app, report, theme, hero, colors, lang) {
             return false;
-        };
-        frame.render_widget(Image::new(protocol), card_area);
+        }
+        render_others_line(frame, result, theme, others, lang);
+    } else {
+        for (spec, card_area) in cards.iter().zip(card_areas.iter().copied()) {
+            let mut images = app.result_images.borrow_mut();
+            let Some(protocol) = images.metric_card_protocol(&app.graphics, &font, spec) else {
+                return false;
+            };
+            frame.render_widget(Image::new(protocol), card_area);
+        }
     }
     render_secondary_box(frame, app, result, theme, rows[1], lang);
 

@@ -159,9 +159,9 @@ fn text_trend_cuts_the_gap_marks_it_and_spreads_november_over_half_the_width() {
     let buffer = render_buffer(&app, 120, 40);
     let text = rows(&buffer).join("\n");
     assert!(text.contains('≈'), "{text}");
-    assert!(text.contains("2026-04-27"), "{text}");
-    assert!(text.contains("2026-11-15"), "{text}");
-    assert!(text.contains("2026-11-01"), "the first date after the break is labelled: {text}");
+    assert!(text.contains("2026/04/27"), "{text}");
+    assert!(text.contains("11/15"), "{text}");
+    assert!(text.contains("11/01"), "the first date after the break is labelled: {text}");
 
     let (left, right, top, axis_row) = first_chart_graph(&buffer);
     let mark = (left..right).find(|&x| cell(&buffer, x, axis_row) == "≈").expect("≈ on the x axis");
@@ -190,7 +190,7 @@ fn text_trend_without_a_long_gap_has_no_break_mark() {
     let app = trend_app(records);
     let text = rows(&render_buffer(&app, 120, 40)).join("\n");
     assert!(!text.contains('≈'), "{text}");
-    assert!(text.contains("2026-11-01") && text.contains("2026-11-22"), "{text}");
+    assert!(text.contains("11/01") && text.contains("11/22"), "{text}");
 }
 
 #[test]
@@ -242,7 +242,7 @@ fn image_trend_shows_the_break_mark_as_terminal_text() {
     });
     let text = rows(&render_buffer(&app, 120, 40)).join("\n");
     assert_eq!(text.matches('≈').count(), 3, "one mark under each of the three charts:\n{text}");
-    assert!(text.contains("2026-04-27") && text.contains("2026-11-15"), "{text}");
+    assert!(text.contains("2026/04/27") && text.contains("11/15"), "{text}");
 }
 
 fn seeded_app(dates: &[NaiveDate], today: NaiveDate) -> (TempDir, common::TestApp) {
@@ -326,7 +326,7 @@ fn trend_samples_at_80x24_and_160x45() {
             .count();
         assert_eq!(axis_marks, 3, "{width}x{height}:\n{text}");
         assert_eq!(text.matches('≈').count(), 3, "{width}x{height}:\n{text}");
-        assert!(text.contains("2026-11-01"), "{width}x{height}:\n{text}");
+        assert!(text.contains("11/01"), "{width}x{height}:\n{text}");
         println!("--- {lang:?} {width}x{height}\n{text}");
     }
 }

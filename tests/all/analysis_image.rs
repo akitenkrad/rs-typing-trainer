@@ -679,6 +679,7 @@ fn calendar_chart(forecasts: Vec<TrendForecast>) -> TrendChartSpec {
             },
         ],
         forecasts,
+        x_ticks: Vec::new(),
     }
 }
 
@@ -786,7 +787,7 @@ fn record(day: u32, wpm: f64) -> SessionRecord {
 }
 
 #[test]
-fn trend_charts_keep_benchmark_series_separate() {
+fn trend_charts_draw_every_benchmark_version_as_one_series() {
     let mut v1 = record(1, 20.0);
     v1.header.mode = "bench".into();
     v1.header.bench_id = Some("bench-v1/A/01".into());
@@ -794,12 +795,12 @@ fn trend_charts_keep_benchmark_series_separate() {
     v2.header.mode = "bench".into();
     v2.header.bench_id = Some("bench-v2/A/01".into());
 
+    // MYTASK-3642: one «bench» series whatever the version and part.
     let spec = build_trend_data(&[v1, v2], MetricKind::NetWpm, Lang::En).unwrap();
-    assert_eq!(spec.series.len(), 2);
-    assert_eq!(spec.series[0].name, "bench-v1-A");
-    assert_eq!(spec.series[0].points[0].value, 20.0);
-    assert_eq!(spec.series[1].name, "bench-v2-A");
-    assert_eq!(spec.series[1].points[0].value, 40.0);
+    assert_eq!(spec.series.len(), 1);
+    assert_eq!(spec.series[0].name, "bench");
+    let values = spec.series[0].points.iter().map(|point| point.value).collect::<Vec<_>>();
+    assert_eq!(values, [20.0, 40.0]);
 }
 
 #[test]
@@ -1175,8 +1176,8 @@ fn image_chart_keeps_title_legend_and_both_endpoint_dates_as_terminal_text() {
     let text = buffer.content().iter().map(|cell| cell.symbol()).collect::<String>();
     assert!(text.contains("net WPM / daily median"), "{text}");
     assert!(text.contains("random"), "{text}");
-    assert!(text.contains("2026-01-01"), "{text}");
-    assert!(text.contains("2026-01-10"), "{text}");
+    assert!(text.contains("2026/01/01"), "{text}");
+    assert!(text.contains("01/10"), "{text}");
 }
 
 #[test]
@@ -1190,7 +1191,7 @@ fn text_chart_keeps_the_existing_unknown_bucket_for_an_invalid_timestamp() {
 
     let buffer = render_buffer(&app);
     let text = buffer.content().iter().map(|cell| cell.symbol()).collect::<String>();
-    assert!(text.contains("2026-01-01"), "{text}");
+    assert!(text.contains("2026/01/01"), "{text}");
     assert!(text.contains("unknown"), "{text}");
 }
 

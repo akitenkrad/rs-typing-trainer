@@ -1,6 +1,7 @@
 //! MYTASK-3633: the live goal of a menu step — the meter while typing and the
 //! headline of the result screen — for the six prescriptions of the first
-//! batch, and its absence everywhere else.
+//! batch, and its absence on the «normal» row. The other rows and the table
+//! cells are in `live_goal_rows` (MYTASK-3641).
 
 use std::time::{Duration, Instant};
 
@@ -157,29 +158,31 @@ fn uneven(index: usize) -> u64 {
 }
 
 #[test]
-fn the_dispatch_gives_a_goal_only_to_the_six_first_batch_steps() {
-    for id in [
-        "accuracy.gate",
-        "accuracy.anticipation",
-        "rhythm.metronome",
-        "speed.pacer",
-        "endurance.split",
+fn the_dispatch_follows_the_row_of_the_step_cell() {
+    // MYTASK-3641: the goal comes from the row of the step's cell, so the
+    // six steps of the first batch keep theirs and the other prescriptions
+    // get the goal of their row.
+    for (id, kind) in [
+        ("accuracy.gate", GoalKind::AccuracyGate),
+        ("accuracy.anticipation", GoalKind::Anticipation),
+        ("rhythm.metronome", GoalKind::Metronome),
+        ("speed.pacer", GoalKind::Pacer),
+        ("endurance.split", GoalKind::EnduranceSplit),
+        ("preview.wide", GoalKind::Preview),
+        ("preview.phrase", GoalKind::Preview),
+        ("transition.adaptive", GoalKind::WeakTransition),
+        ("transition.ngram", GoalKind::WeakTransition),
+        ("recovery.retry", GoalKind::Recovery),
+        ("overlap.burst", GoalKind::Overlap),
+        ("reach.unlock", GoalKind::Reach),
+        ("japanese.spelling", GoalKind::Spelling),
+        ("blind.fade", GoalKind::Blind),
     ] {
-        assert!(GoalKind::for_step(&prescription_step(id, 1)).is_some(), "{id}");
+        assert_eq!(GoalKind::for_step(&prescription_step(id, 1)), Some(kind), "{id}");
     }
     assert_eq!(GoalKind::for_step(&fixed_step("fixed.finish")), Some(GoalKind::Sprint));
     for id in ["fixed.warmup", "fixed.check"] {
         assert_eq!(GoalKind::for_step(&fixed_step(id)), None, "{id}");
-    }
-    for id in [
-        "preview.wide",
-        "transition.adaptive",
-        "recovery.retry",
-        "overlap.burst",
-        "reach.unlock",
-        "blind.fade",
-    ] {
-        assert_eq!(GoalKind::for_step(&prescription_step(id, 1)), None, "{id}");
     }
 }
 

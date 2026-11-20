@@ -235,8 +235,66 @@ fn item_strokes(record: &SessionRecord, item_idx: u32) -> Vec<Stroke<'_>> {
         .collect()
 }
 
-fn post_error_slowdown(records: &[SessionRecord], model: &PlayerModel) -> Option<PostErrorSlowdown> {
-    let mut post = Vec::new();
+/// The post-error slowdown of `records` with the excess time of each error
+/// (MYTASK-3641): the computation behind
+/// [`ErrorDiagnosis::post_error_slowdown`], which the recovery component and
+/// the `post-error-excess-ms` judgment read.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PostErrorDetail {
+    pub slowdown: Option<PostErrorSlowdown>,
+    /// For each error in typing order: the extra time (ms) of the correct
+    /// intervals after it (up to three) over the baseline median. Empty while
+    /// there is no baseline.
+    pub per_error_excess_ms: Vec<f64>,
+}
+
+/// [`PostErrorDetail`] of `records` with the player model that
+/// [`diagnose_errors`] builds.
+pub fn post_error_detail(
+    records: &[SessionRecord],
+    layout: &KeyboardLayout,
+    geometry: &KeyboardGeometry,
+    settings: AnalysisSettings,
+    as_of: DateTime<Utc>,
+) -> PostErrorDetail {
+    let model = build_player_model(records, layout, geometry, settings, ModelView::Recent, as_of);
+    let (per_error, mut baseline) = post_error_samples(records, &model);
+    let mut post = per_error.iter().flatten().copied().collect::<Vec<_>>();
+    let slowdown = post_error_slowdown_of(&mut post, &mut baseline);
+    let per_error_excess_ms = slowdown.as_ref().map_or_else(Vec::new, |slowdown| {
+        per_error
+            .iter()
+            .map(|samples| samples.iter().map(|value| value - slowdown.baseline_median_ms).sum())
+            .collect()
+    });
+    PostErrorDetail {
+        slowdown,
+        per_error_excess_ms,
+    }
+}
+
+pub(crate) fn post_error_slowdown(records: &[SessionRecord], model: &PlayerModel) -> Option<PostErrorSlowdown> {
+    let (per_error, mut baseline) = post_error_samples(records, model);
+    let mut post = per_error.into_iter().flatten().collect::<Vec<_>>();
+    post_error_slowdown_of(&mut post, &mut baseline)
+}
+
+fn post_error_slowdown_of(post: &mut [f64], baseline: &mut [f64]) -> Option<PostErrorSlowdown> {
+    let post_median = median(post)?;
+    let baseline_median = median(baseline)?;
+    Some(PostErrorSlowdown {
+        post_error_median_ms: post_median,
+        baseline_median_ms: baseline_median,
+        excess_ms: post_median - baseline_median,
+        post_n: post.len() as u64,
+        baseline_n: baseline.len() as u64,
+    })
+}
+
+/// The post-error intervals of each error (in typing order) and the
+/// baseline intervals, both relative to the transition estimate.
+fn post_error_samples(records: &[SessionRecord], model: &PlayerModel) -> (Vec<Vec<f64>>, Vec<f64>) {
+    let mut per_error = Vec::new();
     let mut baseline = Vec::new();
     for record in records.iter().filter(|record| record.header.metrics_version > 0) {
         for item in &record.log.items {
@@ -253,6 +311,7 @@ fn post_error_slowdown(records: &[SessionRecord], model: &PlayerModel) -> Option
                     .find(|stroke| stroke.key.correct)
                     .and_then(|stroke| stroke.expected);
                 let mut collected = 0;
+                let mut post = Vec::new();
                 for index in error_index + 1..strokes.len() {
                     if !strokes[index].key.correct {
                         continue;
@@ -267,6 +326,7 @@ fn post_error_slowdown(records: &[SessionRecord], model: &PlayerModel) -> Option
                         break;
                     }
                 }
+                per_error.push(post);
             }
             for index in 1..strokes.len() {
                 if !strokes[index].key.correct || errors.iter().any(|error| error.abs_diff(index) < 10) {
@@ -282,15 +342,7 @@ fn post_error_slowdown(records: &[SessionRecord], model: &PlayerModel) -> Option
             }
         }
     }
-    let post_median = median(&mut post)?;
-    let baseline_median = median(&mut baseline)?;
-    Some(PostErrorSlowdown {
-        post_error_median_ms: post_median,
-        baseline_median_ms: baseline_median,
-        excess_ms: post_median - baseline_median,
-        post_n: post.len() as u64,
-        baseline_n: baseline.len() as u64,
-    })
+    (per_error, baseline)
 }
 
 fn transition_baseline(model: &PlayerModel, from: char, to: char) -> f64 {
@@ -342,7 +394,7 @@ fn interval_sd(strokes: &[Stroke<'_>]) -> f64 {
     (intervals.iter().map(|value| (value - mean).powi(2)).sum::<f64>() / intervals.len() as f64).sqrt()
 }
 
-fn correction_cost(records: &[SessionRecord]) -> CorrectionCost {
+pub(crate) fn correction_cost(records: &[SessionRecord]) -> CorrectionCost {
     let total_keystrokes = records.iter().map(|record| record.log.keystrokes.len() as u64).sum::<u64>();
     let target_units = records
         .iter()

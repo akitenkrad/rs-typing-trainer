@@ -1,12 +1,13 @@
 use std::collections::BTreeSet;
 
-use chrono::Duration as ChronoDuration;
+use chrono::{Datelike, Duration as ChronoDuration, NaiveDate};
 use ratatui::Frame;
+use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect, Size};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Axis, Block, Borders, Chart, Dataset, GraphType, Paragraph};
+use ratatui::widgets::{Axis, Block, Borders, Chart, Clear, Dataset, GraphType, Paragraph};
 use ratatui_image::Image;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -19,7 +20,7 @@ use crate::ui::analysis_image::{
     ComparisonBarsSpec, FORECAST_EN_COLOR, FORECAST_JA_COLOR, FingerChartSpec, GradeLadderSpec, MetricKind, PixelPoint, RadarAxis, RadarChartSpec,
     RadarRing, SERIES_COLORS, SparklineSpec, TREND_BREAK_WIDTH_DAYS, TextTrendData, TransitionArrowSpec, TransitionBar, TransitionBarsSpec,
     TransitionKeyboardSpec, TrendAxis, TrendChartSpec, TrendDateRange, TrendForecast, TrendPoint, build_finger_bars, build_text_trend_data,
-    build_trend_data, metric_value, mode_label, shared_trend_axis,
+    build_trend_data, metric_value, mode_label, shared_trend_axis, trend_date_label, trend_tick_candidates,
 };
 use crate::ui::keyboard::{
     KeyboardState, KeyboardStyle, KeyboardView, finger_color, heatmap_color, keycap_center_cells, keycap_image_area, keycap_tile_placements,
@@ -559,7 +560,7 @@ fn overlay_axis_breaks(
 ) {
     let buffer = frame.buffer_mut();
     let span = axis.span().max(1.0);
-    for (fraction, segment) in axis.break_fractions().into_iter().zip(&axis.segments()[1..]) {
+    for ((fraction, segment), previous) in axis.break_fractions().into_iter().zip(&axis.segments()[1..]).zip(axis.segments()) {
         let mark = column_of(to_fraction(fraction * span));
         if let Some(cell) = buffer.cell_mut((mark, axis_row)) {
             cell.set_symbol("≈");
@@ -567,7 +568,7 @@ fn overlay_axis_breaks(
         let Some(label_row) = label_row else {
             continue;
         };
-        let label = segment.start.to_string();
+        let label = trend_date_label(segment.start, segment.start.year() != previous.end.year());
         let width = label.width() as u16;
         let mut start = column_of(to_fraction(axis.position(segment.start)));
         if label_row == axis_row {
@@ -587,6 +588,44 @@ fn overlay_axis_breaks(
             }
         }
     }
+}
+
+/// Writes the x-axis tick labels (`MM/DD`) on `row`, each centred on the
+/// column of its date, left to right, where the label and one column on each
+/// side are still blank and inside `left..right`. Ticks whose label does not
+/// fit (it would touch the endpoint dates, a break or another tick) are
+/// dropped. Returns the ticks that got a label.
+fn place_tick_labels(
+    buffer: &mut Buffer,
+    ticks: &[NaiveDate],
+    column_of: impl Fn(NaiveDate) -> u16,
+    row: u16,
+    left: u16,
+    right: u16,
+) -> Vec<NaiveDate> {
+    let mut placed = Vec::new();
+    for &date in ticks {
+        let label = trend_date_label(date, false);
+        let width = label.width() as u16;
+        let Some(start) = column_of(date).checked_sub(width / 2) else {
+            continue;
+        };
+        if start < left || start + width > right {
+            continue;
+        }
+        let blank = (start.saturating_sub(1).max(left)..(start + width + 1).min(right))
+            .all(|x| buffer.cell((x, row)).is_some_and(|cell| cell.symbol() == " "));
+        if !blank {
+            continue;
+        }
+        for (offset, ch) in label.chars().enumerate() {
+            if let Some(cell) = buffer.cell_mut((start + offset as u16, row)) {
+                cell.set_char(ch);
+            }
+        }
+        placed.push(date);
+    }
+    placed
 }
 
 fn render_metric_chart_text(
@@ -663,11 +702,11 @@ fn render_metric_chart_text(
     } else {
         0.0
     };
-    let first_date = axis.axis.start().to_string();
+    let first_date = trend_date_label(axis.axis.start(), true);
     let last_date = if axis.unknown {
         "unknown".to_owned()
     } else {
-        axis.axis.end().to_string()
+        trend_date_label(axis.axis.end(), axis.axis.end().year() != axis.axis.start().year())
     };
     let upper = axis.upper_bound();
     let chart = Chart::new(datasets)
@@ -684,9 +723,6 @@ fn render_metric_chart_text(
                 .labels(vec![Span::raw(format!("{min_y:.1}")), Span::raw(format!("{max_y:.1}"))]),
         );
     frame.render_widget(chart, area);
-    if !axis.axis.has_breaks() {
-        return;
-    }
     // The chart widget places its graph area itself; find it from the corner
     // of the two axes it drew — a `└` followed by `─` up to the right edge
     // (the legend box has a `└` too, but closes with `┘`).
@@ -713,7 +749,21 @@ fn render_metric_chart_text(
         graph_left + dots / 2
     };
     let label_row = (axis_row + 1 < area.bottom()).then_some(axis_row + 1);
-    overlay_axis_breaks(frame, axis.axis, |units| units / upper, column_of, axis_row, label_row, area.right());
+    if axis.axis.has_breaks() {
+        overlay_axis_breaks(frame, axis.axis, |units| units / upper, column_of, axis_row, label_row, area.right());
+    }
+    // Tick dates between the endpoints, each under its own column.
+    if let Some(label_row) = label_row {
+        let candidates = trend_tick_candidates(axis.axis, f64::from(graph_width) / upper);
+        place_tick_labels(
+            frame.buffer_mut(),
+            &candidates,
+            |date| column_of(axis.x(Some(date)) / upper),
+            label_row,
+            area.left(),
+            area.right(),
+        );
+    }
 }
 
 fn trend_forecasts(app: &App) -> Vec<TrendForecast> {
@@ -768,10 +818,6 @@ fn render_metric_chart_image(frame: &mut Frame, app: &App, area: Rect, lang: Lan
     let Some((min_y, max_y)) = spec.y_bounds() else {
         return false;
     };
-    let mut images = app.analysis_images.borrow_mut();
-    if images.prepare_chart_with_range(&app.graphics, spec, x_range.clone()).is_err() {
-        return false;
-    }
     frame.render_widget(
         Paragraph::new(title).style(Style::default().add_modifier(Modifier::BOLD)),
         Rect::new(area.x, area.y, area.width, 1),
@@ -804,18 +850,12 @@ fn render_metric_chart_image(frame: &mut Frame, app: &App, area: Rect, lang: Lan
         let column = (fraction.clamp(0.0, 1.0) * f64::from(plot_area.width)).floor() as u16;
         plot_area.x + column.min(plot_area.width - 1)
     };
-    let break_columns = x_range.break_fractions().into_iter().map(&column_of).collect::<Vec<_>>();
-    frame.render_widget(Paragraph::new(x_range.start().to_string()), label_area);
-    // The centred «day» caption gives way to a break mark that would land on it.
-    let day = Msg::TrendDay.text(lang);
-    let day_start = label_area.x + label_area.width.saturating_sub(day.width() as u16) / 2;
-    if !break_columns
-        .iter()
-        .any(|&column| (day_start.saturating_sub(1)..=day_start + day.width() as u16).contains(&column))
-    {
-        frame.render_widget(Paragraph::new(day).alignment(Alignment::Center), label_area);
-    }
-    frame.render_widget(Paragraph::new(x_range.end().to_string()).alignment(Alignment::Right), label_area);
+    let (start, end) = (x_range.start(), x_range.end());
+    frame.render_widget(Paragraph::new(trend_date_label(start, true)), label_area);
+    frame.render_widget(
+        Paragraph::new(trend_date_label(end, end.year() != start.year())).alignment(Alignment::Right),
+        label_area,
+    );
     if x_range.has_breaks() {
         overlay_axis_breaks(
             frame,
@@ -826,6 +866,38 @@ fn render_metric_chart_image(frame: &mut Frame, app: &App, area: Rect, lang: Lan
             Some(label_area.y),
             label_area.right(),
         );
+    }
+    // Tick dates between the endpoints; the image draws a vertical grid line
+    // at each tick that got a label.
+    let candidates = trend_tick_candidates(x_range, f64::from(plot_area.width) / x_range.span().max(1.0));
+    spec.x_ticks = place_tick_labels(
+        frame.buffer_mut(),
+        &candidates,
+        |date| column_of(x_range.fraction(date)),
+        label_area.y,
+        label_area.x,
+        label_area.right(),
+    );
+    // Without ticks the centred «day» caption stays, where the row is blank.
+    if spec.x_ticks.is_empty() {
+        let day = Msg::TrendDay.text(lang);
+        let day_width = day.width() as u16;
+        let day_start = label_area.x + label_area.width.saturating_sub(day_width) / 2;
+        let buffer = frame.buffer_mut();
+        let blank = (day_start.saturating_sub(1)..(day_start + day_width + 1).min(label_area.right()))
+            .all(|x| buffer.cell((x, label_area.y)).is_some_and(|cell| cell.symbol() == " "));
+        if blank {
+            frame.render_widget(
+                Paragraph::new(day),
+                Rect::new(day_start, label_area.y, day_width.min(label_area.width), 1),
+            );
+        }
+    }
+    let mut images = app.analysis_images.borrow_mut();
+    if images.prepare_chart_with_range(&app.graphics, spec, x_range.clone()).is_err() {
+        // The text chart is drawn over the same area instead.
+        frame.render_widget(Clear, area);
+        return false;
     }
     let Some(protocol) = images.chart_protocol_with_range(&app.graphics, spec, x_range.clone()) else {
         return false;

@@ -148,7 +148,7 @@ fn english_sentence_shows_its_tatoeba_number() {
             assert_eq!(label, format!("Tatoeba #{sentence_id}"));
             for (width, height) in [(120, 40), (80, 24)] {
                 let rows = render(&app, width, height);
-                assert_source_under_prompt(&rows, &label, "[ESC]Abort", "Combo");
+                assert_source_under_prompt(&rows, &label, "[ESC]Abort", common::metrics_phrase(&app, Lang::En));
             }
         }
     }

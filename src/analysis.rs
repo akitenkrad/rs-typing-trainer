@@ -61,6 +61,30 @@ pub fn diagnose(
     let player_model = build_player_model(records, layout, geometry, options.model, ModelView::Recent, as_of);
     let errors = diagnose_errors(records, layout, geometry, options.model, as_of);
     let style = diagnose_style(records, &player_model);
+    let error_cost_ms = spelling_error_cost_ms(records, &errors);
+    let japanese = analyze_japanese(
+        records,
+        layout,
+        geometry,
+        options.model,
+        as_of,
+        japanese_corpus,
+        options.min_transition_n,
+        options.spelling_suggestions,
+        error_cost_ms,
+    );
+    Diagnosis {
+        player_model,
+        errors,
+        style,
+        japanese,
+    }
+}
+
+/// The cost of one error (ms) that the spelling analysis adds to a
+/// spelling's typing time: the post-error excess plus the correction time per
+/// error, or 300 ms when neither was observed.
+pub fn spelling_error_cost_ms(records: &[SessionRecord], errors: &errors::ErrorDiagnosis) -> f64 {
     let error_count = records
         .iter()
         .flat_map(|record| &record.log.keystrokes)
@@ -79,23 +103,7 @@ pub fn diagnose(
     if !has_error_cost {
         error_cost_ms = 300.0;
     }
-    let japanese = analyze_japanese(
-        records,
-        layout,
-        geometry,
-        options.model,
-        as_of,
-        japanese_corpus,
-        options.min_transition_n,
-        options.spelling_suggestions,
-        error_cost_ms,
-    );
-    Diagnosis {
-        player_model,
-        errors,
-        style,
-        japanese,
-    }
+    error_cost_ms
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

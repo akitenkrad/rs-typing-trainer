@@ -438,7 +438,7 @@ fn every_mode_in_both_styles_keeps_the_order_and_stays_inside_the_frame() {
                 let terminal = render(&app, width, height);
                 let output = text(&terminal);
                 let buffer = terminal.backend().buffer();
-                let metrics = row_of(&terminal, if lang == Lang::Ja { "連続正解" } else { "Combo" });
+                let metrics = row_of(&terminal, common::metrics_phrase(&app, lang));
                 let footer = row_of(&terminal, if lang == Lang::Ja { "[ESC]中断" } else { "[ESC]Abort" });
                 let timer = (0..height).find(|y| {
                     let row = compact(&terminal, *y);

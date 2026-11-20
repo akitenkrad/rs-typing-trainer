@@ -1,5 +1,8 @@
-//! The live goal of a menu step on screen (MYTASK-3633): a meter with the
-//! target line while typing, and the headline of the result screen.
+//! The live goal on screen (MYTASK-3633, MYTASK-3641): a meter with the
+//! target line while typing, and the headline of the result screen. A menu
+//! step and a session started from the table draw it the same way; the
+//! result of a table cell compares with the cell's previous session and its
+//! personal best instead of the menu's «3 in a row».
 //!
 //! The numbers come from `practice::menu::live_goal`; this module only lays
 //! them out. Every `match` on [`GoalKind`] is exhaustive, so a new goal kind
@@ -14,30 +17,79 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
+use crate::analysis::grades::Direction as Better;
 use crate::app::{App, ResultOrigin};
 use crate::i18n::Lang;
 use crate::practice::menu::PACER_ACCURACY_FLOOR;
-use crate::practice::menu::live_goal::{GoalKind, GoalMeasure, LiveGoal, LiveGoalState, RECENT_INTERVALS, Tone, histogram, mistype_slots};
+use crate::practice::menu::live_goal::{
+    GoalKind, GoalMeasure, GoalOrigin, LiveGoal, LiveGoalState, RECENT_INTERVALS, Tone, histogram, mistype_slots,
+};
+use crate::ui::result_image::{MetricCardSpec, ResultImageColors};
 use crate::ui::theme::Theme;
 
-/// The live goal while a menu step with one is being played; `None` in every
-/// other session (individual training, benchmarks, the stand-alone warm-up,
-/// the warm-up and check steps).
+/// The live goal while a session with one is being played: a menu step or a
+/// table cell whose row has a goal. `None` for benchmarks, the stand-alone
+/// warm-up, the «normal» row and the warm-up and check steps.
 pub fn playing_goal(app: &App) -> Option<&LiveGoalState> {
-    if app.menu_active_step.is_none() || app.active_bench_id.is_some() || app.game.is_none() {
+    if app.active_bench_id.is_some() || app.game.is_none() {
         return None;
     }
     app.menu_live_goal.as_ref()
 }
 
-/// The goal of the step whose result is on screen, once its measurement is
-/// final.
+/// The goal of the session whose result is on screen, once its measurement
+/// is final.
 pub fn result_goal(app: &App) -> Option<(&LiveGoalState, &GoalMeasure)> {
-    if app.result_origin != ResultOrigin::JustPlayed || app.menu_active_step.is_none() || app.active_bench_id.is_some() {
+    if app.result_origin != ResultOrigin::JustPlayed || app.active_bench_id.is_some() {
         return None;
     }
     let state = app.menu_live_goal.as_ref()?;
+    if state.goal.origin == GoalOrigin::Menu && app.menu_active_step.is_none() {
+        return None;
+    }
     Some((state, state.finished.as_ref()?))
+}
+
+/// The main value of a goal as the meter and the headline show it.
+pub fn format_value(kind: GoalKind, value: f64) -> String {
+    match kind {
+        GoalKind::AccuracyGate | GoalKind::Blind => percent(value),
+        GoalKind::Anticipation | GoalKind::Spelling => format!("{:.0}%", value * 100.0),
+        GoalKind::Metronome => format!("{value:.2}"),
+        GoalKind::Pacer | GoalKind::Sprint => format!("{value:.1}"),
+        GoalKind::EnduranceSplit => format!("{:+.1}%", value * 100.0),
+        GoalKind::Recovery => format!("{value:+.0}"),
+        GoalKind::Preview | GoalKind::Reach => format!("{value:.2}"),
+        GoalKind::Overlap => format!("{value:.0}%"),
+        GoalKind::WeakTransition => format!("{value:.0}"),
+    }
+}
+
+/// The size of a difference between two values of a goal.
+fn format_delta(kind: GoalKind, delta: f64) -> String {
+    let delta = delta.abs();
+    match kind {
+        GoalKind::AccuracyGate | GoalKind::Blind | GoalKind::EnduranceSplit => format!("{:.1}pt", delta * 100.0),
+        GoalKind::Anticipation | GoalKind::Spelling => format!("{:.0}pt", delta * 100.0),
+        GoalKind::Metronome | GoalKind::Preview | GoalKind::Reach => format!("{delta:.2}"),
+        GoalKind::Pacer | GoalKind::Sprint => format!("{delta:.1} WPM"),
+        GoalKind::Recovery | GoalKind::WeakTransition => format!("{delta:.0} ms"),
+        GoalKind::Overlap => format!("{delta:.0}pt"),
+    }
+}
+
+/// The keyboard display of the no-look row as the player sees it.
+fn keyboard_state(app: &App, ja: bool) -> &'static str {
+    match (app.config.session.blind, app.config.keyboard.show.as_str()) {
+        (true, _) if ja => "なし（補助なし）",
+        (true, _) => "off (no assistance)",
+        (false, "hidden") if ja => "非表示",
+        (false, "hidden") => "hidden",
+        (false, "auto") if ja => "だんだん消える",
+        (false, "auto") => "fading out",
+        (false, _) if ja => "表示中",
+        (false, _) => "shown",
+    }
 }
 
 fn tone_color(tone: Tone, theme: &Theme) -> Color {
@@ -147,6 +199,62 @@ fn meter_text(goal: &LiveGoal, measure: &GoalMeasure, elapsed: Duration, lang: L
                 None => "1st: set the mark".to_owned(),
             },
         },
+        GoalKind::Recovery => MeterText {
+            label: if ja { "誤打後の余分" } else { "After-error excess" }.to_owned(),
+            value: value.map_or_else(|| "--- ms".to_owned(), |value| format!("{value:+.0} ms")),
+            target: median_text(goal.target.map(|median| format!("{median:+.0} ms")), ja),
+        },
+        GoalKind::Blind => MeterText {
+            label: if ja { "正確さ" } else { "Accuracy" }.to_owned(),
+            value: value.map_or_else(|| "--.-%".to_owned(), percent),
+            target: median_text(goal.target.map(percent), ja),
+        },
+        GoalKind::Preview => MeterText {
+            label: if ja { "語頭の遅れ" } else { "Word onset" }.to_owned(),
+            value: value.map_or_else(|| "-.--".to_owned(), |value| format!("{value:.2}")),
+            target: median_text(goal.target.map(|median| format!("{median:.2}")), ja),
+        },
+        GoalKind::Overlap => MeterText {
+            label: if ja { "ロールオーバー" } else { "Rollover" }.to_owned(),
+            value: value.map_or_else(|| "--%".to_owned(), |value| format!("{value:.0}%")),
+            target: median_text(goal.target.map(|median| format!("{median:.0}%")), ja),
+        },
+        GoalKind::Spelling => MeterText {
+            label: if ja { "綴りの使用率" } else { "Spelling use" }.to_owned(),
+            value: value.map_or_else(|| "--%".to_owned(), |value| format!("{:.0}%", value * 100.0)),
+            target: match (goal.spelling.as_ref(), goal.target) {
+                (None, _) if ja => "勧める綴りなし".to_owned(),
+                (None, _) => "no suggestion".to_owned(),
+                (Some(_), Some(threshold)) if ja => format!("{:.0}% 以上", threshold * 100.0),
+                (Some(_), Some(threshold)) => format!("{:.0}%+", threshold * 100.0),
+                (Some(_), None) => String::new(),
+            },
+        },
+        GoalKind::WeakTransition => MeterText {
+            label: if ja { "対象遷移" } else { "Targets" }.to_owned(),
+            value: value.map_or_else(|| "--- ms".to_owned(), |value| format!("{value:.0} ms")),
+            target: match goal.line(measure) {
+                Some(line) if ja => format!("基準 {line:.0} ms"),
+                Some(line) => format!("estimate {line:.0} ms"),
+                None if ja => "基準なし".to_owned(),
+                None => "no estimate".to_owned(),
+            },
+        },
+        GoalKind::Reach => MeterText {
+            label: if ja { "遠い段/ホーム" } else { "Far/home IKI" }.to_owned(),
+            value: value.map_or_else(|| "-.--".to_owned(), |value| format!("{value:.2}")),
+            target: median_text(goal.target.map(|median| format!("{median:.2}")), ja),
+        },
+    }
+}
+
+/// «中央値 x» / «median x», or the missing baseline.
+fn median_text(median: Option<String>, ja: bool) -> String {
+    match median {
+        Some(median) if ja => format!("中央値 {median}"),
+        Some(median) => format!("median {median}"),
+        None if ja => "基準なし".to_owned(),
+        None => "no baseline".to_owned(),
     }
 }
 
@@ -217,7 +325,7 @@ pub fn render_meter(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         &text,
         value,
         goal.meter_range(measure),
-        goal.target,
+        goal.line(measure),
         tone,
         usize::from(area.width.saturating_sub(2)),
         theme,
@@ -393,6 +501,193 @@ pub fn render_note(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 spans.push(Span::styled(if ja { "    ★ 最速ペース!" } else { "    ★ Fastest pace!" }, flash));
             }
         }
+        GoalKind::Recovery => {
+            let errors = measure.errors;
+            match measure.last_recovery_ms {
+                Some(extra) => {
+                    let style = if state.event_flash(game.elapsed) {
+                        flash
+                    } else {
+                        Style::default().fg(theme.accent)
+                    };
+                    spans.push(Span::styled(
+                        if ja {
+                            format!("復帰 {:+.2} s", extra / 1_000.0)
+                        } else {
+                            format!("Recovery {:+.2} s", extra / 1_000.0)
+                        },
+                        style,
+                    ));
+                    spans.push(Span::styled(
+                        if ja {
+                            format!("    誤打 {errors}（測れた {}）", measure.recoveries)
+                        } else {
+                            format!("    Errors {errors} ({} measured)", measure.recoveries)
+                        },
+                        muted,
+                    ));
+                }
+                None => spans.push(Span::styled(
+                    if ja {
+                        format!("誤打 {errors}    誤打のあと元の速さへ戻るまでを測ります")
+                    } else {
+                        format!("Errors {errors}    timing the way back to your pace after an error")
+                    },
+                    muted,
+                )),
+            }
+        }
+        GoalKind::Blind => {
+            spans.push(Span::styled(if ja { "キーボード表示: " } else { "Keyboard: " }, muted));
+            spans.push(Span::styled(
+                keyboard_state(app, ja),
+                Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::styled(
+                if ja {
+                    format!("    連続 {} 打    誤打 {mistypes}", measure.streak)
+                } else {
+                    format!("    Streak {}    Errors {mistypes}", measure.streak)
+                },
+                muted,
+            ));
+            if state.record_flash(game.elapsed) {
+                spans.push(Span::styled(
+                    if ja {
+                        "    ★ 連続記録更新!"
+                    } else {
+                        "    ★ New longest streak!"
+                    },
+                    flash,
+                ));
+            }
+        }
+        GoalKind::Preview => {
+            spans.push(Span::styled(if ja { "止まらず " } else { "No-stop run " }, muted));
+            spans.push(Span::styled(
+                format!("{}", measure.onset_run),
+                Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::styled(
+                if ja {
+                    format!(" 語（最長 {}）    語頭 {}", measure.longest_onset_run, measure.words_started)
+                } else {
+                    format!(" words (longest {})    Word starts {}", measure.longest_onset_run, measure.words_started)
+                },
+                muted,
+            ));
+            if state.record_flash(game.elapsed) {
+                spans.push(Span::styled(if ja { "    ★ 最長更新!" } else { "    ★ Longest run!" }, flash));
+            }
+        }
+        GoalKind::Overlap => {
+            spans.push(Span::styled(
+                if !app.release_events_supported {
+                    if ja {
+                        "キーを離した時刻が取れない端末です（計測できません）".to_owned()
+                    } else {
+                        "This terminal does not report key releases (cannot measure)".to_owned()
+                    }
+                } else if ja {
+                    format!(
+                        "重なった打鍵 {} / {} 組    誤打 {mistypes}",
+                        measure.overlap_pairs, measure.comparable_pairs
+                    )
+                } else {
+                    format!(
+                        "Overlapping pairs {} / {}    Errors {mistypes}",
+                        measure.overlap_pairs, measure.comparable_pairs
+                    )
+                },
+                muted,
+            ));
+        }
+        GoalKind::Spelling => match goal.spelling.as_ref() {
+            Some(target) => {
+                spans.push(Span::styled(
+                    target.label(),
+                    Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::styled(
+                    if ja {
+                        format!("    使用 {} / {} 回", measure.spelling_used, measure.spelling_total)
+                    } else {
+                        format!("    used {} of {}", measure.spelling_used, measure.spelling_total)
+                    },
+                    muted,
+                ));
+            }
+            None => spans.push(Span::styled(
+                if ja {
+                    "勧める綴りがまだありません（日本語の記録が足りません）"
+                } else {
+                    "No suggested spelling yet (not enough Japanese sessions)"
+                },
+                muted,
+            )),
+        },
+        GoalKind::WeakTransition => match measure.last_hit.as_ref() {
+            Some(hit) => {
+                let faster = hit.prior_ms.map(|prior| hit.ms <= prior);
+                let color = match faster {
+                    Some(true) => theme.correct,
+                    Some(false) => theme.mistype,
+                    None => theme.accent,
+                };
+                let mut style = Style::default().fg(color);
+                if state.event_flash(game.elapsed) {
+                    style = style.add_modifier(Modifier::BOLD);
+                }
+                let verdict = match (faster, ja) {
+                    (Some(true), true) => " 速い ▲",
+                    (Some(false), true) => " 遅い ▼",
+                    (Some(true), false) => " faster ▲",
+                    (Some(false), false) => " slower ▼",
+                    (None, _) => "",
+                };
+                spans.push(Span::styled(format!("{} {:.0} ms{verdict}", hit.label, hit.ms), style));
+                if let Some(prior) = hit.prior_ms {
+                    spans.push(Span::styled(
+                        if ja {
+                            format!("（基準 {prior:.0}）")
+                        } else {
+                            format!(" (estimate {prior:.0})")
+                        },
+                        muted,
+                    ));
+                }
+                spans.push(Span::styled(
+                    if ja {
+                        format!("    対象 {} 回", measure.transition_hits)
+                    } else {
+                        format!("    Targets typed {}", measure.transition_hits)
+                    },
+                    muted,
+                ));
+            }
+            None => {
+                let labels = goal.transitions.iter().map(|transition| transition.label()).collect::<Vec<_>>().join(" ");
+                spans.push(Span::styled(
+                    match (labels.is_empty(), ja) {
+                        (true, true) => "対象の遷移がありません".to_owned(),
+                        (true, false) => "No target transitions".to_owned(),
+                        (false, true) => format!("対象: {labels}"),
+                        (false, false) => format!("Targets: {labels}"),
+                    },
+                    muted,
+                ));
+            }
+        },
+        GoalKind::Reach => {
+            spans.push(Span::styled(
+                if ja {
+                    format!("遠い段（数字・上・下）の間隔をホーム段と比べます    誤打 {mistypes}")
+                } else {
+                    format!("Remote rows (number, top, bottom) against the home row    Errors {mistypes}")
+                },
+                muted,
+            ));
+        }
     }
     frame.render_widget(Paragraph::new(Line::from(spans)).alignment(Alignment::Center), area);
 }
@@ -408,6 +703,9 @@ pub struct GoalReport {
     pub details: Vec<Line<'static>>,
     /// Full-width lines under it (time line, histogram, sprint bars).
     pub chart: Vec<Line<'static>>,
+    /// The cell's earlier values and this one, oldest first (a table cell;
+    /// empty for a menu step). The image card draws them as a sparkline.
+    pub recent: Vec<f64>,
 }
 
 impl GoalReport {
@@ -429,6 +727,125 @@ fn verdict_line(met: Option<bool>, yes: String, no: String, unknown: String, the
         )),
         None => Line::from(Span::styled(unknown, Style::default().fg(theme.muted))),
     }
+}
+
+/// What the result says about progress: «3 回連続: 2/3» for a menu step,
+/// the difference from the cell's previous session and personal best for a
+/// table cell.
+fn progress_lines(app: &App, goal: &LiveGoal, measure: &GoalMeasure, lang: Lang, theme: &Theme) -> Vec<Line<'static>> {
+    match goal.origin {
+        GoalOrigin::Menu => streak_line(app, lang, theme).into_iter().collect(),
+        GoalOrigin::Drill(_) => comparison_lines(goal, measure, lang, theme),
+    }
+}
+
+/// The value against the cell's previous session and its best one. ▲ is
+/// better and ▼ worse in the goal's own direction.
+pub fn comparison_lines(goal: &LiveGoal, measure: &GoalMeasure, lang: Lang, theme: &Theme) -> Vec<Line<'static>> {
+    let ja = lang == Lang::Ja;
+    let Some(value) = measure.value else {
+        return Vec::new();
+    };
+    let (Some(previous), Some(best)) = (goal.previous_value(), goal.best_value()) else {
+        return vec![muted(
+            if ja {
+                "この升目の初回です（比べる回はまだありません）".to_owned()
+            } else {
+                "First session of this cell (nothing to compare yet)".to_owned()
+            },
+            theme,
+        )];
+    };
+    let kind = goal.kind;
+    let change = |label: &str, other: f64| -> Line<'static> {
+        let (arrow, word, color) = if kind.better(value, other) {
+            ("▲", if ja { "改善" } else { "better" }, theme.correct)
+        } else if kind.better(other, value) {
+            ("▼", if ja { "後退" } else { "worse" }, theme.mistype)
+        } else {
+            ("＝", if ja { "同じ" } else { "same" }, theme.muted)
+        };
+        Line::from(vec![
+            Span::styled(format!("{label} {}  ", format_value(kind, other)), Style::default().fg(theme.fg)),
+            Span::styled(
+                format!("{arrow} {} {word}", format_delta(kind, value - other)),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
+        ])
+    };
+    let mut lines = vec![change(if ja { "前回" } else { "Previous" }, previous)];
+    if kind.better(value, best) {
+        lines.push(Line::from(Span::styled(
+            if ja {
+                format!("★ 自己ベスト更新（これまで {}）", format_value(kind, best))
+            } else {
+                format!("★ New personal best (was {})", format_value(kind, best))
+            },
+            Style::default().fg(theme.warning).add_modifier(Modifier::BOLD),
+        )));
+    } else {
+        lines.push(change(if ja { "自己ベスト" } else { "Best" }, best));
+    }
+    lines
+}
+
+/// The note that a check-step metric is judged there (menu steps only).
+fn judged_on_check(goal: &LiveGoal, ja: bool, theme: &Theme) -> Option<Line<'static>> {
+    (goal.origin == GoalOrigin::Menu).then(|| {
+        muted(
+            if ja {
+                "卒業の判定は確認段の値で行います".to_owned()
+            } else {
+                "Graduation is judged on the check step".to_owned()
+            },
+            theme,
+        )
+    })
+}
+
+/// The missing own median: a menu step lacks check steps, a table cell
+/// lacks both its own sessions and check steps.
+fn no_baseline(goal: &LiveGoal, ja: bool, theme: &Theme) -> Line<'static> {
+    muted(
+        match (goal.origin, ja) {
+            (GoalOrigin::Menu, true) => "基準なし（確認段の履歴が足りません）",
+            (GoalOrigin::Menu, false) => "No baseline yet (not enough check steps)",
+            (GoalOrigin::Drill(_), true) => "基準なし（この升目の記録も確認段もありません）",
+            (GoalOrigin::Drill(_), false) => "No baseline yet (no sessions of this cell or check steps)",
+        }
+        .to_owned(),
+        theme,
+    )
+}
+
+/// «自分の中央値 x 以下/以上» against the own median of an own-median row.
+fn median_verdict(goal: &LiveGoal, measure: &GoalMeasure, shown: String, unknown: &str, ja: bool, theme: &Theme) -> Line<'static> {
+    let source = match (goal.baseline_runs, ja) {
+        (Some(runs), true) => format!("（この升目の直近 {runs} 回）"),
+        (Some(runs), false) => format!(" (last {runs} of this cell)"),
+        (None, _) => String::new(),
+    };
+    let (good, bad) = match (goal.kind.direction(), ja) {
+        (Better::Lower, true) => ("以下", "を上回った"),
+        (Better::Lower, false) => ("At or below", "Above"),
+        (Better::Higher, true) => ("以上", "を下回った"),
+        (Better::Higher, false) => ("At or above", "Below"),
+    };
+    verdict_line(
+        measure.met,
+        if ja {
+            format!("自分の中央値 {shown}{source} {good}")
+        } else {
+            format!("{good} your median {shown}{source}")
+        },
+        if ja {
+            format!("自分の中央値 {shown}{source} {bad}")
+        } else {
+            format!("{bad} your median {shown}{source}")
+        },
+        unknown.to_owned(),
+        theme,
+    )
 }
 
 /// «3 回連続: 2/3» from the recorded progress of the step.
@@ -461,9 +878,14 @@ pub fn result_report(app: &App, width: u16, theme: &Theme) -> Option<GoalReport>
     let lang = app.config.general.lang;
     let ja = lang == Lang::Ja;
     let goal = &state.goal;
-    let step = app.daily_menu.as_ref()?.steps.get(app.menu_active_step?)?;
-    let level = step.level.map(|level| format!(" Lv{level}")).unwrap_or_default();
-    let title = format!(" {}{level} ", step.title);
+    let title = match goal.origin {
+        GoalOrigin::Menu => {
+            let step = app.daily_menu.as_ref()?.steps.get(app.menu_active_step?)?;
+            let level = step.level.map(|level| format!(" Lv{level}")).unwrap_or_default();
+            format!(" {}{level} ", step.title)
+        }
+        GoalOrigin::Drill(cell) => format!(" {} ", crate::ui::mode_select::cell_label(cell, lang)),
+    };
     let tone = goal.tone(measure);
     // The chart is drawn inside the headline's border and side margins.
     let chart_width = usize::from(width.saturating_sub(6));
@@ -491,7 +913,7 @@ pub fn result_report(app: &App, width: u16, theme: &Theme) -> Option<GoalReport>
                 },
                 theme,
             ));
-            details.extend(streak_line(app, lang, theme));
+            details.extend(progress_lines(app, goal, measure, lang, theme));
             details.push(plain(
                 if ja {
                     format!("最長の連続 {} 打", measure.longest_streak)
@@ -548,14 +970,7 @@ pub fn result_report(app: &App, width: u16, theme: &Theme) -> Option<GoalReport>
                     },
                     theme,
                 ),
-                None => muted(
-                    if ja {
-                        "基準なし（確認段の履歴が足りません）".to_owned()
-                    } else {
-                        "No baseline yet (not enough check steps)".to_owned()
-                    },
-                    theme,
-                ),
+                None => no_baseline(goal, ja, theme),
             });
             details.push(plain(
                 if ja {
@@ -565,14 +980,8 @@ pub fn result_report(app: &App, width: u16, theme: &Theme) -> Option<GoalReport>
                 },
                 theme,
             ));
-            details.push(muted(
-                if ja {
-                    "卒業の判定は確認段の値で行います".to_owned()
-                } else {
-                    "Graduation is judged on the check step".to_owned()
-                },
-                theme,
-            ));
+            details.extend(judged_on_check(goal, ja, theme));
+            details.extend(progress_lines(app, goal, measure, lang, theme));
             (
                 if ja { "先走りの割合" } else { "Anticipation share" },
                 measure.value.map_or_else(|| "--".to_owned(), |value| format!("{:.0}%", value * 100.0)),
@@ -599,14 +1008,7 @@ pub fn result_report(app: &App, width: u16, theme: &Theme) -> Option<GoalReport>
                     },
                     theme,
                 ),
-                None => muted(
-                    if ja {
-                        "基準なし（確認段の履歴が足りません）".to_owned()
-                    } else {
-                        "No baseline yet (not enough check steps)".to_owned()
-                    },
-                    theme,
-                ),
+                None => no_baseline(goal, ja, theme),
             });
             let mut sorted = measure.intervals.clone();
             sorted.sort_by(f64::total_cmp);
@@ -619,14 +1021,8 @@ pub fn result_report(app: &App, width: u16, theme: &Theme) -> Option<GoalReport>
                 },
                 theme,
             ));
-            details.push(muted(
-                if ja {
-                    "卒業の判定は確認段の値で行います".to_owned()
-                } else {
-                    "Graduation is judged on the check step".to_owned()
-                },
-                theme,
-            ));
+            details.extend(judged_on_check(goal, ja, theme));
+            details.extend(progress_lines(app, goal, measure, lang, theme));
             if !sorted.is_empty() {
                 const LEVELS: [&str; 9] = [" ", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
                 let high = (median_ms * 2.0).max(1.0);
@@ -703,7 +1099,7 @@ pub fn result_report(app: &App, width: u16, theme: &Theme) -> Option<GoalReport>
                 ),
                 theme,
             ));
-            details.extend(streak_line(app, lang, theme));
+            details.extend(progress_lines(app, goal, measure, lang, theme));
             (if ja { "速さ（WPM）" } else { "Speed (WPM)" }, format!("{:.1}", measure.net_wpm))
         }
         GoalKind::EnduranceSplit => {
@@ -752,7 +1148,7 @@ pub fn result_report(app: &App, width: u16, theme: &Theme) -> Option<GoalReport>
                 },
                 theme,
             ));
-            details.extend(streak_line(app, lang, theme));
+            details.extend(progress_lines(app, goal, measure, lang, theme));
             (
                 if ja { "後半の遅れ" } else { "Second-half slowdown" },
                 measure.value.map_or_else(|| "--".to_owned(), |value| format!("{:+.1}%", value * 100.0)),
@@ -777,14 +1173,18 @@ pub fn result_report(app: &App, width: u16, theme: &Theme) -> Option<GoalReport>
                 },
                 theme,
             ));
-            details.push(muted(
-                if ja {
-                    "最も速い 1 本を記録します".to_owned()
-                } else {
-                    "The fastest one is recorded".to_owned()
-                },
-                theme,
-            ));
+            if goal.origin == GoalOrigin::Menu {
+                details.push(muted(
+                    if ja {
+                        "最も速い 1 本を記録します".to_owned()
+                    } else {
+                        "The fastest one is recorded".to_owned()
+                    },
+                    theme,
+                ));
+            } else {
+                details.extend(progress_lines(app, goal, measure, lang, theme));
+            }
             let best_index = runs
                 .iter()
                 .enumerate()
@@ -813,6 +1213,291 @@ pub fn result_report(app: &App, width: u16, theme: &Theme) -> Option<GoalReport>
             }
             (if ja { "最速の 1 本（WPM）" } else { "Fastest sprint (WPM)" }, format!("{best:.1}"))
         }
+        GoalKind::Recovery => {
+            details.push(match goal.target {
+                Some(median) => median_verdict(
+                    goal,
+                    measure,
+                    format!("{median:+.0} ms"),
+                    if ja {
+                        "誤打が足りず測れません"
+                    } else {
+                        "Too few errors to measure"
+                    },
+                    ja,
+                    theme,
+                ),
+                None => no_baseline(goal, ja, theme),
+            });
+            details.push(plain(
+                if ja {
+                    format!("誤打 {}・復帰を測れた誤打 {}", measure.errors, measure.recoveries)
+                } else {
+                    format!("Errors {}, recovery measured for {}", measure.errors, measure.recoveries)
+                },
+                theme,
+            ));
+            details.extend(judged_on_check(goal, ja, theme));
+            details.extend(progress_lines(app, goal, measure, lang, theme));
+            (
+                if ja {
+                    "誤打後の余分な時間（ms）"
+                } else {
+                    "Excess after errors (ms)"
+                },
+                measure.value.map_or_else(|| "--".to_owned(), |value| format_value(goal.kind, value)),
+            )
+        }
+        GoalKind::Blind => {
+            details.push(match goal.target {
+                Some(median) => median_verdict(
+                    goal,
+                    measure,
+                    percent(median),
+                    if ja { "打鍵がありません" } else { "No keystrokes" },
+                    ja,
+                    theme,
+                ),
+                None => no_baseline(goal, ja, theme),
+            });
+            details.push(plain(
+                if ja {
+                    format!("キーボード表示: {}・最長の連続 {} 打", keyboard_state(app, ja), measure.longest_streak)
+                } else {
+                    format!("Keyboard: {}, longest streak {} keys", keyboard_state(app, ja), measure.longest_streak)
+                },
+                theme,
+            ));
+            details.extend(judged_on_check(goal, ja, theme));
+            details.extend(progress_lines(app, goal, measure, lang, theme));
+            (
+                if ja { "正確さ（見ないで）" } else { "Accuracy (no-look)" },
+                measure.value.map_or_else(|| "--".to_owned(), percent),
+            )
+        }
+        GoalKind::Preview => {
+            details.push(match goal.target {
+                Some(median) => median_verdict(
+                    goal,
+                    measure,
+                    format!("{median:.2}"),
+                    if ja {
+                        "語頭が足りず測れません"
+                    } else {
+                        "Too few word starts"
+                    },
+                    ja,
+                    theme,
+                ),
+                None => no_baseline(goal, ja, theme),
+            });
+            details.push(plain(
+                if ja {
+                    format!("語頭 {}・止まらず最長 {} 語", measure.words_started, measure.longest_onset_run)
+                } else {
+                    format!("{} word starts, longest no-stop run {}", measure.words_started, measure.longest_onset_run)
+                },
+                theme,
+            ));
+            details.extend(judged_on_check(goal, ja, theme));
+            details.extend(progress_lines(app, goal, measure, lang, theme));
+            (
+                if ja {
+                    "語頭の遅れ（語頭/語中）"
+                } else {
+                    "Word onset (start/inside)"
+                },
+                measure.value.map_or_else(|| "--".to_owned(), |value| format_value(goal.kind, value)),
+            )
+        }
+        GoalKind::Overlap => {
+            details.push(match goal.target {
+                Some(median) => median_verdict(
+                    goal,
+                    measure,
+                    format!("{median:.0}%"),
+                    if ja {
+                        "キーを離した時刻がなく測れません"
+                    } else {
+                        "No key releases to measure"
+                    },
+                    ja,
+                    theme,
+                ),
+                None => no_baseline(goal, ja, theme),
+            });
+            details.push(plain(
+                if measure.comparable_pairs == 0 {
+                    if ja {
+                        "キーを離した時刻が取れない端末です".to_owned()
+                    } else {
+                        "This terminal does not report key releases".to_owned()
+                    }
+                } else if ja {
+                    format!("重なった打鍵 {} / {} 組", measure.overlap_pairs, measure.comparable_pairs)
+                } else {
+                    format!("Overlapping pairs {} of {}", measure.overlap_pairs, measure.comparable_pairs)
+                },
+                theme,
+            ));
+            details.extend(judged_on_check(goal, ja, theme));
+            details.extend(progress_lines(app, goal, measure, lang, theme));
+            (
+                if ja { "ロールオーバー率" } else { "Rollover rate" },
+                measure.value.map_or_else(|| "--".to_owned(), |value| format_value(goal.kind, value)),
+            )
+        }
+        GoalKind::Spelling => {
+            let threshold = goal.target.unwrap_or(0.0) * 100.0;
+            details.push(match goal.spelling.as_ref() {
+                Some(_) => verdict_line(
+                    measure.met,
+                    if ja {
+                        format!("使用率 {threshold:.0}% 以上")
+                    } else {
+                        format!("Used {threshold:.0}% of the time or more")
+                    },
+                    if ja {
+                        format!("使用率 {threshold:.0}% に届かず")
+                    } else {
+                        format!("Below {threshold:.0}%")
+                    },
+                    if ja {
+                        "その仮名を打っていません".to_owned()
+                    } else {
+                        "The kana was not typed".to_owned()
+                    },
+                    theme,
+                ),
+                None => muted(
+                    if ja {
+                        "勧める綴りがまだありません".to_owned()
+                    } else {
+                        "No suggested spelling yet".to_owned()
+                    },
+                    theme,
+                ),
+            });
+            if let Some(target) = goal.spelling.as_ref() {
+                details.push(plain(
+                    if ja {
+                        format!("{}・使用 {} / {} 回", target.label(), measure.spelling_used, measure.spelling_total)
+                    } else {
+                        format!("{}, used {} of {}", target.label(), measure.spelling_used, measure.spelling_total)
+                    },
+                    theme,
+                ));
+            }
+            details.extend(judged_on_check(goal, ja, theme));
+            details.extend(progress_lines(app, goal, measure, lang, theme));
+            (
+                if ja { "勧めた綴りの使用率" } else { "Suggested spelling use" },
+                measure.value.map_or_else(|| "--".to_owned(), |value| format_value(goal.kind, value)),
+            )
+        }
+        GoalKind::WeakTransition => {
+            let line = goal.line(measure);
+            details.push(match line {
+                Some(line) => verdict_line(
+                    measure.met,
+                    if ja {
+                        format!("基準 {line:.0} ms より速い")
+                    } else {
+                        format!("Faster than the estimate {line:.0} ms")
+                    },
+                    if ja {
+                        format!("基準 {line:.0} ms より遅い")
+                    } else {
+                        format!("Slower than the estimate {line:.0} ms")
+                    },
+                    if ja {
+                        "対象の遷移を打っていません".to_owned()
+                    } else {
+                        "No target transition was typed".to_owned()
+                    },
+                    theme,
+                ),
+                None => muted(
+                    if ja {
+                        "基準なし（遷移の推定がありません）".to_owned()
+                    } else {
+                        "No estimate for the targets".to_owned()
+                    },
+                    theme,
+                ),
+            });
+            details.push(plain(
+                if ja {
+                    format!("対象 {} 種・{} 回", measure.transition_rows.len(), measure.transition_hits)
+                } else {
+                    format!("{} targets typed {} times", measure.transition_rows.len(), measure.transition_hits)
+                },
+                theme,
+            ));
+            details.extend(progress_lines(app, goal, measure, lang, theme));
+            for (label, median, prior, n) in measure.transition_rows.iter().take(5) {
+                let (mark, color) = match prior {
+                    Some(prior) if median <= prior => ("▲", theme.correct),
+                    Some(_) => ("▼", theme.mistype),
+                    None => (" ", theme.fg),
+                };
+                let prior = prior.map_or_else(String::new, |prior| {
+                    if ja {
+                        format!("（基準 {prior:.0}）")
+                    } else {
+                        format!(" (estimate {prior:.0})")
+                    }
+                });
+                chart.push(Line::from(vec![
+                    Span::styled(format!("{label:<4}"), Style::default().fg(theme.muted)),
+                    Span::styled(format!("{median:>5.0} ms {mark}"), Style::default().fg(color)),
+                    Span::styled(format!("{prior}  ×{n}"), Style::default().fg(theme.muted)),
+                ]));
+            }
+            (
+                if ja {
+                    "対象遷移の平均（ms）"
+                } else {
+                    "Target transitions (ms)"
+                },
+                measure.value.map_or_else(|| "--".to_owned(), |value| format_value(goal.kind, value)),
+            )
+        }
+        GoalKind::Reach => {
+            details.push(match goal.target {
+                Some(median) => median_verdict(
+                    goal,
+                    measure,
+                    format!("{median:.2}"),
+                    if ja {
+                        "遠い段かホーム段の打鍵が足りません"
+                    } else {
+                        "Too few keys on a remote or the home row"
+                    },
+                    ja,
+                    theme,
+                ),
+                None => no_baseline(goal, ja, theme),
+            });
+            details.extend(judged_on_check(goal, ja, theme));
+            details.extend(progress_lines(app, goal, measure, lang, theme));
+            (
+                if ja {
+                    "遠い段/ホーム段の IKI 比"
+                } else {
+                    "Remote/home-row IKI ratio"
+                },
+                measure.value.map_or_else(|| "--".to_owned(), |value| format_value(goal.kind, value)),
+            )
+        }
+    };
+    let recent = match goal.origin {
+        GoalOrigin::Drill(_) => {
+            let mut recent = goal.history[goal.history.len().saturating_sub(19)..].to_vec();
+            recent.extend(measure.value);
+            recent
+        }
+        GoalOrigin::Menu => Vec::new(),
     };
     Some(GoalReport {
         title,
@@ -821,6 +1506,7 @@ pub fn result_report(app: &App, width: u16, theme: &Theme) -> Option<GoalReport>
         tone,
         details,
         chart,
+        recent,
     })
 }
 
@@ -872,4 +1558,28 @@ pub fn render_report(frame: &mut Frame, report: &GoalReport, theme: &Theme, area
     let mut chart = report.chart.clone();
     chart.truncate(usize::from(rows[1].height));
     frame.render_widget(Paragraph::new(chart), crate::ui::left_inset(rows[1]));
+}
+
+/// The goal's headline as an image card for the image result layouts
+/// (MYTASK-3641): the label and the value drawn large in the tone colour,
+/// with the cell's recent values as a sparkline. The comparisons stay in
+/// the text beside it, where ▲ and ▼ follow the goal's direction.
+pub fn goal_card_spec(report: &GoalReport, lang: Lang, cells: ratatui::layout::Size, colors: ResultImageColors) -> MetricCardSpec {
+    let accent = match report.tone {
+        Tone::Good => colors.correct,
+        Tone::Warning => colors.warning,
+        Tone::Bad => colors.mistype,
+        Tone::Neutral => colors.accent,
+    };
+    MetricCardSpec {
+        label: report.label.clone(),
+        value: report.value.clone(),
+        previous_delta: None,
+        best_delta: None,
+        recent: report.recent.clone(),
+        lang,
+        delta_suffix: String::new(),
+        cells,
+        colors: ResultImageColors { accent, ..colors },
+    }
 }

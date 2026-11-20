@@ -1022,7 +1022,7 @@ fn every_mode_orders_keyboard_timer_metrics_prompt_and_footer() {
             let output = text(&terminal);
             let buffer = terminal.backend().buffer();
             let row_text = |y: u16| (0..width).map(|x| buffer[(x, y)].symbol()).collect::<String>();
-            let metrics_row = compact_row(&terminal, if lang == Lang::Ja { "連続正解" } else { "Combo" });
+            let metrics_row = compact_row(&terminal, common::metrics_phrase(&app, lang));
             let footer_row = compact_row(&terminal, if lang == Lang::Ja { "[ESC]中断" } else { "[ESC]Abort" });
             let timer_row = (0..height).find(|y| {
                 let row = row_text(*y).chars().filter(|character| !character.is_whitespace()).collect::<String>();

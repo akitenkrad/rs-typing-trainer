@@ -482,8 +482,8 @@ fn trend_labels_first_last_dates_and_value_range() {
     app.handle_key(key(KeyCode::Tab));
 
     let output = render(&app);
-    assert!(output.contains("2026-11-01"), "{output}");
-    assert!(output.contains("2026-11-03"), "{output}");
+    assert!(output.contains("2026/11/01"), "{output}");
+    assert!(output.contains("11/03"), "{output}");
     assert!(output.contains("30.0"), "{output}");
     assert!(output.contains("50.0"), "{output}");
 }

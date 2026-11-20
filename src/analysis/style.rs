@@ -96,16 +96,7 @@ pub fn diagnose_style(records: &[SessionRecord], model: &PlayerModel) -> TypingS
             }
         }
     }
-    let word_start = match (median(&mut starts), median(&mut internal)) {
-        (Some(start), Some(inside)) if inside > 0.0 => Some(WordStartMetric {
-            start_median_ms: start,
-            internal_median_ms: inside,
-            ratio: start / inside,
-            n: starts.len() as u64,
-            internal_n: internal.len() as u64,
-        }),
-        _ => None,
-    };
+    let word_start = word_start_of(&mut starts, &mut internal);
     let mut words = word_samples
         .into_iter()
         .filter(|(_, values)| values.len() >= 3)
@@ -127,7 +118,7 @@ pub fn diagnose_style(records: &[SessionRecord], model: &PlayerModel) -> TypingS
     TypingStyleDiagnosis {
         word_start,
         words,
-        rollover: rollover(records),
+        rollover: rollover_metric(records),
         rhythm: RhythmBreakdown {
             within_word_cv: coefficient_of_variation(&internal),
             between_word_cv: coefficient_of_variation(&between_words),
@@ -135,6 +126,48 @@ pub fn diagnose_style(records: &[SessionRecord], model: &PlayerModel) -> TypingS
             between_word_n: between_words.len() as u64,
         },
     }
+}
+
+/// The word-start metric from the word-start and within-word intervals.
+fn word_start_of(starts: &mut [f64], internal: &mut [f64]) -> Option<WordStartMetric> {
+    match (median(starts), median(internal)) {
+        (Some(start), Some(inside)) if inside > 0.0 => Some(WordStartMetric {
+            start_median_ms: start,
+            internal_median_ms: inside,
+            ratio: start / inside,
+            n: starts.len() as u64,
+            internal_n: internal.len() as u64,
+        }),
+        _ => None,
+    }
+}
+
+/// Word-start and within-word intervals (ms) of `records` in typing order:
+/// the intervals behind `word_start` of [`diagnose_style`] (MYTASK-3641).
+pub fn word_intervals_ms(records: &[SessionRecord]) -> (Vec<f64>, Vec<f64>) {
+    let mut starts = Vec::new();
+    let mut internal = Vec::new();
+    for record in records.iter().filter(|record| record.header.metrics_version > 0) {
+        for item in &record.log.items {
+            let (item_starts, item_internal) = item_intervals(&correct_chars(record, item.idx));
+            starts.extend(item_starts);
+            internal.extend(item_internal);
+        }
+    }
+    (starts, internal)
+}
+
+/// The word-start part of [`diagnose_style`] alone. It needs no player
+/// model, so a live display can follow it keystroke by keystroke
+/// (MYTASK-3641).
+pub fn word_start_metric(records: &[SessionRecord]) -> Option<WordStartMetric> {
+    let (starts, internal) = word_intervals_ms(records);
+    word_start_from(&starts, &internal)
+}
+
+/// The word-start metric of intervals from [`word_intervals_ms`].
+pub fn word_start_from(starts: &[f64], internal: &[f64]) -> Option<WordStartMetric> {
+    word_start_of(&mut starts.to_vec(), &mut internal.to_vec())
 }
 
 /// Word-start and within-word intervals (ms) of one item's correct
@@ -223,7 +256,9 @@ fn correct_chars(record: &SessionRecord, item_idx: u32) -> Vec<TimedChar<'_>> {
         .collect()
 }
 
-fn rollover(records: &[SessionRecord]) -> Option<RolloverMetric> {
+/// The rollover part of [`diagnose_style`]: overlapping key pairs among the
+/// pairs whose first key has a release time (MYTASK-3641 reads it live).
+pub fn rollover_metric(records: &[SessionRecord]) -> Option<RolloverMetric> {
     let mut comparable = 0_u64;
     let mut overlaps = Vec::new();
     for record in records

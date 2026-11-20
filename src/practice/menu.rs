@@ -183,6 +183,9 @@ pub enum MetricSource {
     HabitsAssistanceRemovable,
     PrescriptionVerdict,
     SessionNetWpm,
+    /// `analysis::japanese::spelling_usage` of the step's suggested spelling
+    /// (MYTASK-3641).
+    JapaneseSpellingUsage,
     Unavailable,
 }
 
@@ -235,8 +238,8 @@ impl MenuMetric {
             Self::AnticipationRate => MetricSource::ErrorDiagnosisAnticipationProportion,
             Self::PacerTargetReached => MetricSource::SessionPacerTargetAndAccuracy,
             Self::FarHomeIkiRatio => MetricSource::SkillAxisReach,
-            // Japanese analysis exposes suggestions, but not usage frequency.
-            Self::SpellingUsageRate => MetricSource::Unavailable,
+            // MYTASK-3641: the use of the step's suggested spelling.
+            Self::SpellingUsageRate => MetricSource::JapaneseSpellingUsage,
             Self::EnduranceSecondHalfSlowdown => MetricSource::EnduranceComparison,
             Self::BlindAssistanceRemovable => MetricSource::HabitsAssistanceRemovable,
             Self::PrescriptionR3 => MetricSource::PrescriptionVerdict,
@@ -2448,16 +2451,11 @@ pub fn build_from_storage(
             language.to_owned(),
             LanguageTargets {
                 transitions: target_transitions(&details, &corpus, practice, config, &excluded_controls),
-                spelling: diagnosis
-                    .japanese
-                    .spelling
-                    .iter()
-                    .find(|row| row.decision == SpellingDecision::Suggested)
-                    .map(|row| SpellingTarget {
-                        kana: row.kana.clone(),
-                        current: row.current.clone(),
-                        candidate: row.candidate.clone(),
-                    }),
+                spelling: crate::analysis::japanese::suggested_spelling(&diagnosis.japanese.spelling).map(|row| SpellingTarget {
+                    kana: row.kana.clone(),
+                    current: row.current.clone(),
+                    candidate: row.candidate.clone(),
+                }),
             },
         );
         let blind_assistance_removable =

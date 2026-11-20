@@ -111,11 +111,10 @@ fn catalog_rejects_unknown_setting_keys_and_wrong_value_types() {
 
 #[test]
 fn every_metric_declares_its_existing_analysis_source() {
+    // MYTASK-3641: the spelling-usage rate is measured by the Japanese
+    // analysis now, so no metric is unavailable.
     for metric in MenuMetric::all() {
-        if *metric == MenuMetric::SpellingUsageRate {
-            assert_eq!(metric.source(), MetricSource::Unavailable);
-        } else {
-            assert_ne!(metric.source(), MetricSource::Unavailable, "{metric:?}");
-        }
+        assert_ne!(metric.source(), MetricSource::Unavailable, "{metric:?}");
     }
+    assert_eq!(MenuMetric::SpellingUsageRate.source(), MetricSource::JapaneseSpellingUsage);
 }

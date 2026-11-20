@@ -115,7 +115,7 @@ pub fn record_step_completion(ctx: &JudgeContext<'_>, run_id: i64, index: usize,
         value: condition
             .as_ref()
             .filter(|condition| condition.metric != MenuMetric::BlindAssistanceRemovable)
-            .and_then(|condition| session_metric_value(ctx, condition.metric, record, language).ok().flatten()),
+            .and_then(|condition| step_metric_value(ctx, condition.metric, record, language, &step).ok().flatten()),
         advance_met: None,
         level_after: step.level,
     };
@@ -425,6 +425,30 @@ pub fn session_metric_value(ctx: &JudgeContext<'_>, metric: MenuMetric, record: 
     })
 }
 
+/// The value of `metric` for one session of `step`'s judgment. It is
+/// [`session_metric_value`] except for `spelling-usage-rate`, which needs the
+/// spelling the step suggested (`target.spelling`, MYTASK-3641): the share of
+/// that kana typed with the suggested spelling. A step without a suggestion,
+/// or a session that never typed the kana, has no value.
+pub fn step_metric_value(
+    ctx: &JudgeContext<'_>,
+    metric: MenuMetric,
+    record: &SessionRecord,
+    language: &str,
+    step: &MenuStep,
+) -> AppResult<Option<f64>> {
+    if metric == MenuMetric::SpellingUsageRate {
+        return Ok(spelling_usage_value(record, step));
+    }
+    session_metric_value(ctx, metric, record, language)
+}
+
+/// `spelling-usage-rate` of `record` for the spelling `step` suggests.
+pub fn spelling_usage_value(record: &SessionRecord, step: &MenuStep) -> Option<f64> {
+    let target = super::StepTargets::of(step).spelling?;
+    crate::analysis::japanese::spelling_usage(std::slice::from_ref(record), &target.kana, &target.candidate).rate()
+}
+
 /// Share of anticipation errors among first errors. With no first error the
 /// share is undefined (0/0) and therefore `None`; with first errors but no
 /// anticipation among them it is a measured 0.
@@ -541,7 +565,11 @@ fn judge_pairs(ctx: &JudgeContext<'_>, run_id: i64, menu: &DailyMenu, catalog: &
         // seven components, split at the prescription start below.
         let raw = raw_reference_series(ctx, &checks, basis, condition.metric, &step.prescription_id)?;
         let advance = if condition.source == AdvanceSource::Check && !is_r3 {
-            let value = checks.metric(ctx, condition.metric, current)?;
+            let value = if condition.metric == MenuMetric::SpellingUsageRate {
+                spelling_usage_value(&current.record, step)
+            } else {
+                checks.metric(ctx, condition.metric, current)?
+            };
             let own_median = if matches!(condition.rule, super::AdvanceRule::LeOwnMedian | super::AdvanceRule::GeOwnMedian) {
                 checks.previous_metric_median(ctx, condition.metric)?
             } else {

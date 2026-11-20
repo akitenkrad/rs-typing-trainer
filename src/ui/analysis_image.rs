@@ -1,6 +1,6 @@
 //! Pixel rendering and fixed-protocol caching for analysis badges and charts.
 
-use chrono::{DateTime, NaiveDate};
+use chrono::{DateTime, Datelike, NaiveDate, Weekday};
 use image::RgbaImage;
 use ratatui::layout::Size;
 use ratatui::style::Color;
@@ -217,6 +217,10 @@ pub struct TrendChartSpec {
     pub cells: Size,
     pub series: Vec<TrendSeries>,
     pub forecasts: Vec<TrendForecast>,
+    /// Dates of the x-axis ticks; a faint vertical grid line is drawn at each
+    /// (chosen by the screen together with the tick labels, see
+    /// [`trend_tick_candidates`]).
+    pub x_ticks: Vec<NaiveDate>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -360,6 +364,97 @@ impl TrendAxis {
     }
 }
 
+/// Width in columns of a tick label (`MM/DD`).
+pub const TREND_TICK_LABEL_WIDTH: u16 = 5;
+/// Columns a tick label needs: the label plus one blank column on each side.
+const TREND_TICK_SLOT: f64 = TREND_TICK_LABEL_WIDTH as f64 + 2.0;
+
+/// Interval between the trend tab's x-axis ticks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrendTickStep {
+    /// Every `n` days, counted from the start of the axis.
+    Days(u32),
+    /// Every Monday (`1`) or every other Monday (`2`).
+    Weeks(u32),
+    /// The first day of every `n`-th month (1, 3, 6 or 12, aligned to January).
+    Months(u32),
+}
+
+impl TrendTickStep {
+    const CANDIDATES: [Self; 8] = [
+        Self::Days(1),
+        Self::Days(2),
+        Self::Weeks(1),
+        Self::Weeks(2),
+        Self::Months(1),
+        Self::Months(3),
+        Self::Months(6),
+        Self::Months(12),
+    ];
+
+    /// Shortest distance, in days, between two ticks of this step.
+    fn min_days(self) -> f64 {
+        match self {
+            Self::Days(days) => f64::from(days),
+            Self::Weeks(weeks) => 7.0 * f64::from(weeks),
+            Self::Months(1) => 28.0,
+            Self::Months(months) => 30.0 * f64::from(months) - 3.0,
+        }
+    }
+
+    fn contains(self, date: NaiveDate, origin: NaiveDate) -> bool {
+        match self {
+            Self::Days(days) => (date - origin).num_days().rem_euclid(i64::from(days)) == 0,
+            Self::Weeks(weeks) => {
+                // Mondays; every other Monday counts weeks from a fixed Monday
+                // (1970-01-05) so that the ticks do not move with the range.
+                let epoch = NaiveDate::from_ymd_opt(1970, 1, 5).expect("valid epoch");
+                date.weekday() == Weekday::Mon && ((date - epoch).num_days() / 7).rem_euclid(i64::from(weeks)) == 0
+            }
+            Self::Months(months) => date.day() == 1 && (date.month0()).is_multiple_of(months),
+        }
+    }
+
+    /// The smallest step whose ticks are at least one label slot apart when a
+    /// day is `columns_per_day` columns wide, or `None` when even yearly ticks
+    /// would collide.
+    pub fn choose(columns_per_day: f64) -> Option<Self> {
+        Self::CANDIDATES
+            .into_iter()
+            .find(|step| step.min_days() * columns_per_day >= TREND_TICK_SLOT)
+    }
+}
+
+/// Tick dates for an x axis on which a day is `columns_per_day` columns wide:
+/// the dates of the smallest [`TrendTickStep`] whose labels fit, taken only
+/// inside the axis's segments (never inside a cut-out gap). The screen still
+/// drops the ticks whose labels would touch another label.
+pub fn trend_tick_candidates(axis: &TrendAxis, columns_per_day: f64) -> Vec<NaiveDate> {
+    let Some(step) = TrendTickStep::choose(columns_per_day) else {
+        return Vec::new();
+    };
+    let origin = axis.start();
+    axis.segments()
+        .iter()
+        .flat_map(|segment| {
+            segment
+                .start
+                .iter_days()
+                .take_while(move |date| *date <= segment.end)
+                .filter(move |date| step.contains(*date, origin))
+        })
+        .collect()
+}
+
+/// A date on the trend tab's x axis: `MM/DD`, or `YYYY/MM/DD` with the year.
+pub fn trend_date_label(date: NaiveDate, with_year: bool) -> String {
+    if with_year {
+        date.format("%Y/%m/%d").to_string()
+    } else {
+        date.format("%m/%d").to_string()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum AggregatedDate {
     Known(NaiveDate),
@@ -498,6 +593,7 @@ enum AnalysisImageKey {
         kind: MetricKind,
         cells: Size,
         x_range: Option<TrendAxis>,
+        x_ticks: Vec<NaiveDate>,
         series: Vec<SeriesKey>,
         forecasts: Vec<ForecastKey>,
     },
@@ -809,6 +905,7 @@ fn chart_key(spec: &TrendChartSpec, x_range: Option<TrendAxis>) -> AnalysisImage
         kind: spec.kind,
         cells: spec.cells,
         x_range,
+        x_ticks: spec.x_ticks.clone(),
         series: spec
             .series
             .iter()
@@ -1580,6 +1677,14 @@ fn render_trend_chart_with_optional_range(cell_pixels: CellPixels, spec: &TrendC
         let row = top + (bottom - top) * index as f32 / 3.0;
         stroke_line(&mut pixmap, (left, row), (right, row), GRID_COLOR, 55, 1.0, None);
     }
+    // Vertical grid lines at the ticks, as faint as the horizontal ones.
+    for &date in &spec.x_ticks {
+        // Centred on a pixel so that the 1-pixel line stays crisp.
+        let tx = x(date).floor() + 0.5;
+        if (left..=right).contains(&tx) {
+            stroke_line(&mut pixmap, (tx, top), (tx, bottom), GRID_COLOR, 55, 1.0, None);
+        }
+    }
 
     // Axis breaks: a faint dashed vertical line through the plot and a «≈»
     // drawn as two slanted strokes at the bottom edge.
@@ -1707,6 +1812,7 @@ pub fn build_trend_data(records: &[SessionRecord], kind: MetricKind, lang: Lang)
         cells: Size::new(1, 1),
         series,
         forecasts: Vec::new(),
+        x_ticks: Vec::new(),
     })
 }
 
@@ -1746,13 +1852,14 @@ fn aggregate_trend(records: &[SessionRecord], kind: MetricKind, lang: Lang) -> B
         let date = DateTime::parse_from_rfc3339(&record.header.finished_at)
             .map(|value| AggregatedDate::Known(value.date_naive()))
             .unwrap_or(AggregatedDate::Unknown);
-        let series = record
-            .header
-            .bench_id
-            .as_deref()
-            .and_then(parse_bench_id)
-            .map(|(bench_series, part, _)| format!("{bench_series}-{}", part.as_str()))
-            .unwrap_or_else(|| mode_label(&record.header.mode, lang));
+        // Every benchmark run — any version, any part — is one «bench» series;
+        // the day's point is the median over all of that day's parts.
+        let is_bench = record.header.bench_id.as_deref().and_then(parse_bench_id).is_some();
+        let series = if is_bench {
+            mode_label("bench", lang)
+        } else {
+            mode_label(&record.header.mode, lang)
+        };
         groups
             .entry(series)
             .or_default()
