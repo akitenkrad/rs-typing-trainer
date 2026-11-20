@@ -24,13 +24,18 @@ pub enum Availability {
     Unavailable,
 }
 
-/// The availability of every cell, as agreed for MYTASK-3638.
+/// The availability of every cell, as agreed for MYTASK-3638 (and the four
+/// rows MYTASK-3640 added for the menu's prescriptions). Spelling is
+/// Japanese only; see [`is_available_in`].
 pub fn availability(cell: DrillCell) -> Availability {
     use Availability::{Existing, Extended, Unavailable};
     use DrillSkill as S;
     use PromptUnit as U;
     match (cell.skill, cell.unit) {
         (S::Normal | S::Accuracy | S::Speed | S::Recovery | S::Blind, _) => Existing,
+        // MYTASK-3640: anticipation, look-ahead, rollover and spelling need
+        // text that reads on: words, phrases, sentences and passages.
+        (S::Anticipation | S::Preview | S::Overlap | S::Spelling, U::Word | U::Phrase | U::Sentence | U::Passage) => Existing,
         (S::Weak, U::Ngram | U::Word) => Existing,
         (S::Weak, U::Phrase | U::Sentence) => Extended,
         (S::Rhythm, U::Word) => Existing,
@@ -48,15 +53,44 @@ pub fn is_available(cell: DrillCell) -> bool {
     availability(cell) != Availability::Unavailable
 }
 
+/// Whether a cell can be started in a practice language: the spelling row
+/// practices romaji, so it is Japanese only.
+pub fn is_available_in(cell: DrillCell, lang: Lang) -> bool {
+    is_available(cell) && !(cell.skill == DrillSkill::Spelling && lang == Lang::En)
+}
+
+/// Rows whose cells run the plain mode of their unit and differ only in the
+/// settings of their catalog prescription.
+pub fn is_setting_row(skill: DrillSkill) -> bool {
+    matches!(
+        skill,
+        DrillSkill::Normal
+            | DrillSkill::Accuracy
+            | DrillSkill::Speed
+            | DrillSkill::Recovery
+            | DrillSkill::Blind
+            | DrillSkill::Anticipation
+            | DrillSkill::Preview
+            | DrillSkill::Overlap
+            | DrillSkill::Spelling
+    )
+}
+
 /// The mode a cell runs and records (`sessions.mode`). Cells that existed
 /// before the table record the same mode as before; new cells record the
 /// mode of their skill, and the prompt unit goes to `mode_params`.
 pub fn mode_for(cell: DrillCell, lang: Lang) -> Option<ModeKind> {
-    if !is_available(cell) {
+    if !is_available_in(cell, lang) {
         return None;
     }
     Some(match cell.skill {
-        DrillSkill::Normal | DrillSkill::Accuracy | DrillSkill::Speed | DrillSkill::Recovery | DrillSkill::Blind => match cell.unit {
+        DrillSkill::Weak => ModeKind::Adaptive,
+        DrillSkill::Rhythm => ModeKind::Rhythm,
+        DrillSkill::Burst => ModeKind::Burst,
+        DrillSkill::Endurance => ModeKind::Endurance,
+        DrillSkill::Unlock => ModeKind::Unlock,
+        // The setting rows run the plain mode of their unit.
+        _ => match cell.unit {
             PromptUnit::Char => ModeKind::Random,
             PromptUnit::Ngram => ModeKind::Ngram,
             PromptUnit::Word if lang == Lang::Ja => ModeKind::Romaji,
@@ -64,12 +98,20 @@ pub fn mode_for(cell: DrillCell, lang: Lang) -> Option<ModeKind> {
             PromptUnit::Phrase => ModeKind::Phrase,
             PromptUnit::Sentence | PromptUnit::Passage => ModeKind::Sentence,
         },
-        DrillSkill::Weak => ModeKind::Adaptive,
-        DrillSkill::Rhythm => ModeKind::Rhythm,
-        DrillSkill::Burst => ModeKind::Burst,
-        DrillSkill::Endurance => ModeKind::Endurance,
-        DrillSkill::Unlock => ModeKind::Unlock,
     })
+}
+
+/// Whether a menu step of mode `kind` in `lang` runs the cell's own mode, so
+/// that it can start the way the cell does (MYTASK-3640). The word cells of
+/// the setting rows run `romaji` in Japanese on the table, while a menu step
+/// keeps recording `words` and is fed the same Japanese words; both count as
+/// the cell's mode. Any other mode is a level that overrides the cell's mode.
+pub fn runs_as(cell: DrillCell, kind: ModeKind, lang: Lang) -> bool {
+    match mode_for(cell, lang) {
+        Some(mode) if mode == kind => true,
+        Some(ModeKind::Romaji) => kind == ModeKind::Words && cell.unit == PromptUnit::Word,
+        _ => false,
+    }
 }
 
 /// Whether the practice language changes the prompts of a cell. Random
@@ -86,6 +128,10 @@ pub fn catalog_prescription(skill: DrillSkill) -> Option<&'static str> {
         DrillSkill::Speed => Some("speed.pacer"),
         DrillSkill::Recovery => Some("recovery.retry"),
         DrillSkill::Blind => Some("blind.fade"),
+        DrillSkill::Anticipation => Some("accuracy.anticipation"),
+        DrillSkill::Preview => Some("preview.wide"),
+        DrillSkill::Overlap => Some("overlap.burst"),
+        DrillSkill::Spelling => Some("japanese.spelling"),
         _ => None,
     }
 }
@@ -124,12 +170,34 @@ pub fn config_for_cell(base: &Config, cell: DrillCell, lang: Lang) -> Result<Con
     let kind = mode_for(cell, lang).ok_or_else(|| format!("{} × {} cannot be played", cell.skill.as_str(), cell.unit.as_str()))?;
     let settings = cell_settings(cell)?;
     let mut config = crate::practice::menu::config_for_step(base, kind.as_str(), &settings)?;
+    apply_cell_prompts(&mut config, cell, lang);
+    Ok(config)
+}
+
+/// How a cell makes its prompts: the language of the per-mode language
+/// settings and the cell itself (`mode.drill`, whose unit the prompt
+/// generator follows). The table and today's menu (MYTASK-3640) both start a
+/// cell through this.
+pub fn apply_cell_prompts(config: &mut Config, cell: DrillCell, lang: Lang) {
     let code = language_code(if uses_language(cell) { lang } else { Lang::En }).to_owned();
     config.adaptive.lang.clone_from(&code);
     config.mode.phrase.lang.clone_from(&code);
     config.mode.sentence.lang = code;
     config.mode.drill = Some(cell);
-    Ok(config)
+}
+
+/// The cell a mode belongs to when nothing names one: the row of its own
+/// skill, or the plain row, with the mode's own unit.
+pub fn cell_for_mode(kind: ModeKind) -> DrillCell {
+    let skill = match kind {
+        ModeKind::Adaptive => DrillSkill::Weak,
+        ModeKind::Rhythm => DrillSkill::Rhythm,
+        ModeKind::Burst => DrillSkill::Burst,
+        ModeKind::Endurance => DrillSkill::Endurance,
+        ModeKind::Unlock => DrillSkill::Unlock,
+        _ => DrillSkill::Normal,
+    };
+    DrillCell::new(skill, PromptUnit::natural(kind))
 }
 
 /// The cell the table opens on: the saved cell, or the one matching the
@@ -141,16 +209,7 @@ pub fn initial_cell(config: &Config) -> DrillCell {
             return cell;
         }
     }
-    let kind = config.mode.kind;
-    let skill = match kind {
-        ModeKind::Adaptive => DrillSkill::Weak,
-        ModeKind::Rhythm => DrillSkill::Rhythm,
-        ModeKind::Burst => DrillSkill::Burst,
-        ModeKind::Endurance => DrillSkill::Endurance,
-        ModeKind::Unlock => DrillSkill::Unlock,
-        _ => DrillSkill::Normal,
-    };
-    DrillCell::new(skill, PromptUnit::natural(kind))
+    cell_for_mode(config.mode.kind)
 }
 
 /// The practice language the table opens with: the saved one, or the
@@ -179,12 +238,7 @@ pub fn requires_keys(cell: DrillCell) -> bool {
 /// `words` and `romaji` always did: combinations, and the word cells of the
 /// setting-based rows. Random letters open it only while no key is chosen.
 pub fn uses_key_picker(cell: DrillCell) -> bool {
-    (cell.unit == PromptUnit::Ngram && requires_keys(cell))
-        || (cell.unit == PromptUnit::Word
-            && matches!(
-                cell.skill,
-                DrillSkill::Normal | DrillSkill::Accuracy | DrillSkill::Speed | DrillSkill::Recovery | DrillSkill::Blind
-            ))
+    (cell.unit == PromptUnit::Ngram && requires_keys(cell)) || (cell.unit == PromptUnit::Word && is_setting_row(cell.skill))
 }
 
 /// Items in one burst sprint: `burst.words` words, or the same distance in

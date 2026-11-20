@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::analysis::errors::ErrorKind;
 use crate::analysis::grades::{Component, Direction, LanguageGrade, Level, ranked_components};
-use crate::config::{Config, MenuConfig, ModeKind};
+use crate::config::{Config, DrillCell, MenuConfig, ModeKind};
 use crate::i18n::Lang;
 
 pub mod live_goal;
@@ -314,6 +314,12 @@ pub struct AdvanceCondition {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PrescriptionLevel {
+    /// The cell of the individual-training table this level plays
+    /// (MYTASK-3640): the skill row and what the prompts are made of. When
+    /// `mode` is not the cell's own mode, the level overrides it (see
+    /// [`crate::practice::drill::runs_as`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cell: Option<DrillCell>,
     pub mode: String,
     /// Minutes of the step (§4.2, MYTASK-3619: the level's minutes are
     /// authoritative). `0` means "not given": the step then takes the frame
@@ -384,6 +390,10 @@ pub struct FixedStep {
     pub role: MenuRole,
     pub id: String,
     pub title: LocalizedText,
+    /// The cell of the individual-training table this step plays
+    /// (MYTASK-3640).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cell: Option<DrillCell>,
     pub mode: String,
     pub minutes: u8,
     #[serde(default)]
@@ -414,6 +424,7 @@ impl MenuCatalog {
                 return Err(format!("invalid fixed-step role for {}", step.id));
             }
             validate_mode(&step.mode, &step.id)?;
+            validate_cell(step.cell, &step.id)?;
             validate_settings(&step.settings, &step.id)?;
             validate_step_minutes(&step.mode, i64::from(step.minutes), &step.id)?;
             step.title.validate(&format!("{}.title", step.id))?;
@@ -431,6 +442,7 @@ impl MenuCatalog {
             for (index, level) in row.levels.iter().enumerate() {
                 let owner = format!("{} level {}", row.id, index + 1);
                 validate_mode(&level.mode, &owner)?;
+                validate_cell(level.cell, &owner)?;
                 validate_settings(&level.settings, &owner)?;
                 level.focus.validate(&format!("{owner}.focus"))?;
                 level.advance.note.validate(&format!("{owner}.advance.note"))?;
@@ -504,6 +516,18 @@ fn validate_mode(mode: &str, owner: &str) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("unknown mode {mode:?} in {owner}"))
+    }
+}
+
+/// A catalog cell must be one the table can start (MYTASK-3640).
+fn validate_cell(cell: Option<DrillCell>, owner: &str) -> Result<(), String> {
+    match cell {
+        Some(cell) if !crate::practice::drill::is_available(cell) => Err(format!(
+            "cell {} × {} in {owner} cannot be played",
+            cell.skill.as_str(),
+            cell.unit.as_str()
+        )),
+        _ => Ok(()),
     }
 }
 
@@ -601,18 +625,55 @@ pub fn config_for_step(base: &Config, mode: &str, settings: &BTreeMap<String, to
     Ok(config)
 }
 
+/// The in-memory configuration of a menu step. The level's mode and settings
+/// are applied as before (the step records the same mode and settings), in
+/// the step's language. A step that runs its cell's mode then makes its
+/// prompts the way the cell does on the individual-training table
+/// (MYTASK-3640, [`crate::practice::drill::apply_cell_prompts`]); a level
+/// that overrides the cell's mode keeps the prompts of its own mode.
 pub fn config_for_menu_step(base: &Config, step: &MenuStep) -> Result<Config, String> {
     let mut config = config_for_step(base, &step.mode, &step.settings)?;
     let language = language_code(step.language).to_owned();
     config.adaptive.lang.clone_from(&language);
     config.mode.sentence.lang.clone_from(&language);
     config.mode.phrase.lang = language;
+    if let Some(cell) = step_cell(step).filter(|cell| step_runs_cell_mode(step, *cell)) {
+        // Every cell a menu step runs this way follows the practice language
+        // (`uses_language`), so the step's language stays.
+        crate::practice::drill::apply_cell_prompts(&mut config, cell, step.language);
+    }
     // §4.2 (MYTASK-3619): the endurance mode's own duration follows the step
     // time, so the halves it compares match the session that was played.
     if config.mode.kind == ModeKind::Endurance && (3..=5).contains(&u64::from(step.minutes)) {
         config.endurance.minutes = u64::from(step.minutes);
     }
     Ok(config)
+}
+
+/// The cell of the individual-training table a menu step plays
+/// (MYTASK-3640): the catalog's `cell` of its fixed step or level. A step
+/// whose catalog entry names no cell (or a stored plan of an unknown entry)
+/// gets the cell of its mode ([`crate::practice::drill::cell_for_mode`]).
+pub fn step_cell(step: &MenuStep) -> Option<DrillCell> {
+    let named = bundled_catalog()
+        .ok()
+        .and_then(|catalog| catalog_cell(catalog, &step.prescription_id, step.level));
+    named.or_else(|| mode_kind(&step.mode).map(crate::practice::drill::cell_for_mode))
+}
+
+/// The catalog's cell of a fixed step (`level = None`) or of a level of a
+/// prescription.
+pub fn catalog_cell(catalog: &MenuCatalog, id: &str, level: Option<u8>) -> Option<DrillCell> {
+    match level {
+        None => catalog.fixed_steps.iter().find(|step| step.id == id)?.cell,
+        Some(level) => catalog.prescription(id)?.levels.get(usize::from(level).checked_sub(1)?)?.cell,
+    }
+}
+
+/// Whether a menu step runs the mode of its cell (and so starts the way the
+/// cell does), or its level overrides the cell's mode (MYTASK-3640).
+pub fn step_runs_cell_mode(step: &MenuStep, cell: DrillCell) -> bool {
+    mode_kind(&step.mode).is_some_and(|kind| crate::practice::drill::runs_as(cell, kind, step.language))
 }
 
 /// The mode the prompt generator runs for a menu step. A Japanese step of a

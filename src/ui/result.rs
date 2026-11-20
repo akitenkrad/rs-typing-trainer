@@ -70,10 +70,16 @@ pub fn render(frame: &mut Frame, app: &App) {
         ResultOrigin::JustPlayed => Msg::GameResultTitle,
         ResultOrigin::History => Msg::HistoryDetailTitle,
     };
-    let outer = Block::default()
-        .borders(Borders::ALL)
-        .title(format!(" {} ", title.text(lang)))
-        .style(Style::default().fg(theme.fg));
+    // MYTASK-3640: a menu step's result names the cell it played.
+    let cell = (app.result_origin == ResultOrigin::JustPlayed)
+        .then(|| app.daily_menu.as_ref()?.steps.get(app.menu_active_step?))
+        .flatten()
+        .and_then(|step| crate::ui::menu::step_cell_label(step, lang));
+    let title = match cell {
+        Some(cell) => format!(" {} · {cell} ", title.text(lang)),
+        None => format!(" {} ", title.text(lang)),
+    };
+    let outer = Block::default().borders(Borders::ALL).title(title).style(Style::default().fg(theme.fg));
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
 
@@ -405,7 +411,8 @@ fn render_image_result(frame: &mut Frame, app: &App, result: &GameResult, theme:
             Lang::En => " Keystroke speed by item ",
             Lang::Ja => " 打鍵速度の推移 ",
         })
-        .style(Style::default().fg(theme.muted));
+        .style(Style::default().fg(theme.muted))
+        .title_style(Style::default().fg(theme.fg).add_modifier(Modifier::BOLD));
     frame.render_widget(speed_block, middle[0]);
     if speed.points.len() < 2 {
         frame.render_widget(
@@ -427,7 +434,8 @@ fn render_image_result(frame: &mut Frame, app: &App, result: &GameResult, theme:
     let reaction_block = Block::default()
         .borders(Borders::ALL)
         .title(format!(" {} ", Msg::ReactionTimeDistribution.text(lang).trim_end_matches(':')))
-        .style(Style::default().fg(theme.muted));
+        .style(Style::default().fg(theme.muted))
+        .title_style(Style::default().fg(theme.fg).add_modifier(Modifier::BOLD));
     frame.render_widget(reaction_block, middle[1]);
     {
         let mut images = app.result_images.borrow_mut();
@@ -550,7 +558,8 @@ fn render_image_keyboard(
     let block = Block::default()
         .borders(Borders::ALL)
         .title(title)
-        .style(Style::default().fg(theme.muted));
+        .style(Style::default().fg(theme.muted))
+        .title_style(Style::default().fg(theme.fg).add_modifier(Modifier::BOLD));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let Some((spec, _, _)) = keyboard else {
@@ -887,16 +896,21 @@ fn menu_result_line(app: &App, lang: Lang, width: usize) -> Option<String> {
     let total = app.daily_menu.as_ref().map_or(0, |menu| menu.steps.len());
     let position = app.menu_active_step.map_or(0, |index| index + 1);
     let level = step.level.map(menu_level_mark).unwrap_or_default();
-    let step_label = match lang {
-        Lang::En => format!("Menu {position}/{total} {}{level} — ", step.title),
-        Lang::Ja => format!("メニュー {position}/{total} {}{level} — ", step.title),
+    // MYTASK-3640: the cell of the individual-training table goes first; on
+    // a narrow window it stays alone, and last it goes too.
+    let cell = crate::ui::menu::step_cell_label(step, lang);
+    let full = match (lang, cell.as_deref()) {
+        (Lang::En, Some(cell)) => format!("{cell} · Menu {position}/{total} {}{level} — ", step.title),
+        (Lang::Ja, Some(cell)) => format!("{cell}・メニュー {position}/{total} {}{level} — ", step.title),
+        (Lang::En, None) => format!("Menu {position}/{total} {}{level} — ", step.title),
+        (Lang::Ja, None) => format!("メニュー {position}/{total} {}{level} — ", step.title),
     };
     let fixed = UnicodeWidthStr::width(prefix) + UnicodeWidthStr::width(suffix.as_str());
-    let step_label = if fixed + UnicodeWidthStr::width(step_label.as_str()) + 12 <= width {
-        step_label
-    } else {
-        String::new()
-    };
+    let step_label = [Some(full), cell.map(|cell| format!("{cell} — "))]
+        .into_iter()
+        .flatten()
+        .find(|label| fixed + UnicodeWidthStr::width(label.as_str()) + 12 <= width)
+        .unwrap_or_default();
     let available = width.saturating_sub(fixed + UnicodeWidthStr::width(step_label.as_str()));
     Some(format!("{step_label}{prefix}{}{suffix}", truncate_display(&step.advance, available)))
 }
@@ -925,13 +939,34 @@ fn menu_check_judgments_line(app: &App, lang: Lang, width: usize) -> Option<Stri
         })
         .collect::<Vec<_>>();
     if parts.is_empty() {
-        return None;
+        // MYTASK-3640: a fixed step with nothing judged still names its cell
+        // and its place in the menu.
+        let menu = app.daily_menu.as_ref()?;
+        let index = app.menu_active_step?;
+        let step = menu.steps.get(index)?;
+        let cell = crate::ui::menu::step_cell_label(step, lang)?;
+        let total = menu.steps.len();
+        let line = match lang {
+            Lang::En => format!("{cell} · Menu {}/{total} {}", index + 1, step.title),
+            Lang::Ja => format!("{cell}・メニュー {}/{total} {}", index + 1, step.title),
+        };
+        return Some(truncate_display(&line, width));
     }
     let (prefix, separator) = match lang {
         Lang::En => ("Judged with this check: ", "; "),
         Lang::Ja => ("この確認で判定: ", "，"),
     };
-    let available = width.saturating_sub(UnicodeWidthStr::width(prefix));
+    // MYTASK-3640: the check step's cell, when it leaves room for the rest.
+    let cell = app
+        .daily_menu
+        .as_ref()
+        .and_then(|menu| menu.steps.get(app.menu_active_step?))
+        .and_then(|step| crate::ui::menu::step_cell_label(step, lang))
+        .map(|cell| format!("{cell} — "))
+        .filter(|cell| UnicodeWidthStr::width(cell.as_str()) + UnicodeWidthStr::width(prefix) + 12 <= width)
+        .unwrap_or_default();
+    let prefix = format!("{cell}{prefix}");
+    let available = width.saturating_sub(UnicodeWidthStr::width(prefix.as_str()));
     Some(format!("{prefix}{}", truncate_display(&parts.join(separator), available)))
 }
 

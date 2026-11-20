@@ -74,7 +74,7 @@
 | `endurance.minutes` | 整数 | `4` | 持久練習の時間．3〜5 分． |
 | `menu.minutes` | 整数 | `15` | 練習メニューの長さ．`10`・`15`・`20`．[練習メニュー](#練習メニュー)を参照． |
 | `menu.languages` | `en` / `ja` の配列 | `—` | 練習する言語．未設定なら表示言語に従います．[練習メニュー](#練習メニュー)を参照． |
-| `drill.skill` | `normal` / `accuracy` / `speed` / `recovery` / `blind` / `weak` / `rhythm` / `burst` / `endurance` / `unlock` | `—` | 個別の訓練の表で最後に始めた行．未設定なら `mode.kind` に従う．[練習モード](modes.ja.md)を参照． |
+| `drill.skill` | `normal` / `accuracy` / `speed` / `recovery` / `blind` / `anticipation` / `preview` / `overlap` / `spelling` / `weak` / `rhythm` / `burst` / `endurance` / `unlock` | `—` | 個別の訓練の表で最後に始めた行．未設定なら `mode.kind` に従う．[練習モード](modes.ja.md)を参照． |
 | `drill.unit` | `char` / `ngram` / `word` / `phrase` / `sentence` / `passage` | `—` | 個別の訓練の表で最後に始めた列．未設定なら `mode.kind` に従う． |
 | `drill.lang` | `en` / `ja` | `—` | 個別の訓練の練習言語（`L`）．未設定なら `mode.kind` の言語に従う． |
 | `ui.animation_enabled` | 真偽値 | `true` | 項目のスライドを有効にする． |

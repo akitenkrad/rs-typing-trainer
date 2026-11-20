@@ -74,7 +74,7 @@ Every supported key is listed here. “Unset” means that the application deriv
 | `endurance.minutes` | integer | `4` | Endurance duration, from 3 through 5 minutes. |
 | `menu.minutes` | integer | `15` | Practice-menu length: `10`, `15` or `20`; see [Practice menu](#practice-menu). |
 | `menu.languages` | array of `en` / `ja` | `—` | Practice languages; unset follows the interface language. See [Practice menu](#practice-menu). |
-| `drill.skill` | `normal` / `accuracy` / `speed` / `recovery` / `blind` / `weak` / `rhythm` / `burst` / `endurance` / `unlock` | `—` | Row of the individual-training table last started; unset follows `mode.kind`. See [Training modes](modes.md). |
+| `drill.skill` | `normal` / `accuracy` / `speed` / `recovery` / `blind` / `anticipation` / `preview` / `overlap` / `spelling` / `weak` / `rhythm` / `burst` / `endurance` / `unlock` | `—` | Row of the individual-training table last started; unset follows `mode.kind`. See [Training modes](modes.md). |
 | `drill.unit` | `char` / `ngram` / `word` / `phrase` / `sentence` / `passage` | `—` | Column of the individual-training table last started; unset follows `mode.kind`. |
 | `drill.lang` | `en` / `ja` | `—` | Practice language of the individual-training table (`L`); unset follows the language of `mode.kind`. |
 | `ui.animation_enabled` | boolean | `true` | Enable item slide animations. |

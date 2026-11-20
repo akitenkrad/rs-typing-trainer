@@ -48,6 +48,7 @@ mod layouts;
 mod live_goal;
 mod menu_build;
 mod menu_catalog;
+mod menu_cells;
 mod menu_progress;
 mod menu_progress_band;
 mod menu_skills;

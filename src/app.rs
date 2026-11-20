@@ -1086,7 +1086,7 @@ impl App {
         let cell = self.drill_cell;
         let lang = self.practice_lang;
         let Some(kind) = crate::practice::drill::mode_for(cell, lang) else {
-            self.mode_warning = Some(crate::ui::mode_select::unavailable_reason(cell, self.config.general.lang).to_owned());
+            self.mode_warning = Some(crate::ui::mode_select::unavailable_reason(cell, lang, self.config.general.lang).to_owned());
             return;
         };
         if cell.unit == PromptUnit::Passage && lang == Lang::Ja && !crate::data::has_bundled_japanese_passages() {
@@ -2817,12 +2817,17 @@ impl App {
                 crate::practice::menu::restrict_catalog_to_step_targets(&mut catalog, step);
             }
         }
-        // The speed row of the table runs the pacer on every unit
-        // (MYTASK-3638); elsewhere only the modes that always offered it.
+        // The speed and anticipation rows of the table run their pacer on
+        // every unit (MYTASK-3638, MYTASK-3640: a Japanese word cell runs
+        // `romaji`); elsewhere only the modes that always offered it.
         let pacer_supported = matches!(
             self.config.mode.kind,
             ModeKind::Words | ModeKind::Sentence | ModeKind::Phrase | ModeKind::Adaptive
-        ) || self.config.mode.drill.is_some_and(|cell| cell.skill == crate::config::DrillSkill::Speed);
+        ) || self
+            .config
+            .mode
+            .drill
+            .is_some_and(|cell| matches!(cell.skill, crate::config::DrillSkill::Speed | crate::config::DrillSkill::Anticipation));
         self.config.pacer.target_wpm = (!is_bench && pacer_supported && self.config.pacer.enabled)
             .then(|| crate::practice::pacer::target_wpm(&records, self.config.pacer.ratio, self.config.pacer.min_wpm));
         if !is_bench

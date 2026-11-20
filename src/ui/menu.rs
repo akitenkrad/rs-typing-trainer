@@ -122,8 +122,11 @@ pub fn render_focus(frame: &mut Frame, app: &App, remaining: f32) {
         Lang::En => format!("Starting in {:.1}s · press any key to continue · [Esc] Menu", remaining.max(0.0)),
         Lang::Ja => format!("あと {:.1} 秒で開始・任意のキーで続ける・[Esc] メニュー", remaining.max(0.0)),
     };
+    // MYTASK-3640: the cell of the individual-training table this step plays.
+    let cell = step.and_then(|step| step_cell_label(step, lang)).unwrap_or_default();
     let lines = vec![
         Line::from(""),
+        Line::from(Span::styled(cell, Style::default().fg(theme.accent))),
         Line::from(Span::styled(focus, Style::default().fg(theme.warning).add_modifier(Modifier::BOLD))),
         Line::from(""),
         Line::from(instruction),
@@ -131,12 +134,20 @@ pub fn render_focus(frame: &mut Frame, app: &App, remaining: f32) {
     frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), inner);
 }
 
+/// The name of the cell a menu step plays, «正確さ × 単語» /
+/// «Accuracy × Words» (MYTASK-3640).
+pub fn step_cell_label(step: &MenuStep, lang: Lang) -> Option<String> {
+    crate::practice::menu::step_cell(step).map(|cell| crate::ui::mode_select::cell_label(cell, lang))
+}
+
 fn detail_lines(step: &MenuStep, lang: Lang, theme: Theme) -> Vec<Line<'static>> {
-    let (reason, focus, advance, evidence) = match lang {
-        Lang::En => ("Selected because", "Focus", "Graduation condition", "Evidence strength"),
-        Lang::Ja => ("選んだ理由", "意識すること", "卒業の条件", "根拠の強さ"),
+    let (drill, reason, focus, advance, evidence) = match lang {
+        Lang::En => ("Drill", "Selected because", "Focus", "Graduation condition", "Evidence strength"),
+        Lang::Ja => ("訓練", "選んだ理由", "意識すること", "卒業の条件", "根拠の強さ"),
     };
+    let cell = step_cell_label(step, lang).unwrap_or_else(|| "—".to_owned());
     vec![
+        Line::from(Span::styled(format!("{drill}: {cell}"), Style::default().fg(theme.accent))),
         Line::from(Span::styled(format!("{reason}: {}", step.reason), Style::default().fg(theme.accent))),
         Line::from(Span::styled(format!("{focus}: {}", step.focus), Style::default().fg(theme.warning))),
         Line::from(format!("{advance}: {}", step.advance)),

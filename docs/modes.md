@@ -10,13 +10,17 @@ Individual training is a table. Each row is the **skill** a session trains, each
 |---|---|---|---|---|---|---|
 | Normal | ○ | ○ | ○ | ○ | ○ | ○ |
 | Accuracy, Speed, Recovery, No-look | ○ | ○ | ○ | ○ | ○ | ○ |
+| Anticipation, Look-ahead, Rollover | — | — | ○ | ○ | ○ | ○ |
+| Spelling (Japanese only) | — | — | ○ | ○ | ○ | ○ |
 | Weak transitions | — | ○ | ○ | ○ | ○ | — |
 | Rhythm | — | ○ | ○ | ○ | ○ | — |
 | Burst | — | — | ○ | ○ | ○ | — |
 | Endurance | — | — | ○ | ○ | ○ | ○ |
 | Unlock keys | ○ | — | ○ | — | — | — |
 
-A `—` cell is shown dimmed. The cursor stops on it and the line under the table says why it cannot be played; `Enter` does nothing there.
+A `—` cell is shown dimmed. The cursor stops on it and the line under the table says why it cannot be played; `Enter` does nothing there. Spelling practices romaji, so its cells are `—` while the practice language is English.
+
+Every step of [today's training](training.md#steps-are-cells-of-the-table) is one of these cells with the settings of its level.
 
 ### Skills (rows)
 
@@ -27,6 +31,10 @@ A `—` cell is shown dimmed. The cursor stops on it and the line under the tabl
 | Speed | A pacer 5% faster than your recent speed runs above the prompt, on every column | The first level of `speed.pacer` (`pacer.enabled = true`, `pacer.ratio = 1.05`) |
 | Recovery | A typo moves on and the missed prompt comes back once | The first level of `recovery.retry` (`session.error_mode = "advance"`, `session.retry_on_error = true`) |
 | No-look | Keys you know well fade from the on-screen keyboard | The first level of `blind.fade` (`keyboard.show = "auto"`) |
+| Anticipation | A pacer 10% slower than your recent speed; confirm each letter before pressing it | The first level of `accuracy.anticipation` (`pacer.enabled = true`, `pacer.ratio = 0.90`) |
+| Look-ahead | Three prompts ahead are shown and typed text is hidden in sentences; read the next one, not the letter under the cursor | The first level of `preview.wide` (`session.preview_items = 3`, `mode.sentence.hide_typed = true`) |
+| Rollover | Press the next key before releasing the last one, staying relaxed | The first level of `overlap.burst` (pacer off) |
+| Spelling | Keep to the romaji spelling the analysis suggests (Japanese only) | The first level of `japanese.spelling` (`mode.key_filter = "include"`) |
 | Weak transitions | More of your slow or error-prone key transitions (`adaptive`) | Pacer off |
 | Rhythm | One keystroke per metronome beat; the result shows the median drift from the beat (`rhythm`) | Pacer off |
 | Burst | Three all-out sprints; the fastest is recorded (`burst`) | Pacer off |
@@ -65,7 +73,9 @@ The table has one practice language, shown above it; `L` switches English ⇄ Ja
 
 ### Records
 
-A cell is recorded under the same `mode` as before the table existed, so history and analysis keep their series: Normal × Words is `words` (or `romaji` in Japanese), Normal × Sentence is `sentence`, Rhythm × Words is `rhythm`, Endurance × Sentence is `endurance`, and so on. Accuracy, Speed, Recovery and No-look record the mode of their column (`random`, `ngram`, `words`/`romaji`, `phrase`, `sentence`); Normal × Passage is `sentence`. Every cell also writes `drill` (`{"skill", "unit"}`) and `unit` into `mode_params`, which tells a rhythm session on sentences from one on words. The database schema is unchanged.
+The four rows added for today's training (Anticipation, Look-ahead, Rollover, Spelling) run the plain mode of their column, as Accuracy does. Their Words cells pass through the key picker like the other setting rows.
+
+A cell is recorded under the same `mode` as before the table existed, so history and analysis keep their series: Normal × Words is `words` (or `romaji` in Japanese), Normal × Sentence is `sentence`, Rhythm × Words is `rhythm`, Endurance × Sentence is `endurance`, and so on. Accuracy, Speed, Recovery, No-look, Anticipation, Look-ahead, Rollover and Spelling record the mode of their column (`random`, `ngram`, `words`/`romaji`, `phrase`, `sentence`); Normal × Passage is `sentence`. Every cell also writes `drill` (`{"skill", "unit"}`) and `unit` into `mode_params`, which tells a rhythm session on sentences from one on words. The database schema is unchanged.
 
 ## Key selection
 

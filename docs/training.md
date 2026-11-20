@@ -143,7 +143,7 @@ The practice menu turns the analysis into one day of practice: which prescriptio
 
 ### Opening the menu
 
-Today's training is the first item on the title screen; choose it (or press `M`) to open the menu screen. The menu screen and `stats --menu` show the menu's actual total, followed by `[menu] minutes` when the two differ (see [Steps and length](#steps-and-length)), and say when the introductory menu applies. Each row shows the completion mark, step number, practice language, step name, prescription, level and minutes. The selected row adds the reason it was chosen, the focus, the graduation condition, and the evidence strength with its note. When no benchmark exists in a practice language, or the latest one is at least seven days old, the menu says that a benchmark (about 4 minutes) is recommended first; taking it is optional. See [Playing a menu](gameplay.md#practice-menu) for running the steps.
+Today's training is the first item on the title screen; choose it (or press `M`) to open the menu screen. The menu screen and `stats --menu` show the menu's actual total, followed by `[menu] minutes` when the two differ (see [Steps and length](#steps-and-length)), and say when the introductory menu applies. Each row shows the completion mark, step number, practice language, step name, prescription, level and minutes. The selected row adds the cell of the individual-training table it plays (see [Steps are cells of the table](#steps-are-cells-of-the-table)), the reason it was chosen, the focus, the graduation condition, and the evidence strength with its note. When no benchmark exists in a practice language, or the latest one is at least seven days old, the menu says that a benchmark (about 4 minutes) is recommended first; taking it is optional. See [Playing a menu](gameplay.md#practice-menu) for running the steps.
 
 The menu for a day is fixed once its first step starts (for the same layout, practice languages and length): reopening it later that day shows the same plan with the finished steps marked, so playing a step does not reshuffle the remaining ones. `rs-typing-trainer stats --menu` prints the same plan without the TUI (see [CLI](analysis.md#practice-menu-and-skill-records)).
 
@@ -204,6 +204,40 @@ When no practice language has enough data, the menu is: warm-up (1 min), transit
 ### Warm-up on its own
 
 `W` on the individual-training screen (shown above the table as `[W] 1-minute warm-up`) plays the menu's warm-up step by itself: the same mode, length and settings as `fixed.warmup` in the catalog (`words` for 1 minute, pacer off, accuracy gate off). It uses the table's practice language (`L`); a Japanese warm-up gets Japanese words typed in romaji and shows the surface / kana / romaji rows, as the menu's Japanese warm-up does. The session is recorded as `words` and is not part of the day's menu run. Its settings apply to that session only: your configuration file is not changed, and the next ordinary session uses your own settings again. `Enter` on its result screen plays the warm-up once more.
+
+### Steps are cells of the table
+
+Every step of today's training is a cell of the [individual-training table](modes.md#individual-training) — a skill (row) and what you type (column) — played with the settings of its level. The catalog names the cell of every fixed step and every level (`cell = { skill = "accuracy", unit = "word" }`), and a cell that the table cannot play is a catalog error. The menu screen (`Drill: Accuracy × Words`), the focus screen before the countdown, and the result screen (its title, and the step row when there is room) show the cell's name; the progress band keeps its short names.
+
+| Step or prescription | Levels | Cell |
+|---|---|---|
+| Warm-up / Check / Finish | — | Normal × Words / Normal × Sentence / Burst × Words |
+| `accuracy.gate` | ① ② / ③ | Accuracy × Words / Accuracy × Sentence |
+| `accuracy.anticipation` | ① ② | Anticipation × Words |
+| `transition.adaptive` | ① ② ③ | Weak transitions × Words |
+| `transition.ngram` | ① | Weak transitions × Combos |
+| `preview.wide` | ① ② ③ | Look-ahead × Sentence |
+| `preview.phrase` | ① ② | Look-ahead × Phrases |
+| `rhythm.metronome` | ① ② ③ | Rhythm × Words |
+| `recovery.retry` | ① ② | Recovery × Sentence |
+| `overlap.burst` | ① / ② | Rollover × Words / Rollover × Phrases |
+| `speed.pacer` | ① ② | Speed × Phrases |
+| `reach.unlock` | ① ② | Unlock keys × Words |
+| `japanese.spelling` | ① / ② | Spelling × Words / Spelling × Sentence |
+| `endurance.split` | ① ② ③ | Endurance × Sentence |
+| `blind.fade` | ① ② ③ | No-look × Words |
+
+A step runs and records the mode and settings of its level, exactly as before, so its history, judgments and graduation are unchanged. When that mode is the cell's own mode (a Japanese `words` level counts as the `romaji` of a Japanese word cell), the step makes its prompts the way the cell does on the table: the cell becomes the session's prompt unit, Japanese words come from the same daily deck, and `mode_params` gains `drill` and `unit` as a table session's do. The step is typed in its own language (`[menu] languages`), never in the table's practice language.
+
+A level may override its cell's mode. It then keeps its mode and the prompts of that mode, and records no `drill`:
+
+| Level | Cell | Level's mode |
+|---|---|---|
+| `transition.adaptive` ③ | Weak transitions × Words (`adaptive`) | `words` with the target transitions |
+| `transition.ngram` ① | Weak transitions × Combos (`adaptive`) | `ngram` with `pairs` |
+| `rhythm.metronome` ③ | Rhythm × Words (`rhythm`) | `words` without the beat |
+| `overlap.burst` ① | Rollover × Words (`words`) | `burst` |
+| `reach.unlock` ① ② | Unlock keys × Words (`unlock`) | `words` with the remote-row keys |
 
 ### Two practice languages
 

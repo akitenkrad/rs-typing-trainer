@@ -11,7 +11,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::app::App;
 use crate::config::{DrillCell, DrillSkill, PromptUnit};
 use crate::i18n::Lang;
-use crate::practice::drill::{self, Availability};
+use crate::practice::drill;
 use crate::ui::{left_inset, theme::Theme};
 
 /// Display width of the row-label column.
@@ -31,6 +31,14 @@ pub fn skill_label(skill: DrillSkill, lang: Lang) -> &'static str {
         (DrillSkill::Recovery, Lang::Ja) => "立ち直り",
         (DrillSkill::Blind, Lang::En) => "No-look",
         (DrillSkill::Blind, Lang::Ja) => "キーボードを見ない",
+        (DrillSkill::Anticipation, Lang::En) => "Anticipation",
+        (DrillSkill::Anticipation, Lang::Ja) => "先走り",
+        (DrillSkill::Preview, Lang::En) => "Look-ahead",
+        (DrillSkill::Preview, Lang::Ja) => "先読み",
+        (DrillSkill::Overlap, Lang::En) => "Rollover",
+        (DrillSkill::Overlap, Lang::Ja) => "重なり",
+        (DrillSkill::Spelling, Lang::En) => "Spelling",
+        (DrillSkill::Spelling, Lang::Ja) => "綴り",
         (DrillSkill::Weak, Lang::En) => "Weak transitions",
         (DrillSkill::Weak, Lang::Ja) => "弱い遷移",
         (DrillSkill::Rhythm, Lang::En) => "Rhythm",
@@ -70,10 +78,24 @@ fn language_name(language: Lang, lang: Lang) -> &'static str {
     }
 }
 
-/// Why a `—` cell cannot be started (shown under the table).
-pub fn unavailable_reason(cell: DrillCell, lang: Lang) -> &'static str {
+/// The name of a cell, «正確さ × 単語» / «Accuracy × Words» (the table,
+/// and the steps of today's menu, MYTASK-3640).
+pub fn cell_label(cell: DrillCell, lang: Lang) -> String {
+    format!("{} × {}", skill_label(cell.skill, lang), unit_label(cell.unit, lang))
+}
+
+/// Why a `—` cell cannot be started in the practice language `practice`
+/// (shown under the table).
+pub fn unavailable_reason(cell: DrillCell, practice: Lang, lang: Lang) -> &'static str {
     let ja = lang == Lang::Ja;
     match (cell.skill, cell.unit) {
+        (DrillSkill::Spelling, PromptUnit::Word | PromptUnit::Phrase | PromptUnit::Sentence | PromptUnit::Passage) if practice == Lang::En => {
+            if ja {
+                "選べません: 綴りはローマ字の練習なので日本語だけです（[L] で切替）"
+            } else {
+                "Not available: spelling practices romaji, Japanese only ([L] to switch)"
+            }
+        }
         (DrillSkill::Unlock, _) => {
             if ja {
                 "選べません: キー解放は解放済みのキーだけで作れる問題に限られます"
@@ -134,6 +156,22 @@ pub fn skill_description(app: &App, cell: DrillCell, lang: Lang) -> String {
         DrillSkill::Blind => text(
             "No-look: keys you know well fade from the on-screen keyboard",
             "キーボードを見ない: 慣れたキーから画面の鍵盤が消えていく",
+        ),
+        DrillSkill::Anticipation => text(
+            "Anticipation: a pacer 10% slower; check each letter before pressing",
+            "先走り: 10% 遅いペーサーで，次の文字を確かめてから押す",
+        ),
+        DrillSkill::Preview => text(
+            "Look-ahead: three prompts ahead are shown; read the next one",
+            "先読み: 3 問先まで見せる．打っている文字ではなく次を読む",
+        ),
+        DrillSkill::Overlap => text(
+            "Rollover: press the next key before releasing the last; relax",
+            "重なり: 前のキーを離す前に次を押してよい．力を抜く",
+        ),
+        DrillSkill::Spelling => text(
+            "Spelling: keep to the romaji spelling the analysis suggests",
+            "綴り: 分析が勧めるローマ字の綴りに統一する",
         ),
         DrillSkill::Weak => text(
             "Weak transitions: more of your slow or error-prone key pairs",
@@ -287,7 +325,7 @@ fn table_lines(app: &App, theme: &Theme, lang: Lang) -> Vec<Line<'static>> {
         ];
         for unit in PromptUnit::ALL {
             let cell = DrillCell::new(skill, unit);
-            let available = drill::availability(cell) != Availability::Unavailable;
+            let available = drill::is_available_in(cell, app.practice_lang);
             let mark = if available { "○" } else { "—" };
             let selected = cell == cursor;
             let text = if selected { format!("[{mark}]") } else { mark.to_owned() };
@@ -336,24 +374,21 @@ pub fn render(frame: &mut Frame, app: &App) {
         Lang::Ja => format!("[W] {minutes} 分のウォームアップ    [L] 練習言語: {practice}"),
     };
     lines.push(Line::from(Span::styled(top, Style::default().fg(theme.accent))));
-    lines.push(Line::default());
+    // 14 rows since MYTASK-3640: the table follows the top line directly so
+    // that it, the two description lines and the key guide fit 80×24.
     lines.extend(table_lines(app, &theme, lang));
-    lines.push(Line::default());
 
     let cell = app.drill_cell;
-    if drill::is_available(cell) {
+    if drill::is_available_in(cell, app.practice_lang) {
         lines.push(Line::from(Span::styled(
             skill_description(app, cell, lang),
             Style::default().fg(theme.fg),
         )));
         lines.push(Line::from(Span::styled(unit_description(app, cell, lang), Style::default().fg(theme.fg))));
     } else {
+        lines.push(Line::from(Span::styled(cell_label(cell, lang), Style::default().fg(theme.muted))));
         lines.push(Line::from(Span::styled(
-            format!("{} × {}", skill_label(cell.skill, lang), unit_label(cell.unit, lang)),
-            Style::default().fg(theme.muted),
-        )));
-        lines.push(Line::from(Span::styled(
-            unavailable_reason(cell, lang).to_owned(),
+            unavailable_reason(cell, app.practice_lang, lang).to_owned(),
             Style::default().fg(theme.muted),
         )));
     }

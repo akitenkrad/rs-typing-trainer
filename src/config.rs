@@ -266,6 +266,16 @@ pub enum DrillSkill {
     Speed,
     Recovery,
     Blind,
+    /// Anticipation errors: pressing the next key before checking it
+    /// (MYTASK-3640, `accuracy.anticipation`).
+    Anticipation,
+    /// Looking ahead at the next prompts (MYTASK-3640, `preview.wide`).
+    Preview,
+    /// Relaxed rollover between keys (MYTASK-3640, `overlap.burst`).
+    Overlap,
+    /// The suggested romaji spelling; Japanese only (MYTASK-3640,
+    /// `japanese.spelling`).
+    Spelling,
     Weak,
     Rhythm,
     Burst,
@@ -274,12 +284,16 @@ pub enum DrillSkill {
 }
 
 impl DrillSkill {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 14] = [
         Self::Normal,
         Self::Accuracy,
         Self::Speed,
         Self::Recovery,
         Self::Blind,
+        Self::Anticipation,
+        Self::Preview,
+        Self::Overlap,
+        Self::Spelling,
         Self::Weak,
         Self::Rhythm,
         Self::Burst,
@@ -294,6 +308,10 @@ impl DrillSkill {
             Self::Speed => "speed",
             Self::Recovery => "recovery",
             Self::Blind => "blind",
+            Self::Anticipation => "anticipation",
+            Self::Preview => "preview",
+            Self::Overlap => "overlap",
+            Self::Spelling => "spelling",
             Self::Weak => "weak",
             Self::Rhythm => "rhythm",
             Self::Burst => "burst",

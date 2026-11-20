@@ -48,6 +48,8 @@ fn expected_availability(skill: DrillSkill, unit: PromptUnit) -> Availability {
     use Availability::{Existing as O, Extended as T, Unavailable as N};
     let row = match skill {
         DrillSkill::Normal | DrillSkill::Accuracy | DrillSkill::Speed | DrillSkill::Recovery | DrillSkill::Blind => [O, O, O, O, O, O],
+        // MYTASK-3640: text that reads on (spelling: Japanese only).
+        DrillSkill::Anticipation | DrillSkill::Preview | DrillSkill::Overlap | DrillSkill::Spelling => [N, N, O, O, O, O],
         DrillSkill::Weak => [N, O, O, T, T, N],
         DrillSkill::Rhythm => [N, T, O, T, T, N],
         DrillSkill::Burst => [N, N, O, T, T, N],
@@ -120,11 +122,18 @@ fn start(cell: DrillCell, practice: Lang) -> (TestApp, Instant) {
 
 #[test]
 fn the_table_has_the_agreed_availability_and_modes() {
+    assert_eq!(DrillSkill::ALL.len(), 14);
     for cell in all_cells() {
         assert_eq!(drill::availability(cell), expected_availability(cell.skill, cell.unit), "{cell:?}");
         for lang in [Lang::En, Lang::Ja] {
             let mode = drill::mode_for(cell, lang);
-            if expected_availability(cell.skill, cell.unit) == Availability::Unavailable {
+            let english_spelling = cell.skill == DrillSkill::Spelling && lang == Lang::En;
+            assert_eq!(
+                drill::is_available_in(cell, lang),
+                expected_availability(cell.skill, cell.unit) != Availability::Unavailable && !english_spelling,
+                "{cell:?} {lang:?}"
+            );
+            if expected_availability(cell.skill, cell.unit) == Availability::Unavailable || english_spelling {
                 assert_eq!(mode, None, "{cell:?}");
             } else {
                 assert_eq!(mode, Some(expected_mode(cell, lang)), "{cell:?} {lang:?}");
@@ -148,7 +157,7 @@ fn every_available_cell_starts_with_its_mode_settings_and_prompts() {
     let sentences_en = data.sentences_en().iter().cloned().collect::<HashSet<_>>();
     let sentences_ja = data.sentences_ja().iter().map(|row| row.text.clone()).collect::<HashSet<_>>();
     for lang in [Lang::En, Lang::Ja] {
-        for cell in all_cells().into_iter().filter(|cell| drill::is_available(*cell)) {
+        for cell in all_cells().into_iter().filter(|cell| drill::is_available_in(*cell, lang)) {
             if cell.unit == PromptUnit::Passage && lang == Lang::Ja && !rs_typing_trainer::data::has_bundled_japanese_passages() {
                 continue;
             }
@@ -178,6 +187,21 @@ fn every_available_cell_starts_with_its_mode_settings_and_prompts() {
                     assert!(config.session.retry_on_error, "{label}");
                 }
                 DrillSkill::Blind => assert_eq!(config.keyboard.show, "auto", "{label}"),
+                // MYTASK-3640: the first level of each row's prescription.
+                DrillSkill::Anticipation => {
+                    assert!(config.pacer.enabled, "{label}");
+                    assert_eq!(config.pacer.ratio, 0.90, "{label}");
+                    assert!(config.pacer.target_wpm.is_some(), "{label}: the pacer runs on every unit");
+                }
+                DrillSkill::Preview => {
+                    assert_eq!(config.session.preview_items, 3, "{label}");
+                    assert!(config.mode.sentence.hide_typed, "{label}");
+                    assert!(!config.pacer.enabled, "{label}");
+                }
+                DrillSkill::Spelling => {
+                    assert_eq!(config.mode.key_filter, rs_typing_trainer::config::KeyFilter::Include, "{label}");
+                    assert!(!config.pacer.enabled, "{label}");
+                }
                 _ => {
                     assert!(!config.pacer.enabled, "{label}");
                     assert_eq!(config.gate.min_accuracy, 0.0, "{label}");
@@ -245,13 +269,15 @@ fn every_available_cell_starts_with_its_mode_settings_and_prompts() {
 #[test]
 fn unavailable_cells_do_not_start_and_say_why() {
     for lang in [Lang::En, Lang::Ja] {
-        for cell in all_cells().into_iter().filter(|cell| !drill::is_available(*cell)) {
+        // The table opens in English (the configured mode is `words`).
+        for cell in all_cells().into_iter().filter(|cell| !drill::is_available_in(*cell, Lang::En)) {
             let mut app = test_app(config(lang));
             let now = Instant::now();
             app.handle_key_at(key(KeyCode::Enter), now);
+            assert_eq!(app.practice_lang, Lang::En);
             app.drill_cell = cell;
             let screen = compact(&render(&app, 80, 24));
-            let reason = rs_typing_trainer::ui::mode_select::unavailable_reason(cell, lang).replace(' ', "");
+            let reason = rs_typing_trainer::ui::mode_select::unavailable_reason(cell, Lang::En, lang).replace(' ', "");
             assert!(screen.contains(&reason), "{cell:?}:\n{screen}");
             app.handle_key_at(key(KeyCode::Enter), now);
             assert_eq!(app.screen, Screen::ModeSelect, "{cell:?}");
@@ -602,7 +628,7 @@ fn the_table_fits_80_by_24_in_both_languages() {
         };
         let reference = marks(&rows[header + 1]);
         assert_eq!(reference.len(), 6, "{}", rows[header + 1]);
-        for row in &rows[header + 1..header + 11] {
+        for row in &rows[header + 1..header + 15] {
             assert_eq!(marks(row), reference, "{lang:?}: {row}");
         }
     }

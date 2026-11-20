@@ -697,3 +697,33 @@ fn reaction_histogram_axis_labels_match_the_percentile_label_height() {
         "axis labels are {axis_height}px high but p50 is {percentile_height}px high"
     );
 }
+
+#[test]
+fn metric_card_headline_is_large_and_in_the_foreground_color() {
+    // The muted 0.8-cell headline (WPM / CPS / accuracy) was hard to read.
+    let font = resolve_big_font("biz-ud-gothic", Path::new("/unused"));
+    let cell = CellPixels::new(10, 22);
+    for (label, value, recent) in [("WPM", "54.7", vec![50.0, 54.7]), ("正確さ", "94.9%", Vec::new())] {
+        let spec = MetricCardSpec {
+            label: label.into(),
+            value: value.into(),
+            previous_delta: None,
+            best_delta: None,
+            recent,
+            lang: Lang::Ja,
+            delta_suffix: String::new(),
+            cells: Size::new(63, 6),
+            colors: colors(),
+        };
+        let image = render_metric_card(&font, cell, &spec).unwrap();
+        if let Ok(dir) = std::env::var("RESULT_CARD_PNG_DIR") {
+            image
+                .save(std::path::Path::new(&dir).join(format!("card-{}.png", value.trim_end_matches('%'))))
+                .unwrap();
+        }
+        let headline = color_bounds(&image, rgba(Color::White), [0, 0, image.width() / 2, image.height() / 3])
+            .unwrap_or_else(|| panic!("{label}: no foreground headline"));
+        let height = headline[3] - headline[1] + 1;
+        assert!(height >= 18, "{label}: headline is {height} px tall at a 22 px cell");
+    }
+}

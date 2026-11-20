@@ -340,9 +340,14 @@ impl ReactionHistogramSpec {
     }
 }
 
+/// Pixel height of a metric card's headline: 1.3 cells.
+fn metric_card_label_height(cell_pixels: CellPixels) -> u32 {
+    (u32::from(cell_pixels.height) * 13 / 10).max(12)
+}
+
 impl MetricCardSpec {
     fn value_layout(&self, width: u32, height: u32, cell_pixels: CellPixels) -> (f32, f32, u32) {
-        let label_height = (u32::from(cell_pixels.height) * 4 / 5).max(8);
+        let label_height = metric_card_label_height(cell_pixels);
         let top = (height as f32 * 0.17).max(label_height as f32 + 5.0);
         let glyph_height = (height as f32 * 0.43).round().max(18.0) as u32;
         let center = if self.recent.len() >= 2 {
@@ -582,15 +587,18 @@ pub fn render_metric_card(font: &ResolvedBigFont, cell_pixels: CellPixels, spec:
     stroke_round_rect(&mut pixmap, [1.5, 1.5, width as f32 - 1.5, height as f32 - 1.5], 8.0, muted, 180, 1.5);
 
     let mut glyphs = HashMap::new();
-    let label_height = (u32::from(cell_pixels.height) * 4 / 5).max(8);
+    let label_height = metric_card_label_height(cell_pixels);
+    // The headline (WPM / CPS / accuracy) in the foreground colour, larger than
+    // the axis labels: the muted 0.8-cell label was hard to read.
+    let label = color_rgb(spec.colors.foreground, [235, 238, 242]);
     draw_text(
         &mut pixmap,
         font,
         &spec.label,
-        10.0,
+        12.0,
         6.0,
         label_height,
-        muted,
+        label,
         true,
         TextAlign::Left,
         cell_pixels,
