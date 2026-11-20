@@ -348,18 +348,22 @@ fn anticipation_flashes_and_reports_without_a_baseline() {
     let mut at = type_keys(&mut app, started, 6, |_| 150, |_| false);
     // Type the character after the expected one: an anticipation error.
     app.on_tick_at(Duration::from_millis(1), at).unwrap();
-    let game = app.game.as_ref().unwrap();
-    let target = game.current_prompt.target.chars().collect::<Vec<_>>();
-    let position = game.session.position();
-    if position + 1 >= target.len() {
-        at = type_keys(&mut app, at, target.len() - position + 1, |_| 150, |_| false);
+    // Move on (typing correctly) until the next two characters differ: a
+    // doubled letter («letter») would make the «next» key a correct one. The
+    // prompts are random, so this used to fail now and then.
+    let mut found = None;
+    for _ in 0..200 {
+        let game = app.game.as_ref().unwrap();
+        let target = game.current_prompt.target.chars().collect::<Vec<_>>();
+        let position = game.session.position();
+        if position + 1 < target.len() && target[position + 1] != target[position] {
+            found = Some(target[position + 1]);
+            break;
+        }
+        at = type_keys(&mut app, at, 1, |_| 150, |_| false);
         app.on_tick_at(Duration::from_millis(1), at).unwrap();
     }
-    let game = app.game.as_ref().unwrap();
-    let target = game.current_prompt.target.chars().collect::<Vec<_>>();
-    let position = game.session.position();
-    let next = target[position + 1];
-    assert_ne!(Some(next), target.get(position).copied(), "pick a word without a doubled letter");
+    let next = found.expect("a position whose next character differs");
     app.handle_key_at(key(KeyCode::Char(next)), at);
     let state = app.menu_live_goal.clone().unwrap();
     assert_eq!(state.measure.anticipations, 1, "{:?}", state.measure);

@@ -42,6 +42,11 @@ pub fn render(frame: &mut Frame, app: &App) {
         crate::ui::today_summary::render(frame, app, &theme, inner);
         return;
     }
+    if app.analysis_tab == crate::app::ANALYSIS_BENCH_TAB && app.analysis_bench_summary {
+        // Summary (MYTASK-3644): the same screenshot layout for the benchmark tab.
+        crate::ui::bench_tab_summary::render(frame, app, &theme, inner);
+        return;
+    }
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(2), Constraint::Min(3), Constraint::Length(2)])
@@ -81,6 +86,9 @@ pub fn render(frame: &mut Frame, app: &App) {
         Msg::AnalysisHintBack.text(lang)
     );
     let mut hint_lines = vec![Line::from(hint)];
+    if app.analysis_tab == crate::app::ANALYSIS_BENCH_TAB {
+        hint_lines.push(Line::from("[S] Summary"));
+    }
     if app.analysis_tab == crate::app::ANALYSIS_SKILLS_TAB
         && let Some(language) = skills_language(app)
     {

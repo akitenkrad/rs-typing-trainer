@@ -236,10 +236,22 @@ pub fn text_size(view: &SummaryView, inner_width: u16, inner_height: u16) -> Sum
 
 pub fn render(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let lang = app.config.general.lang;
-    if area.height < 3 || area.width < 10 {
+    let Some(body) = render_footer(frame, lang, theme, area) else {
+        return;
+    };
+    let view = summary_view(&app.analysis_today, lang);
+    if uses_image(app, body) && render_image(frame, app, theme, &view, body) {
         return;
     }
-    // A one-line footer, small and muted, out of the way of a screenshot.
+    render_text(frame, lang, theme, &view, body);
+}
+
+/// The one-line footer of a Summary, small and muted, out of the way of a
+/// screenshot. Returns the area above it, or `None` when `area` is too small.
+pub(crate) fn render_footer(frame: &mut Frame, lang: Lang, theme: &Theme, area: Rect) -> Option<Rect> {
+    if area.height < 3 || area.width < 10 {
+        return None;
+    }
     let footer = Rect::new(area.x, area.y + area.height - 1, area.width, 1);
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
@@ -252,12 +264,7 @@ pub fn render(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         .alignment(Alignment::Right),
         footer,
     );
-    let body = Rect::new(area.x, area.y, area.width, area.height - 1);
-    let view = summary_view(&app.analysis_today, lang);
-    if uses_image(app, body) && render_image(frame, app, theme, &view, body) {
-        return;
-    }
-    render_text(frame, lang, theme, &view, body);
+    Some(Rect::new(area.x, area.y, area.width, area.height - 1))
 }
 
 fn render_image(frame: &mut Frame, app: &App, theme: &Theme, view: &SummaryView, area: Rect) -> bool {
@@ -291,7 +298,7 @@ pub fn image_spec(view: &SummaryView, lang: Lang, theme: &Theme, cells: ratatui:
     }
 }
 
-fn delta_spans(figure: &SummaryFigure, digits: usize, suffix: &'static str, theme: &Theme) -> Vec<Span<'static>> {
+pub(crate) fn delta_spans(figure: &SummaryFigure, digits: usize, suffix: &'static str, theme: &Theme) -> Vec<Span<'static>> {
     let Some(delta) = figure.delta else {
         return vec![Span::styled(figure.delta_text.clone(), Style::default().fg(theme.muted))];
     };
@@ -306,20 +313,19 @@ fn delta_spans(figure: &SummaryFigure, digits: usize, suffix: &'static str, them
     ]
 }
 
-fn centered(spans: Vec<Span<'static>>, width: usize) -> Line<'static> {
+pub(crate) fn centered(spans: Vec<Span<'static>>, width: usize) -> Line<'static> {
     let used = spans.iter().map(|span| span.content.width()).sum::<usize>();
     let mut all = vec![Span::raw(" ".repeat(width.saturating_sub(used) / 2))];
     all.extend(spans);
     Line::from(all)
 }
 
-/// The text version, also used when an image cannot be drawn.
-pub fn render_text(frame: &mut Frame, lang: Lang, theme: &Theme, view: &SummaryView, area: Rect) {
+/// The accent heading band on the first row of `area`.
+pub(crate) fn render_heading_band(frame: &mut Frame, theme: &Theme, area: Rect, heading: &str, subheading: &str) {
     let width = usize::from(area.width);
-    // Heading band.
     let band_style = Style::default().fg(Color::Black).bg(theme.accent).add_modifier(Modifier::BOLD);
-    let heading = format!(" {}", view.heading);
-    let subheading = format!("{} ", view.subheading);
+    let heading = format!(" {heading}");
+    let subheading = format!("{subheading} ");
     let gap = width.saturating_sub(heading.width() + subheading.width());
     let band = if gap >= 2 {
         format!("{heading}{}{subheading}", " ".repeat(gap))
@@ -330,10 +336,15 @@ pub fn render_text(frame: &mut Frame, lang: Lang, theme: &Theme, view: &SummaryV
         Paragraph::new(Line::from(Span::styled(band, band_style))),
         Rect::new(area.x, area.y, area.width, 1),
     );
+}
+
+/// The heading band and the decorated (double-lined) frame below it.
+/// Returns the frame's inside, or `None` when nothing fits in it.
+pub(crate) fn render_band_and_frame(frame: &mut Frame, theme: &Theme, area: Rect, heading: &str, subheading: &str) -> Option<Rect> {
+    render_heading_band(frame, theme, area, heading, subheading);
     if area.height < 4 {
-        return;
+        return None;
     }
-    // Decorated frame below the band.
     let frame_area = Rect::new(area.x, area.y + 1, area.width, area.height - 1);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -341,9 +352,50 @@ pub fn render_text(frame: &mut Frame, lang: Lang, theme: &Theme, view: &SummaryV
         .border_style(Style::default().fg(theme.accent));
     let inner = block.inner(frame_area);
     frame.render_widget(block, frame_area);
-    if inner.width == 0 || inner.height == 0 {
-        return;
+    (inner.width > 0 && inner.height > 0).then_some(inner)
+}
+
+/// Event lines on the dark bottom band, centered; the first is highlighted
+/// (▲ and the warning color) when `highlight` is set.
+pub(crate) fn event_band_lines(events: &[String], highlight: bool, theme: &Theme, width: usize, rows: u16) -> Vec<Line<'static>> {
+    events
+        .iter()
+        .take(usize::from(rows))
+        .enumerate()
+        .map(|(index, event)| {
+            let highlight = highlight && index == 0;
+            let text = truncate(&if highlight { format!("▲ {event}") } else { event.clone() }, width);
+            let padding = width.saturating_sub(text.width());
+            let line = format!("{}{text}{}", " ".repeat(padding / 2), " ".repeat(padding - padding / 2));
+            Line::from(Span::styled(
+                line,
+                Style::default()
+                    .bg(Color::Indexed(236))
+                    .fg(if highlight { theme.warning } else { Color::White })
+                    .add_modifier(Modifier::BOLD),
+            ))
+        })
+        .collect()
+}
+
+/// `value` in the bitmap big text of `size`, or as one plain line.
+pub(crate) fn value_lines(value: &str, size: SummaryText, style: Style) -> Vec<Line<'static>> {
+    match size {
+        SummaryText::Big(size) => crate::ui::bigtext::font(size)
+            .map(|font| {
+                let characters = value.chars().map(|character| StyledCharacter::new(character, style)).collect::<Vec<_>>();
+                font.render(&characters).lines
+            })
+            .unwrap_or_default(),
+        SummaryText::Plain => vec![Line::from(Span::styled(value.to_owned(), style))],
     }
+}
+
+/// The text version, also used when an image cannot be drawn.
+pub fn render_text(frame: &mut Frame, lang: Lang, theme: &Theme, view: &SummaryView, area: Rect) {
+    let Some(inner) = render_band_and_frame(frame, theme, area, &view.heading, &view.subheading) else {
+        return;
+    };
     let inner_width = usize::from(inner.width);
     let size = text_size(view, inner.width, inner.height);
     let big_rows = match size {
@@ -354,25 +406,7 @@ pub fn render_text(frame: &mut Frame, lang: Lang, theme: &Theme, view: &SummaryV
     // Dark band of events at the bottom of the frame.
     let event_rows = band_rows(view).min(inner.height);
     let event_area = Rect::new(inner.x, inner.y + inner.height - event_rows, inner.width, event_rows);
-    let event_lines = view
-        .events
-        .iter()
-        .take(usize::from(event_rows))
-        .enumerate()
-        .map(|(index, event)| {
-            let highlight = view.highlight && index == 0;
-            let text = truncate(&if highlight { format!("▲ {event}") } else { event.clone() }, inner_width);
-            let padding = inner_width.saturating_sub(text.width());
-            let line = format!("{}{text}{}", " ".repeat(padding / 2), " ".repeat(padding - padding / 2));
-            Line::from(Span::styled(
-                line,
-                Style::default()
-                    .bg(Color::Indexed(236))
-                    .fg(if highlight { theme.warning } else { Color::White })
-                    .add_modifier(Modifier::BOLD),
-            ))
-        })
-        .collect::<Vec<_>>();
+    let event_lines = event_band_lines(&view.events, view.highlight, theme, inner_width, event_rows);
     let event_lines = if view.events.is_empty() {
         vec![chain_line(view, lang, theme, inner_width)]
     } else {
@@ -447,19 +481,7 @@ pub fn render_text(frame: &mut Frame, lang: Lang, theme: &Theme, view: &SummaryV
             column(0, 1),
         );
         let style = Style::default().fg(theme.accent).add_modifier(Modifier::BOLD);
-        let value_lines = match size {
-            SummaryText::Big(size) => crate::ui::bigtext::font(size)
-                .map(|font| {
-                    let characters = main
-                        .value
-                        .chars()
-                        .map(|character| StyledCharacter::new(character, style))
-                        .collect::<Vec<_>>();
-                    font.render(&characters).lines
-                })
-                .unwrap_or_default(),
-            SummaryText::Plain => vec![Line::from(Span::styled(main.value.clone(), style))],
-        };
+        let value_lines = value_lines(&main.value, size, style);
         frame.render_widget(Paragraph::new(value_lines).alignment(Alignment::Center), column(1, big_rows));
         let mut unit = vec![Span::styled("WPM  ", Style::default().add_modifier(Modifier::BOLD))];
         unit.extend(delta_spans(main, 1, "", theme));

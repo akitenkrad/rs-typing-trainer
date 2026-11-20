@@ -310,6 +310,9 @@ pub struct App {
     /// «Today» tab shows the Summary screen (`S`); kept only while the
     /// analysis screen is open, never saved.
     pub analysis_today_summary: bool,
+    /// The benchmark tab shows its Summary (MYTASK-3644), toggled with `S`;
+    /// moving to another tab turns it off.
+    pub analysis_bench_summary: bool,
     pub adaptive_focus: Vec<TransitionCost>,
     adaptive_candidates: Vec<TransitionCost>,
     pub adaptive_result: Vec<AdaptiveResultRow>,
@@ -526,6 +529,7 @@ impl App {
             analysis_today: crate::ui::today::TodayData::empty(date),
             analysis_today_scroll: 0,
             analysis_today_summary: false,
+            analysis_bench_summary: false,
             adaptive_focus: Vec::new(),
             adaptive_candidates: Vec::new(),
             adaptive_result: Vec::new(),
@@ -1488,8 +1492,14 @@ impl App {
                 });
                 self.analysis_confusion_selected = (self.analysis_confusion_selected + 1).min(count.saturating_sub(1));
             }
-            KeyCode::Tab | KeyCode::Right => self.analysis_tab = (self.analysis_tab + 1) % ANALYSIS_TAB_COUNT,
-            KeyCode::BackTab | KeyCode::Left => self.analysis_tab = (self.analysis_tab + ANALYSIS_TAB_COUNT - 1) % ANALYSIS_TAB_COUNT,
+            KeyCode::Tab | KeyCode::Right => {
+                self.analysis_tab = (self.analysis_tab + 1) % ANALYSIS_TAB_COUNT;
+                self.analysis_bench_summary = false;
+            }
+            KeyCode::BackTab | KeyCode::Left => {
+                self.analysis_tab = (self.analysis_tab + ANALYSIS_TAB_COUNT - 1) % ANALYSIS_TAB_COUNT;
+                self.analysis_bench_summary = false;
+            }
             KeyCode::Char('l') | KeyCode::Char('L') if self.analysis_tab == ANALYSIS_SKILLS_TAB => {
                 let languages = self.analysis_skills.languages();
                 if let Some(shown) = crate::ui::analysis::skills_language(self)
@@ -1512,6 +1522,9 @@ impl App {
             }
             KeyCode::Char('s') | KeyCode::Char('S') if self.analysis_tab == ANALYSIS_TODAY_TAB => {
                 self.analysis_today_summary = !self.analysis_today_summary;
+            }
+            KeyCode::Char('s') | KeyCode::Char('S') if self.analysis_tab == ANALYSIS_BENCH_TAB => {
+                self.analysis_bench_summary = !self.analysis_bench_summary;
             }
             KeyCode::Up | KeyCode::Char('k') if self.analysis_tab == ANALYSIS_TODAY_TAB => {
                 self.analysis_today_scroll = self.analysis_today_scroll.saturating_sub(1);
@@ -1582,6 +1595,7 @@ impl App {
         self.analysis_tab = ANALYSIS_COACH_TAB;
         self.analysis_today_scroll = 0;
         self.analysis_today_summary = false;
+        self.analysis_bench_summary = false;
         self.analysis_period = AnalysisPeriod::Days30;
         self.analysis_mode_filter = None;
         self.analysis_transition_selected = 0;

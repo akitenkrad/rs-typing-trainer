@@ -6,6 +6,7 @@ pub mod analysis_image;
 pub mod animation;
 pub mod bench_select;
 pub mod bench_summary;
+pub mod bench_tab_summary;
 pub mod bigtext;
 pub mod bigtext_image;
 pub mod countdown;

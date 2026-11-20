@@ -143,7 +143,7 @@ Press `A` on the title screen. `Tab` or `←/→` changes tabs. The tabs are Tod
 - Keyboard: error rate, median IKI, relative speed (personal median = 1.0), and confusion. `Enter` cycles the four views. In confusion view, `←`/`→` selects the expected key and the keyboard highlights the keys pressed instead. The legend below the keyboard maps the dark-to-bright red scale to each view's values; relative speed runs from fast at 0.0 to slow at 2.0+, with `(1.0 = personal median)` kept as a separate note. The uncoloured sample means no data.
 - Transitions: the 20 slowest and 20 most error-prone shrunk estimates. With terminal images, the selected slow transition is drawn as an arrow between key centres; a repeated key is a loop and a character absent from the active layout has no arrow. The lower two columns use bar length for estimated IKI and estimated error rate. Their dark-to-bright colour uses error rate within that column, and the selected slow bar has an outline. Counts and values remain terminal text, with insufficient rows below the bars. Select a slow transition and press `Enter` to prepare two-key `ngram` practice.
 - Fingers/Hands: finger accuracy/IKI and same-finger versus alternating-hand timing. With terminal images, the finger chart orders left pinky through left index, one shared thumb, then right index through right pinky; the thumb splits into two bars only when separate left/right thumb data is available. IKI bars rise and error-rate bars fall; their colours match the keyboard finger guide, and samples below 30 are translucent. The adjacent four bars compare left hand, right hand, different keys on one finger, and alternating hands on one millisecond scale. Missing fingers are marked `—`, and all original numeric rows continue below the figures.
-- Bench: latest part results, comparisons and the eight axes. With terminal images, the radar radius is the personal-history percentile; the 50 and 100 labels sit between axes. An axis marked “under 3” has no percentile vertex. The part A–D sparklines keep attempt order from left to right, emphasize the latest point, and repeat its WPM and change from the previous result. B/D place v1 and v2 in one sequence; A/C use only the preferred version here. The original WPM and raw/percentile rows remain below the graphics.
+- Bench: latest part results, comparisons and the eight axes. With terminal images, the radar radius is the personal-history percentile; the 50 and 100 labels sit between axes. An axis marked “under 3” has no percentile vertex. The part A–D sparklines keep attempt order from left to right, emphasize the latest point, and repeat its WPM and change from the previous result. B/D place v1 and v2 in one sequence; A/C use only the preferred version here. The original WPM and raw/percentile rows remain below the graphics. `S` switches to the [benchmark Summary](#benchmark-summary) and back; the footer adds `[S] Summary`.
 - Skills: the seven components measured by the practice menu's check steps, one small chart per component, stacked vertically (see [Skill trends](#skill-trends)).
 
 The four-week slope uses benchmark A when it is available, then another available benchmark part. A/C select v2 when present and otherwise v1; B/D combine both versions. Without a benchmark it uses practice records and explicitly warns that practice WPM is not evidence of improvement. Slopes above `+0.5 WPM/week` are upward, below `-0.5 WPM/week` are downward, and values in between are flat. Recommendations follow fixed rules: low accuracy selects a 95% accuracy gate with the pacer off; a slow transition selects `adaptive` and names the pair; weak reach selects `unlock` or `ngram`; weak reaction increases look-ahead; weak rhythm selects `rhythm`; second-half endurance deterioration selects `endurance` plus a break; and weak Japanese selects `romaji`.
@@ -252,6 +252,46 @@ The text version at 80×24 (sample data as above, without the Japanese session):
 │║                                                                            ║│
 │║                                                                            ║│
 │║                       ▲ Accuracy gate: up to level 2                       ║│
+│╚════════════════════════════════════════════════════════════════════════════╝│
+│                                            Summary   [S] details   [Esc] back│
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Benchmark Summary
+
+`S` on the Bench tab switches to a Summary of the latest benchmark run in the same layout as the [Today Summary](#summary): no tab bar, the same footer, a heading band, a decorated frame, large figures and a dark bottom band. Moving to another tab, or reopening the analysis screen, returns to the tab. The run is the latest benchmark record's day, series and form, grouped as history and the result screen group parts; it uses the records left by the period and mode filters, like the tab. It shows only values the Bench tab and the benchmark result screen already show — there is no combined score.
+
+- Heading band: `Benchmark 2026-11-19` (the day the run was played) and `bench-v2 / form 03 / Part A, B, C, D` (series, form and the parts in the run). Benchmark parts have their own languages (A English, C Japanese), so no language is shown separately.
+- Large figures: each part's net WPM side by side, under the part's name (`Part A` when the full names do not fit). Under each: its accuracy, the difference from the previous result and from the median of the last three results, computed as on the result screen — B/D compare across `bench-v1` and `bench-v2`, A/C only within the run's version. A first result reads `first result`. When an A/C part has earlier results only in the other version, the line reads `Different version: no comparison` instead.
+- The eight skill axes: the percentile of each axis as on the tab; `*` marks a raw value (fewer than three results) and `—` no data.
+- Bottom band: the result screen's personal-best verdicts — `New best! Part A, C` (net WPM, highlighted) and `New best accuracy! Part A, B`. Without any, `Previous benchmark: 2026-11-15`, or `First benchmark`. Without benchmark records the frame shows `No benchmark recorded yet` in the middle.
+
+With terminal images and at least 120×29 cells it is one image: the four values share a row and are about an eighth of the screen high, and the eight axes stand on one row. Otherwise it is text with the bitmap big text (several rows at 80×24), or normal characters when even that does not fit.
+
+The text version at 80×24 (sample data: three `bench-v2` runs on 11/12, 11/15 and 11/19; the last adds part D):
+
+```text
+┌ ANALYSIS ────────────────────────────────────────────────────────────────────┐
+│ Benchmark 2026-11-19                    bench-v2 / form 03 / Part A, B, C, D │
+│╔════════════════════════════════════════════════════════════════════════════╗│
+│║      Part A             Part B             Part C             Part D       ║│
+│║ ▗▄▄  ▄▖      ▗▖     ▄▖  ▄▖     ▗▄▄      ▖ ▄▄▄▖     ▗▖     ▄▖  ▗▖      ▗▖   ║│
+│║ ▐   ▞ ▝▖     ▌▐    ▞ ▝▖▞ ▝▖    ▐       ▐▌   ▗▘     ▌▐    ▞ ▝▖ ▌▐      ▌▐   ║│
+│║ ▞▄▖ ▌  ▌    ▐  ▌   ▘  ▌▌  ▌    ▞▄▖     ▌▌   ▞     ▐  ▌   ▘  ▌▐  ▌    ▐  ▌  ║│
+│║ ▛ ▝▖▝▄▞     ▐  ▌    ▄▞ ▚ ▗▌    ▛ ▝▖   ▐ ▌   ▌     ▐  ▌    ▄▞ ▐  ▌    ▐  ▌  ║│
+│║    ▌▞ ▝▖    ▐  ▌     ▝▖ ▀▘▌       ▌   ▙▄▙▖ ▗▘     ▐  ▌     ▝▖▐  ▌    ▐  ▌  ║│
+│║ ▌  ▌▌  ▌    ▝▖▗▘   ▌  ▌▖  ▌    ▌  ▌     ▌  ▐      ▝▖▗▘   ▌  ▌▝▖▗▘    ▝▖▗▘  ║│
+│║ ▝▄▞ ▝▄▞ ▐▌   ▚▞    ▝▄▞ ▝▄▞ ▐▌  ▝▄▞      ▌  ▐  ▐▌   ▚▞    ▝▄▞  ▚▞ ▐▌   ▚▞   ║│
+│║                                            ▝                               ║│
+│║  WPM  acc 97.0%     WPM  acc 97.0%     WPM  acc 92.0%     WPM  acc 90.0%   ║│
+│║ vs previous ▲+6.0  vs previous ▼-1.5  vs previous ▲+3.0  prev first result ║│
+│║  recent-3 ▲+6.0     recent-3 ▼-1.5     recent-3 ▲+2.0      first result    ║│
+│║                          8 skill axes (percentile)                         ║│
+│║   Sustained speed 100.0   Accuracy 100.0   Rhythm 100.0   Transitions —    ║│
+│║          Reach —   Reaction 100.0   Correction —   Japanese 100.0          ║│
+│║                                                                            ║│
+│║                           ▲ New best! Part A, C                            ║│
+│║                        New best accuracy! Part A, B                        ║│
 │╚════════════════════════════════════════════════════════════════════════════╝│
 │                                            Summary   [S] details   [Esc] back│
 └──────────────────────────────────────────────────────────────────────────────┘

@@ -922,7 +922,11 @@ pub fn bench_results_for_day_form(
     Ok(bench_results_for_records(&records, &today_records, series, parallel_index))
 }
 
-fn bench_results_for_records(
+/// The result-screen comparisons of the parts in `today_records` (one
+/// series and form), each against the earlier records of its part in
+/// `records`: B/D combine `bench-v1` and `bench-v2`, A/C stay in `series`.
+/// Also used by the benchmark tab's Summary (MYTASK-3644).
+pub fn bench_results_for_records(
     records: &[SessionRecord],
     today_records: &[(usize, &SessionRecord, crate::bench::BenchPart, u8)],
     series: &str,

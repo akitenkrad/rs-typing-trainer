@@ -14,6 +14,7 @@ mod analysis_trend_ticks;
 mod analysis_ui;
 mod bench;
 mod bench_summary_analysis;
+mod bench_tab_summary;
 mod bigtext;
 mod bigtext_image;
 mod blind;

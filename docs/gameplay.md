@@ -61,6 +61,7 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | Benchmark summary | `Enter` / `Space` / `Esc` / `Q` | Return to the title screen after the input delay |
 | Today | `↑` / `↓` (`k` / `j`) | Scroll the text version |
 | Today | `S` | Switch between the details and the Summary |
+| Bench | `S` | Switch between the tab and the benchmark Summary |
 | Coach | `↑` / `↓` (`k` / `j`) | Scroll the report |
 | Coach | `T` | Open or close goal candidates |
 | Goal candidates | `↑` / `↓`, `Enter` | Select and save a goal |
