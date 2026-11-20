@@ -100,6 +100,8 @@ If today’s latest saved benchmark form has a missing required part, the benchm
 
 The playing screen shows, from top to bottom: the header (time, WPM, item count and pace), the keyboard, the item timer bar, the combo/mistype/accuracy row, the prompt, and the preview and controls on the bottom row. The prompt starts immediately below the combo row instead of being vertically centred in the area below the keyboard, and remains centred horizontally.
 
+A bundled sentence (`sentence`, `endurance`) shows its source in one muted row under the prompt: `Author, "Title" (Aozora Bunko)` for Japanese (`作者『作品名』（青空文庫）` when the display language is Japanese) and `Tatoeba #12345` for English. Only the sentence being typed has it, not the preview. Words, phrases and sentences from your own `[data]` files show none. When the screen has no row to spare, the row takes one of the prompt's optional blank rows (large text) or shares the row under the card with the status message (normal text); otherwise it is left out, and the prompt, the metrics and the bottom row are never given up for it.
+
 `display.prompt_style` chooses how the prompt is drawn: `large` (default) or `normal`. The settings screen calls it "Prompt text" with the values "Large text" and "Normal text", and `Z` on the mode selection screen toggles it.
 
 **Large text** draws the item being typed with the bundled Shinonome bitmap font. Four font dots become one terminal quadrant-block cell, so a 12-dot fullwidth character occupies 6×6 cells and a 16-dot character occupies 8×8 cells. One blank row separates each large block from the normal-size rows around it, and labels sit in a column to the left of the block they name, on its top row:
@@ -194,6 +196,26 @@ The step position and title are dropped first when the window is narrow. “This
 - `today's check is in Japanese, judged next time` (or English), when today's check step is in the other language.
 
 `; improved (reference only; no control)` is appended when the reference judgment taken at this step is “improved”. The check step has no condition of its own; its line lists the prescriptions it judged, for example `Judged with this check: Widen preview met 2/3; Even rhythm not met 0/3`.
+
+### The step's goal on screen
+
+Six steps show their goal while you type and put it first on their result screen: `accuracy.gate`, `accuracy.anticipation`, `rhythm.metronome`, `speed.pacer`, `endurance.split` and the finish step (`fixed.finish`). The playing screen gains a meter row with a target line `┃`, and the combo/mistype/accuracy row becomes a note about the goal. The meter is green when the goal is met, yellow when it is close to the line and red when it is off; it is updated on every keystroke. A missed goal never ends the step early. The result screen starts with a box titled with the step that shows the goal's value in large digits and the verdict, followed by one muted line with WPM, CPS, accuracy, words, mistypes and the longest combo; the menu line and the progress line stay at the bottom. With terminal images, the box sits above the usual image cards when the window is tall enough.
+
+| Step | While typing | On the result screen |
+|---|---|---|
+| `accuracy.gate` | accuracy against the step's gate (`gate.min_accuracy`); correct keystrokes in a row and the longest run; the margin to the gate; `★ New longest streak!` | accuracy, passed or below the gate, `3 in a row: 2/3`, and the errors on a time line of the step |
+| `accuracy.anticipation` | share of anticipation errors against your own median; `Anticipated!` for a moment after one; `no baseline` without earlier check steps | the share, compared with your median, and the counts |
+| `rhythm.metronome` | within-word IKI CV against your own median (lower is better); the recent within-word intervals as a band | the CV, its comparison and a histogram of the intervals |
+| `speed.pacer` | net WPM ahead of or behind the pacer target; a second meter for accuracy with the 95% line | whether the target was reached, with speed and accuracy as two conditions |
+| `endurance.split` | `1st half: measuring` during the first half; then the second-half slowdown against the 15% line | the slowdown and the first-half and second-half IKI and error rates |
+| `fixed.finish` | the sprint number, its WPM against the best earlier sprint; `★ Fastest pace!` | every sprint so far as a bar, the fastest one marked |
+
+The values are those that are recorded and judged: accuracy, the CV, the anticipation share and the slowdown come from the same calculations as the graduation condition, and the last value on the meter equals the value on the result screen. “Your own median” is the median of your earlier check steps in the same language, read once when the step starts. Other steps, individual training, benchmarks and the stand-alone warm-up keep the ordinary screens. The meter of `accuracy.gate` at 80×24:
+
+```text
+│        Accuracy ████████████████████░░░░░░░░░░░┃░░░░░░░░ 92.5%  gate 97%    │
+│           Streak 8 keys (longest 12)    Errors 3    gate margin -4.5pt       │
+```
 
 ### Menu summary screen
 

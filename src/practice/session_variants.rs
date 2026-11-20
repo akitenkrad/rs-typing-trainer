@@ -22,6 +22,10 @@ impl BurstSeries {
     pub fn run_count(&self) -> usize {
         self.runs.len()
     }
+    /// Net WPM of each finished sprint, in order.
+    pub fn runs(&self) -> &[f64] {
+        &self.runs
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

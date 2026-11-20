@@ -395,7 +395,7 @@ fn a_japanese_warm_up_shows_surface_kana_and_romaji_rows() {
     let text = render(&app, 80, 24);
     // Wide characters are followed by a blank cell in the test buffer.
     let compact = text.replace(' ', "");
-    for label in ["表記", "かな", "ローマ字", "[F2]読みが違う"] {
+    for label in ["表記", "かな", "ローマ字", "[Ctrl+R/F2]読みが違う"] {
         assert!(compact.contains(label), "missing {label:?}:\n{text}");
     }
     assert!(compact.contains(&format!("表記{surface}")), "surface {surface:?} not shown:\n{text}");

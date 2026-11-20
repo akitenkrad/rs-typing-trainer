@@ -155,6 +155,34 @@ pub fn diagnose_errors(
     settings: AnalysisSettings,
     as_of: DateTime<Utc>,
 ) -> ErrorDiagnosis {
+    let (kinds, confusion) = classify_errors(records, layout, geometry);
+    let model = build_player_model(records, layout, geometry, settings, ModelView::Recent, as_of);
+    ErrorDiagnosis {
+        kinds,
+        confusion: confusion
+            .into_iter()
+            .map(|((expected, typed), n)| ConfusionMetric { expected, typed, n })
+            .collect(),
+        post_error_slowdown: post_error_slowdown(records, &model),
+        pre_error_rhythm: pre_error_rhythm(records),
+        correction: correction_cost(records),
+        attack_errors: attack_error_rate(records),
+    }
+}
+
+/// The error kinds of [`diagnose_errors`] alone, without the player model and
+/// the timing diagnostics. It is the same classification, so a live display
+/// can follow it keystroke by keystroke (MYTASK-3633).
+pub fn error_kind_counts(records: &[SessionRecord], layout: &KeyboardLayout, geometry: &KeyboardGeometry) -> Vec<ErrorKindMetric> {
+    classify_errors(records, layout, geometry).0
+}
+
+#[allow(clippy::type_complexity)]
+fn classify_errors(
+    records: &[SessionRecord],
+    layout: &KeyboardLayout,
+    geometry: &KeyboardGeometry,
+) -> (Vec<ErrorKindMetric>, BTreeMap<(String, String), u64>) {
     let physical = physical_map(geometry);
     let mut counts = BTreeMap::<ErrorKind, u64>::new();
     let mut confusion = BTreeMap::<(String, String), u64>::new();
@@ -173,29 +201,19 @@ pub fn diagnose_errors(
         .filter(|(kind, _)| **kind != ErrorKind::Consecutive)
         .map(|(_, count)| count)
         .sum::<u64>();
-    let model = build_player_model(records, layout, geometry, settings, ModelView::Recent, as_of);
-    ErrorDiagnosis {
-        kinds: counts
-            .into_iter()
-            .map(|(kind, n)| ErrorKindMetric {
-                kind,
-                n,
-                proportion: if first_error_total > 0 {
-                    n as f64 / first_error_total as f64
-                } else {
-                    0.0
-                },
-            })
-            .collect(),
-        confusion: confusion
-            .into_iter()
-            .map(|((expected, typed), n)| ConfusionMetric { expected, typed, n })
-            .collect(),
-        post_error_slowdown: post_error_slowdown(records, &model),
-        pre_error_rhythm: pre_error_rhythm(records),
-        correction: correction_cost(records),
-        attack_errors: attack_error_rate(records),
-    }
+    let kinds = counts
+        .into_iter()
+        .map(|(kind, n)| ErrorKindMetric {
+            kind,
+            n,
+            proportion: if first_error_total > 0 {
+                n as f64 / first_error_total as f64
+            } else {
+                0.0
+            },
+        })
+        .collect();
+    (kinds, confusion)
 }
 
 #[derive(Clone, Copy)]

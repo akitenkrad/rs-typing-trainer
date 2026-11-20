@@ -99,6 +99,26 @@ pub fn render(frame: &mut Frame, app: &App) {
         return;
     };
 
+    // MYTASK-3633: a menu step with a live goal puts that goal on top. The
+    // image layouts keep their cards under the (text) headline when there is
+    // room; otherwise the text layout with the headline is used.
+    if let Some(report) = crate::ui::live_goal::result_report(app, content.width, &theme) {
+        let hero = report.height().min(content.height);
+        if content.width >= 120 {
+            let rest = Rect::new(content.x, content.y + hero, content.width, content.height.saturating_sub(hero));
+            if rest.height >= 37 && render_image_result(frame, app, result, &theme, rest, lang) {
+                crate::ui::live_goal::render_report(frame, &report, &theme, Rect::new(content.x, content.y, content.width, hero));
+                return;
+            }
+            if rest.height >= 29 && render_compact_image_result(frame, app, result, &theme, rest, lang) {
+                crate::ui::live_goal::render_report(frame, &report, &theme, Rect::new(content.x, content.y, content.width, hero));
+                return;
+            }
+        }
+        render_goal_text_result(frame, app, result, &report, &theme, content, lang);
+        return;
+    }
+
     if content.width >= 120 {
         if content.height >= 37 && render_image_result(frame, app, result, &theme, content, lang) {
             return;
@@ -108,6 +128,58 @@ pub fn render(frame: &mut Frame, app: &App) {
         }
     }
     render_text_result(frame, app, result, &theme, content, lang);
+}
+
+/// The text result of a menu step with a live goal (MYTASK-3633): the goal
+/// large on top, the usual numbers in one muted line, then the
+/// observations, the save line and the menu rows at the bottom.
+fn render_goal_text_result(
+    frame: &mut Frame,
+    app: &App,
+    result: &GameResult,
+    report: &crate::ui::live_goal::GoalReport,
+    theme: &Theme,
+    area: Rect,
+    lang: Lang,
+) {
+    let fixed = 2 + result_hint_height(app);
+    let hero = report.height().min(area.height.saturating_sub(fixed));
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(hero),
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Length(result_hint_height(app)),
+        ])
+        .split(area);
+    crate::ui::live_goal::render_report(frame, report, theme, rows[0]);
+    let others = format!(
+        "{} {:.1} · {} {:.2} · {} {:.1}% · {} {} · {} {} · {} {}",
+        Msg::Wpm.text(lang),
+        result.wpm,
+        Msg::Cps.text(lang),
+        result.cps,
+        Msg::Accuracy.text(lang),
+        result.accuracy * 100.0,
+        Msg::Words.text(lang),
+        result.metrics.completed_words,
+        Msg::Mistypes.text(lang),
+        result.metrics.mistypes_total,
+        Msg::MaxCombo.text(lang),
+        result.max_combo,
+    );
+    let width = usize::from(rows[1].width.saturating_sub(4));
+    frame.render_widget(
+        Paragraph::new(truncate_display(&others, width)).style(Style::default().fg(theme.muted)),
+        left_inset(rows[1]),
+    );
+    if rows[2].height >= 3 {
+        render_observations(frame, app, theme, rows[2], lang);
+    }
+    frame.render_widget(Paragraph::new(save_line(app, result, theme)), left_inset(rows[3]));
+    render_result_hint(frame, app, theme, rows[4], lang);
 }
 
 fn result_mode_is(app: &App, mode: crate::config::ModeKind) -> bool {
@@ -1381,7 +1453,7 @@ fn render_hint_history(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, 
 /// Render `s` as a 5-row block-character "big text" suitable for the result
 /// summary. Supported glyphs are `0-9`, `.`, `%`, and space; unknown
 /// characters render as blank.
-fn big_text(s: &str) -> [String; 5] {
+pub(crate) fn big_text(s: &str) -> [String; 5] {
     let mut rows: [String; 5] = Default::default();
     for c in s.chars() {
         let glyph = big_glyph(c);
@@ -1407,6 +1479,8 @@ fn big_glyph(c: char) -> [&'static str; 5] {
         '9' => [" ███ ", "█   █", " ████", "    █", " ███ "],
         '.' => ["   ", "   ", "   ", "   ", " █ "],
         '%' => ["█   █", "   █ ", "  █  ", " █   ", "█   █"],
+        '+' => ["     ", "  █  ", "█████", "  █  ", "     "],
+        '-' => ["     ", "     ", "█████", "     ", "     "],
         ' ' => ["  ", "  ", "  ", "  ", "  "],
         _ => ["  ", "  ", "  ", "  ", "  "],
     }

@@ -180,6 +180,12 @@ pub fn generate(options: &GenerationOptions) -> Result<GenerationReport> {
     let review_words = render_ja_word_review(&ja_words);
     let review_sentences = render_ja_sentence_review(&ja_sentences);
     let notice = render_notice(&options.input, &works)?;
+    let used_work_ids = ja_sentences.iter().map(|sentence| sentence.source_id.as_str()).collect::<BTreeSet<_>>();
+    let aozora_works_tsv = render_aozora_works(
+        works.iter().map(|work| (work.id.as_str(), work.author.as_str(), work.title.as_str())),
+        &used_work_ids,
+    );
+    let aozora_works_count = aozora_works_tsv.lines().count();
 
     let outputs = [
         ("en_words.tsv.gz", gzip(en_words_tsv.as_bytes())?, en_words.len()),
@@ -188,6 +194,7 @@ pub fn generate(options: &GenerationOptions) -> Result<GenerationReport> {
         ("ja_phrases.tsv.gz", gzip(ja_phrases_tsv.as_bytes())?, ja_phrases.len()),
         ("en_sentences.tsv.gz", gzip(en_sentences_tsv.as_bytes())?, en_sentences.len()),
         ("ja_sentences.tsv.gz", gzip(ja_sentences_tsv.as_bytes())?, ja_sentences.len()),
+        ("aozora_works.tsv.gz", gzip(aozora_works_tsv.as_bytes())?, aozora_works_count),
         ("NOTICE", notice.into_bytes(), 1),
     ];
     for (name, content, _) in &outputs {
@@ -934,6 +941,50 @@ fn render_ja_sentence_review(sentences: &[JapaneseSentence]) -> String {
         .collect()
 }
 
+/// The Aozora Bunko work table bundled next to `ja_sentences.tsv.gz`:
+/// `id<TAB>author<TAB>title`, one row per work that a bundled sentence cites,
+/// ordered by work id. The app reads it to show a sentence's source.
+pub fn render_aozora_works<'a>(works: impl IntoIterator<Item = (&'a str, &'a str, &'a str)>, used_ids: &BTreeSet<&str>) -> String {
+    let mut rows = BTreeMap::new();
+    for (id, author, title) in works {
+        if used_ids.contains(id) {
+            rows.entry(id).or_insert((author, title));
+        }
+    }
+    rows.into_iter()
+        .map(|(id, (author, title))| format!("{id}\t{author}\t{title}\n"))
+        .collect()
+}
+
+/// Builds the work table from `aozora_selection.tsv`
+/// (`id<TAB>author<TAB>title<TAB>input by<TAB>URL`) and an uncompressed
+/// `ja_sentences.tsv` (`text<TAB>reading<TAB>id<TAB>author<TAB>tier`), failing
+/// when a sentence cites a work the selection does not list.
+pub fn aozora_works_from_selection(selection: &str, sentences: &str) -> Result<String> {
+    let mut works = Vec::new();
+    for (index, line) in selection.lines().enumerate() {
+        if line.trim().is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let fields = line.split('\t').collect::<Vec<_>>();
+        ensure!(fields.len() == 5, "selection.tsv line {} must have five fields", index + 1);
+        works.push((fields[0], fields[1], fields[2]));
+    }
+    let mut used = BTreeSet::new();
+    for (index, line) in sentences.lines().enumerate() {
+        if line.trim().is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let fields = line.split('\t').collect::<Vec<_>>();
+        ensure!(fields.len() == 5, "ja_sentences.tsv line {} must have five fields", index + 1);
+        used.insert(fields[2]);
+    }
+    let known = works.iter().map(|(id, _, _)| *id).collect::<BTreeSet<_>>();
+    let missing = used.difference(&known).copied().collect::<Vec<_>>();
+    ensure!(missing.is_empty(), "works missing from selection.tsv: {}", missing.join(", "));
+    Ok(render_aozora_works(works, &used))
+}
+
 fn load_reviewed_pairs(source: &str) -> Result<BTreeSet<(String, String)>> {
     let mut pairs = BTreeSet::new();
     for (index, line) in source.lines().enumerate() {
@@ -956,7 +1007,9 @@ fn render_notice(input: &Path, works: &[Work]) -> Result<String> {
     notice.push_str(scowl.trim_end());
     notice.push_str("\n\n\nIPADIC\n======\n\n");
     notice.push_str(IPADIC_COPYING.trim_end());
-    notice.push_str("\n\n\nJapanese public-domain works\n============================\n\nTitle\tAuthor\tInput by\n");
+    notice.push_str("\n\n\nJapanese public-domain works\n============================\n\n");
+    notice.push_str("Japanese sentences were taken from these works as published by Aozora Bunko (https://www.aozora.gr.jp/).\n\n");
+    notice.push_str("Title\tAuthor\tInput by\n");
     for work in works {
         notice.push_str(&format!("{}\t{}\t{}\n", work.title, work.author, work.input_by));
     }

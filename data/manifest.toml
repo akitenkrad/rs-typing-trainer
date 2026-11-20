@@ -2490,8 +2490,8 @@ sha256 = "b9603d39b043166b6f37dc7d9a5973a65ffba3b32b32f7400efb55080001a682"
 
 [[outputs]]
 path = "ja_words.tsv.gz"
-count = 12000
-sha256 = "82bb9ba580357ef769a09c54504a63671188f990fc29ec5a5c09f966481add32"
+count = 11995
+sha256 = "925abb06becf4dc354da096107f706475188367e504426b9794d8b554a768838"
 
 [[outputs]]
 path = "en_phrases.tsv.gz"
@@ -2511,12 +2511,17 @@ sha256 = "271402caad3e3edf023db6e8b77a87e520b77533ce8e0dac456bcc42e3bce130"
 [[outputs]]
 path = "ja_sentences.tsv.gz"
 count = 7394
-sha256 = "17e706d91b028a8462440617df858b0f8b2914a2e0bda17e3734636e2b9e0587"
+sha256 = "9a3890a22140008c28f157866cf6269efbf788696e34c12ea492a73e381ee303"
+
+[[outputs]]
+path = "aozora_works.tsv.gz"
+count = 526
+sha256 = "e809e2830de8bf30abfe5410ade29f5ad9e138be6a218b8f6e5377481d2f7a7a"
 
 [[outputs]]
 path = "NOTICE"
 count = 1
-sha256 = "c3f7b3586d0292bf0a63e8c91ad90d4f39f18bafeb76efd623026c17d51cb10c"
+sha256 = "775e37415d653b369a1ce5457bf759ca48635075ea759d0328231cab100a64a0"
 
 [[outputs]]
 path = "font/shinonome12.bin.gz"

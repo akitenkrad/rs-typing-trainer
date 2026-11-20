@@ -237,6 +237,8 @@ A graduation condition is judged from one of two sources:
 - **The same run's check step** (all others except transitions): judged once per run, when both the prescription step and a check step in the same language have been played, in either order. “At or below your median” compares the check value with the median of your earlier check steps in that language. With no earlier check, or when today's check is in the other language, the condition is not judged in that run.
 - **Transitions** (`transition.*`): graduate when the prescription check (R3, against control transitions) of the latest adaptive prescription says “effective”. A verdict counts only once.
 
+While a step of `accuracy.gate`, `accuracy.anticipation`, `rhythm.metronome`, `speed.pacer` or `endurance.split` is played, its graduation metric is shown live as a meter with the target line (the gate, your own median, the pacer target with the 95% accuracy line, or the 15% slowdown line), and its result screen leads with that metric; the finish step shows its three sprints. See [The step's goal on screen](gameplay.md#the-steps-goal-on-screen).
+
 A session that meets the condition advances the count; one that does not resets it; one that cannot be determined (missing data) leaves it unchanged. Missing data is never treated as zero. Reaching the required count moves to the next level. Graduating the last level puts the prescription into **maintenance**: it is checked once more after 14 days at a check step, and if that check's component score is below the median of the earlier checks, practice resumes from its last level rather than from level 1.
 
 ### Reference judgment, swaps and pauses

@@ -18,5 +18,6 @@ pub fn perf_lock() -> MutexGuard<'static, ()> {
 mod analysis_image_perf;
 mod bigtext_image_perf;
 mod keyboard_image_perf;
+mod live_goal_perf;
 mod result_image_perf;
 mod title_image_perf;

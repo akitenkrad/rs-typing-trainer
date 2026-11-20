@@ -1,10 +1,10 @@
 use std::collections::BTreeSet;
 
 use gen_data::{
-    BizUdGenerationReport, FontGenerationOptions, FontKind, OutlineCommand, OutlineFont, OutlineGlyph, decode_outline_font, encode_outline_font,
-    extract_aozora, extract_english_body, generate_fonts, gzip_deterministic, jis_x0208_to_char, load_scowl_words, parse_bdf, prepare_english_phrase,
-    prepare_english_sentence, prepare_japanese_phrases, stable_sample, update_bizud_manifest, update_bizud_notice, update_shinonome_manifest,
-    update_shinonome_notice,
+    BizUdGenerationReport, FontGenerationOptions, FontKind, OutlineCommand, OutlineFont, OutlineGlyph, aozora_works_from_selection,
+    decode_outline_font, encode_outline_font, extract_aozora, extract_english_body, generate_fonts, gzip_deterministic, jis_x0208_to_char,
+    load_scowl_words, parse_bdf, prepare_english_phrase, prepare_english_sentence, prepare_japanese_phrases, render_aozora_works, stable_sample,
+    update_bizud_manifest, update_bizud_notice, update_shinonome_manifest, update_shinonome_notice,
 };
 use tempfile::TempDir;
 
@@ -539,4 +539,52 @@ fn both_font_blocks_are_restored_after_data_outputs_are_rewritten() {
     update_bizud_manifest(&manifest, &font_dir, &bizud_report).unwrap();
     assert_eq!(std::fs::read(&notice).unwrap(), once_notice);
     assert_eq!(std::fs::read(&manifest).unwrap(), once_manifest);
+}
+
+#[test]
+fn aozora_work_table_lists_only_cited_works_in_id_order() {
+    let works = [
+        ("000752", "夏目漱石", "坊っちゃん"),
+        ("000081", "宮沢賢治", "やまなし"),
+        ("000753", "夏目漱石", "文鳥"),
+    ];
+    let used = BTreeSet::from(["000753", "000081"]);
+    assert_eq!(render_aozora_works(works, &used), "000081\t宮沢賢治\tやまなし\n000753\t夏目漱石\t文鳥\n");
+    assert_eq!(render_aozora_works(works, &BTreeSet::new()), "");
+}
+
+#[test]
+fn aozora_work_table_is_built_from_the_selection_and_sentences() {
+    let selection = "000752\t夏目漱石\t坊っちゃん\t真先芳秋\thttps://example.invalid/752.zip\n\
+                     000081\t宮沢賢治\tやまなし\t土屋隆\thttps://example.invalid/81.zip\n";
+    let sentences = "親譲りの無鉄砲で小供の時から損ばかりしている。\tおやゆずりのむてっぽうでこどものときからそんばかりしている。\t000752\t夏目漱石\text\n\
+                     親譲りの無鉄砲で小供の時から損ばかりしていた。\tおやゆずりのむてっぽうでこどものときからそんばかりしていた。\t000752\t夏目漱石\tcore\n";
+    assert_eq!(
+        aozora_works_from_selection(selection, sentences).unwrap(),
+        "000752\t夏目漱石\t坊っちゃん\n"
+    );
+
+    let unknown = "ある文。\tあるぶん。\t999999\t誰か\text\n";
+    let error = aozora_works_from_selection(selection, unknown).unwrap_err().to_string();
+    assert!(error.contains("999999"), "{error}");
+    assert!(aozora_works_from_selection("000752\t夏目漱石\n", sentences).is_err());
+}
+
+#[test]
+fn bundled_aozora_work_table_matches_the_selection() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let selection = std::fs::read_to_string(root.join("sources/aozora_selection.tsv")).unwrap();
+    let mut sentences = String::new();
+    std::io::Read::read_to_string(
+        &mut flate2::read::GzDecoder::new(std::fs::File::open(root.join("../../data/ja_sentences.tsv.gz")).unwrap()),
+        &mut sentences,
+    )
+    .unwrap();
+    let expected = aozora_works_from_selection(&selection, &sentences).unwrap();
+    let bundled = std::fs::read(root.join("../../data/aozora_works.tsv.gz")).unwrap();
+    assert_eq!(
+        bundled,
+        gzip_deterministic(expected.as_bytes()).unwrap(),
+        "regenerate data/aozora_works.tsv.gz"
+    );
 }

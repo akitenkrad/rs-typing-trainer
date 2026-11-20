@@ -2,7 +2,7 @@
 
 # Prompt data
 
-rs-typing-trainer bundles six deterministic gzip-compressed TSV datasets. They are embedded with `include_bytes!`, decompressed once at startup, and cached. Their exact input hashes, generation date, filters, output hashes, lindera version, and dictionary version are recorded in [`data/manifest.toml`](../data/manifest.toml). Copyright and attribution details are in [`data/NOTICE`](../data/NOTICE).
+rs-typing-trainer bundles six deterministic gzip-compressed TSV datasets and a table of the Aozora Bunko works the Japanese sentences come from. They are embedded with `include_bytes!`, decompressed once at startup, and cached. Their exact input hashes, generation date, filters, output hashes, lindera version, and dictionary version are recorded in [`data/manifest.toml`](../data/manifest.toml). Copyright and attribution details are in [`data/NOTICE`](../data/NOTICE).
 
 The application also bundles the public-domain Shinonome 0.9.11 font at 12 and 16 dots. Both files contain 6,879 JIS X 0208 fullwidth glyphs, 95 printable ASCII glyphs, and 63 JIS X 0201 halfwidth-kana glyphs, keyed by Unicode code point. `data/NOTICE` includes the complete UTF-8-converted `LICENSE` and `AUTHORS` files and the upstream URL.
 
@@ -16,12 +16,13 @@ The application also bundles the public-domain Shinonome 0.9.11 font at 12 and 1
 | `data/ja_phrases.tsv.gz` | 1,989 | `surface`, `reading`, `rank`, `tier` |
 | `data/en_sentences.tsv.gz` | 19,705 | `text`, `tatoeba_id`, `tier` |
 | `data/ja_sentences.tsv.gz` | 7,394 | `text`, `reading`, `source_id`, `author`, `tier` |
+| `data/aozora_works.tsv.gz` | 526 | `source_id`, `author`, `title` |
 | `data/font/shinonome12.bin.gz` | 7,037 glyphs | fixed binary records |
 | `data/font/shinonome16.bin.gz` | 7,037 glyphs | fixed binary records |
 
 Each uncompressed font starts with a 20-byte header: `SHNFONT\0`, format version, dot height, halfwidth pixel width, fullwidth pixel width, a little-endian glyph count, and four reserved bytes. Code-point-sorted fixed records then contain a little-endian `u32` Unicode value, one width byte, and `height` little-endian `u16` rows. Pixel x is bit `15-x`. Gzip timestamps are zero. The compressed 12-dot and 16-dot files are 113,046 and 150,545 bytes respectively.
 
-Readings are hiragana with the documented punctuation; phrase readings may also contain `！` and `？`. A long-vowel mark appears only when it is also present in the written prompt. The source ID for a Japanese sentence is the six-digit work ID in `tools/gen-data/sources/aozora_selection.tsv`. `tier=core` contains 2,000 English words, 1,886 English phrases, 2,068 English sentences, 561 hand-reviewed Japanese words, all 1,989 original Japanese phrases, and 537 hand-reviewed Japanese sentences; all other rows use `tier=ext`.
+Readings are hiragana with the documented punctuation; phrase readings may also contain `！` and `？`. A long-vowel mark appears only when it is also present in the written prompt. The source ID for a Japanese sentence is the six-digit work ID in `tools/gen-data/sources/aozora_selection.tsv`. `data/aozora_works.tsv.gz` lists, in ID order, the author and title of exactly the works that the bundled sentences cite; the playing screen uses it and the Tatoeba IDs to show where a sentence comes from (see [Playing](gameplay.md#playing-screen-layout)). `tier=core` contains 2,000 English words, 1,886 English phrases, 2,068 English sentences, 561 hand-reviewed Japanese words, all 1,989 original Japanese phrases, and 537 hand-reviewed Japanese sentences; all other rows use `tier=ext`.
 
 ## Sources and licenses
 
@@ -52,7 +53,7 @@ The data API has two entry points. The fixed complete catalog is reserved for re
 
 Daily decks normally contain 65% high-frequency core items and 35% broad-tail items. Due mistakes return 1, 3, 7, and 14 days after the last mistake, up to 10% of the deck. Sentence selection prefers `item_exposure.count = 0`, then the least-exposed rows. Wednesday favors sentences with digits or symbols, Friday favors one Japanese author, and Sunday uses a 50% broad tail. The current theme appears on the title and mode-selection screens.
 
-Press `F2` while practicing Japanese words or sentences to report a wrong reading. The item is skipped and excluded on later starts. Reports are appended as `timestamp<TAB>kind<TAB>text<TAB>reading` to `reading_reports.tsv` beside the configured database.
+Press `Ctrl+R` (or `F2`; on macOS `F2` needs `fn` by default) while practicing Japanese words or sentences to report a wrong reading. The item is skipped and excluded on later starts. Reports are appended as `timestamp<TAB>kind<TAB>text<TAB>reading` to `reading_reports.tsv` beside the configured database.
 
 ## Regeneration
 

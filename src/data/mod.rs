@@ -1,6 +1,6 @@
 //! Bundled and user-provided prompt data.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -9,6 +9,7 @@ use flate2::read::GzDecoder;
 
 use crate::config::DataConfig;
 use crate::error::{AppError, AppResult};
+use crate::i18n::Lang;
 
 const WORDS_EN_GZ: &[u8] = include_bytes!("../../data/en_words.tsv.gz");
 const WORDS_JA_GZ: &[u8] = include_bytes!("../../data/ja_words.tsv.gz");
@@ -16,6 +17,9 @@ const PHRASES_EN_GZ: &[u8] = include_bytes!("../../data/en_phrases.tsv.gz");
 const PHRASES_JA_GZ: &[u8] = include_bytes!("../../data/ja_phrases.tsv.gz");
 const SENTENCES_EN_GZ: &[u8] = include_bytes!("../../data/en_sentences.tsv.gz");
 const SENTENCES_JA_GZ: &[u8] = include_bytes!("../../data/ja_sentences.tsv.gz");
+/// Aozora Bunko works cited by the bundled Japanese sentences:
+/// `id<TAB>author<TAB>title`.
+const AOZORA_WORKS_GZ: &[u8] = include_bytes!("../../data/aozora_works.tsv.gz");
 
 static BUNDLED: OnceLock<Result<BundledText, String>> = OnceLock::new();
 
@@ -55,6 +59,27 @@ struct BundledText {
     phrases_ja: String,
     sentences_en: String,
     sentences_ja: String,
+    aozora_works: String,
+}
+
+/// Where a bundled sentence comes from, shown under the prompt.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PromptSource {
+    /// A public-domain work published by Aozora Bunko.
+    Aozora { work_id: String, author: String, title: String },
+    /// A sentence of the Tatoeba CC0 export, by its sentence number.
+    Tatoeba { sentence_id: String },
+}
+
+impl PromptSource {
+    /// The one-line credit in the display language.
+    pub fn label(&self, lang: Lang) -> String {
+        match (self, lang) {
+            (Self::Aozora { author, title, .. }, Lang::Ja) => format!("{author}『{title}』（青空文庫）"),
+            (Self::Aozora { author, title, .. }, Lang::En) => format!("{author}, \"{title}\" (Aozora Bunko)"),
+            (Self::Tatoeba { sentence_id }, _) => format!("Tatoeba #{sentence_id}"),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -81,6 +106,9 @@ pub struct DataCatalog {
     sentences_en: Vec<String>,
     sentences_ja: Vec<JapaneseText>,
     fixed: Vec<DataItem>,
+    /// Sources of the bundled sentences, by `DataItem::key`. Sentences read
+    /// from the user's own files have none.
+    sources: HashMap<String, PromptSource>,
 }
 
 impl DataCatalog {
@@ -139,6 +167,7 @@ impl DataCatalog {
         }
         let mut seen_japanese_phrases = HashSet::new();
         phrases_ja.retain(|row| seen_japanese_phrases.insert((row.text.clone(), row.reading.clone())));
+        let sources = sentence_sources(&fixed, &bundled.aozora_works)?;
         Ok(Self {
             words_en: load_one_column_source(&words_en_source, config.words_en.is_none())?,
             words_ja: load_japanese_source(&words_ja_source)?,
@@ -147,7 +176,19 @@ impl DataCatalog {
             sentences_en: load_one_column_source(&sentences_en_source, config.sentences_en.is_none())?,
             sentences_ja: load_japanese_source(&sentences_ja_source)?,
             fixed,
+            sources,
         })
+    }
+
+    /// The source of a bundled sentence (`EnglishSentence` or
+    /// `JapaneseSentence`), if it has one.
+    pub fn sentence_source(&self, kind: DataKind, text: &str, reading: Option<&str>) -> Option<&PromptSource> {
+        let key = match kind {
+            DataKind::EnglishSentence => format!("{}:{text}", kind_key(kind)),
+            DataKind::JapaneseSentence => format!("{}:{text}\t{}", kind_key(kind), reading?),
+            _ => return None,
+        };
+        self.sources.get(&key)
     }
 
     /// Immutable complete data used by benchmarks and daily-deck construction.
@@ -292,6 +333,8 @@ fn parse_english_items(source: &str, kind: DataKind, bundled: bool) -> AppResult
         } else {
             (None, Tier::Ext)
         };
+        // Bundled English sentences carry their Tatoeba sentence number.
+        let source_id = (bundled && kind == DataKind::EnglishSentence).then(|| fields[1].to_owned());
         items.push(DataItem {
             kind,
             key: format!("{}:{text}", kind_key(kind)),
@@ -299,7 +342,7 @@ fn parse_english_items(source: &str, kind: DataKind, bundled: bool) -> AppResult
             reading: None,
             rank,
             tier,
-            source_id: None,
+            source_id,
             author: None,
         });
     }
@@ -370,6 +413,44 @@ fn parse_japanese_items(source: &str, kind: DataKind, bundled: bool) -> AppResul
     Ok(items)
 }
 
+/// Sources of the bundled sentences: Tatoeba numbers for English, and the
+/// Aozora Bunko work (looked up in the bundled work table) for Japanese.
+fn sentence_sources(items: &[DataItem], aozora_works: &str) -> AppResult<HashMap<String, PromptSource>> {
+    let mut works = HashMap::new();
+    for (index, line) in aozora_works.lines().enumerate() {
+        if line.trim().is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let fields = line.split('\t').collect::<Vec<_>>();
+        if fields.len() != 3 {
+            return Err(AppError::Record(format!("bundled Aozora work line {} needs three fields", index + 1)));
+        }
+        works.insert(fields[0], (fields[1], fields[2]));
+    }
+    let mut sources = HashMap::new();
+    for item in items {
+        let Some(id) = item.source_id.as_deref() else {
+            continue;
+        };
+        let source = match item.kind {
+            DataKind::EnglishSentence => PromptSource::Tatoeba { sentence_id: id.to_owned() },
+            DataKind::JapaneseSentence => {
+                let Some((author, title)) = works.get(id) else {
+                    continue;
+                };
+                PromptSource::Aozora {
+                    work_id: id.to_owned(),
+                    author: (*author).to_owned(),
+                    title: (*title).to_owned(),
+                }
+            }
+            _ => continue,
+        };
+        sources.insert(item.key.clone(), source);
+    }
+    Ok(sources)
+}
+
 fn parse_tier(value: &str, line: usize) -> AppResult<Tier> {
     match value {
         "core" => Ok(Tier::Core),
@@ -399,6 +480,7 @@ fn bundled_text() -> AppResult<&'static BundledText> {
                 phrases_ja: decompress(PHRASES_JA_GZ)?,
                 sentences_en: decompress(SENTENCES_EN_GZ)?,
                 sentences_ja: decompress(SENTENCES_JA_GZ)?,
+                aozora_works: decompress(AOZORA_WORKS_GZ)?,
             })
         })
         .as_ref()

@@ -307,6 +307,18 @@ impl CheckSeries {
         median(self.previous.iter().filter_map(|point| Self::score(point, component)).collect())
     }
 
+    /// The player's own median of `metric` over the check steps of earlier
+    /// runs: the reference of the `le-own-median` / `ge-own-median` rules.
+    fn previous_metric_median(&self, ctx: &JudgeContext<'_>, metric: MenuMetric) -> AppResult<Option<f64>> {
+        let mut previous = Vec::new();
+        for point in &self.previous {
+            if let Some(value) = self.metric(ctx, metric, point)? {
+                previous.push(value);
+            }
+        }
+        Ok(median(previous))
+    }
+
     fn metric(&self, ctx: &JudgeContext<'_>, metric: MenuMetric, point: &CheckPoint) -> AppResult<Option<f64>> {
         if let Some(component) = grade_component_for_metric(metric) {
             return Ok(point
@@ -371,6 +383,14 @@ fn median(mut values: Vec<f64>) -> Option<f64> {
     })
 }
 
+/// The own median that the judgment of `run_id` compares `metric` with
+/// (`le-own-median` / `ge-own-median`): the median over the `language` check
+/// steps of the other runs, computed exactly as the judgment does. The live
+/// display of a menu step reads it once when the step starts (MYTASK-3633).
+pub fn own_median_for_metric(ctx: &JudgeContext<'_>, metric: MenuMetric, language: &'static str, run_id: i64) -> AppResult<Option<f64>> {
+    CheckSeries::load(ctx, language, run_id)?.previous_metric_median(ctx, metric)
+}
+
 /// The value of `metric` for one session. Missing data is `None` — never 0 —
 /// so a judgment on it is "cannot determine" (§5: insufficient data never
 /// switches or pauses a prescription).
@@ -409,15 +429,25 @@ pub fn session_metric_value(ctx: &JudgeContext<'_>, metric: MenuMetric, record: 
 /// share is undefined (0/0) and therefore `None`; with first errors but no
 /// anticipation among them it is a measured 0.
 pub fn anticipation_rate(diagnosis: &crate::analysis::errors::ErrorDiagnosis) -> Option<f64> {
+    anticipation_rate_of_kinds(&diagnosis.kinds)
+}
+
+/// [`anticipation_rate`] from the error kinds alone (the live display of
+/// `accuracy.anticipation` reads them with `error_kind_counts`).
+pub fn anticipation_rate_of_kinds(kinds: &[crate::analysis::errors::ErrorKindMetric]) -> Option<f64> {
     use crate::analysis::errors::ErrorKind;
 
-    let first_errors = diagnosis
-        .kinds
+    let first_errors = kinds
         .iter()
         .filter(|row| row.kind != ErrorKind::Consecutive)
         .map(|row| row.n)
         .sum::<u64>();
-    (first_errors > 0).then(|| diagnosis.kind_count(ErrorKind::Anticipation) as f64 / first_errors as f64)
+    let anticipation = kinds
+        .iter()
+        .filter(|row| row.kind == ErrorKind::Anticipation)
+        .map(|row| row.n)
+        .sum::<u64>();
+    (first_errors > 0).then(|| anticipation as f64 / first_errors as f64)
 }
 
 /// `blind.fade` (§3.2): the H5 assistance comparison marks the on-screen
@@ -512,15 +542,11 @@ fn judge_pairs(ctx: &JudgeContext<'_>, run_id: i64, menu: &DailyMenu, catalog: &
         let raw = raw_reference_series(ctx, &checks, basis, condition.metric, &step.prescription_id)?;
         let advance = if condition.source == AdvanceSource::Check && !is_r3 {
             let value = checks.metric(ctx, condition.metric, current)?;
-            let mut previous = Vec::new();
-            if matches!(condition.rule, super::AdvanceRule::LeOwnMedian | super::AdvanceRule::GeOwnMedian) {
-                for point in &checks.previous {
-                    if let Some(value) = checks.metric(ctx, condition.metric, point)? {
-                        previous.push(value);
-                    }
-                }
-            }
-            let own_median = median(previous);
+            let own_median = if matches!(condition.rule, super::AdvanceRule::LeOwnMedian | super::AdvanceRule::GeOwnMedian) {
+                checks.previous_metric_median(ctx, condition.metric)?
+            } else {
+                None
+            };
             Some((value, evaluate_advance_measurement(condition, value, own_median)))
         } else {
             None

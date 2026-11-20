@@ -183,9 +183,46 @@ impl<'a> Ctx<'a> {
 // Entry points
 // ---------------------------------------------------------------------------
 
+/// Rows the prompt occupied, so the source line (MYTASK-3637) can be placed
+/// right under it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct PromptExtent {
+    /// Rows used from the top of the area.
+    pub used: u16,
+    /// The card's helper row when it is reserved but has no message now.
+    pub free_helper_row: Option<u16>,
+}
+
+/// How the prompt can make room for the source line when the screen has no
+/// spare row for it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SourceRoom {
+    /// No room: the source line is left out.
+    None,
+    /// Large running text: one of the optional blank rows counted by `rows`
+    /// (between the large blocks, or above the full sentence) is given up.
+    BlankRow,
+    /// The card: the source shares the helper row under it, and a status
+    /// message takes the row while it is shown.
+    HelperRow,
+}
+
+pub(crate) fn source_room(app: &App, size: Option<BigTextSize>) -> SourceRoom {
+    let Some(game) = app.game.as_ref() else {
+        return SourceRoom::None;
+    };
+    match (size, prompt_kind(app, game)) {
+        (None, _) => SourceRoom::HelperRow,
+        (Some(_), PromptKind::Sentence | PromptKind::Japanese { sentence: true }) => SourceRoom::BlankRow,
+        (Some(_), _) => SourceRoom::None,
+    }
+}
+
 /// Draw the prompt into `area` (the rows below the metrics, above the footer).
-pub(crate) fn render(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, bigtext: Option<BigTextSize>) {
-    let Some(ctx) = Ctx::new(app, theme) else { return };
+pub(crate) fn render(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, bigtext: Option<BigTextSize>) -> PromptExtent {
+    let Some(ctx) = Ctx::new(app, theme) else {
+        return PromptExtent::default();
+    };
     if ctx.game.ime_warning {
         let warning = match ctx.lang {
             Lang::En => "Please turn IME off.",
@@ -197,7 +234,10 @@ pub(crate) fn render(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, bi
                 .style(Style::default().fg(theme.mistype).add_modifier(Modifier::BOLD)),
             Rect::new(area.x, area.y, area.width, area.height.min(1)),
         );
-        return;
+        return PromptExtent {
+            used: area.height.min(1),
+            free_helper_row: None,
+        };
     }
     // Keep one blank column on each side so nothing touches the outer frame.
     let area = Rect::new(area.x.saturating_add(1), area.y, area.width.saturating_sub(2), area.height);
@@ -205,14 +245,17 @@ pub(crate) fn render(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, bi
     if let Some(size) = bigtext
         && let Ok(bitmap_font) = font(size)
     {
-        match kind {
+        let used = match kind {
             PromptKind::Word => render_big_word(frame, &ctx, area, size, bitmap_font),
             PromptKind::Sentence => render_big_sentence(frame, &ctx, area, size, bitmap_font),
             PromptKind::Japanese { sentence } => render_big_japanese(frame, &ctx, area, size, bitmap_font, sentence),
-        }
-        return;
+        };
+        return PromptExtent {
+            used: used.min(area.height),
+            free_helper_row: None,
+        };
     }
-    render_card(frame, &ctx, kind, area);
+    render_card(frame, &ctx, kind, area)
 }
 
 /// Rows the prompt needs at a given style; used to choose the screen layout.
@@ -665,10 +708,10 @@ impl BigBlock {
     }
 }
 
-fn render_big_word(frame: &mut Frame, ctx: &Ctx<'_>, area: Rect, size: BigTextSize, bitmap_font: &BitmapFont) {
+fn render_big_word(frame: &mut Frame, ctx: &Ctx<'_>, area: Rect, size: BigTextSize, bitmap_font: &BitmapFont) -> u16 {
     let text = ctx.game.current_prompt.target.as_str();
     let Some(block) = BigBlock::new(ctx, size, bitmap_font, text, ctx.game.typed_index, area.width) else {
-        return;
+        return 0;
     };
     let helper = ctx.word_helper_line();
     let fixed = block.rows();
@@ -679,13 +722,15 @@ fn render_big_word(frame: &mut Frame, ctx: &Ctx<'_>, area: Rect, size: BigTextSi
     let y = block.draw(frame, ctx, area, centered_x(area, block.width()), 0, status);
     if show_helper && let Some(helper) = helper {
         put_centered(frame, area, y + gap, helper);
+        return y + gap + 1;
     }
+    y
 }
 
-fn render_big_sentence(frame: &mut Frame, ctx: &Ctx<'_>, area: Rect, size: BigTextSize, bitmap_font: &BitmapFont) {
+fn render_big_sentence(frame: &mut Frame, ctx: &Ctx<'_>, area: Rect, size: BigTextSize, bitmap_font: &BitmapFont) -> u16 {
     let text = ctx.game.current_prompt.text.as_str();
     let Some(block) = BigBlock::new(ctx, size, bitmap_font, text, ctx.game.typed_index, area.width) else {
-        return;
+        return 0;
     };
     let mut y = block.draw(frame, ctx, area, centered_x(area, block.width()), 0, ctx.status_line());
     let width = area.width.clamp(1, SENTENCE_MAX_WIDTH);
@@ -698,9 +743,10 @@ fn render_big_sentence(frame: &mut Frame, ctx: &Ctx<'_>, area: Rect, size: BigTe
         put_centered(frame, area, y, line);
         y += 1;
     }
+    y
 }
 
-fn render_big_japanese(frame: &mut Frame, ctx: &Ctx<'_>, area: Rect, size: BigTextSize, bitmap_font: &BitmapFont, sentence: bool) {
+fn render_big_japanese(frame: &mut Frame, ctx: &Ctx<'_>, area: Rect, size: BigTextSize, bitmap_font: &BitmapFont, sentence: bool) -> u16 {
     let game = ctx.game;
     let labels = ctx.labels();
     let label_column = labels.iter().map(|label| UnicodeWidthStr::width(*label)).max().unwrap_or(0) as u16 + 2;
@@ -780,9 +826,12 @@ fn render_big_japanese(frame: &mut Frame, ctx: &Ctx<'_>, area: Rect, size: BigTe
         if y < area.height {
             let rest = Rect::new(area.x, area.y + y, area.width, area.height - y);
             let segments = japanese_segments(ctx, usize::from(area.width), false);
-            draw_block(frame, rest, stack_segments(&segments, usize::from(rest.height), false));
+            let rows = stack_segments(&segments, usize::from(rest.height), false);
+            y += rows.len() as u16;
+            draw_block(frame, rest, rows);
         }
     }
+    y
 }
 
 /// The kana row under the large surface: bold, in the accent colour, with the
@@ -1080,7 +1129,7 @@ fn card_segments(ctx: &Ctx<'_>, kind: PromptKind, width: u16) -> (Vec<Segment>, 
 /// `area`, with the helper message under it. When rows are short the card
 /// gives up, in order, the blank rows between its rows, its padding, the
 /// helper row and its border; text rows go last.
-fn render_card(frame: &mut Frame, ctx: &Ctx<'_>, kind: PromptKind, area: Rect) {
+fn render_card(frame: &mut Frame, ctx: &Ctx<'_>, kind: PromptKind, area: Rect) -> PromptExtent {
     let content_width = card_content_width(area.width, kind);
     let (segments, gaps) = card_segments(ctx, kind, content_width);
     let helper = ctx.helper_line(kind);
@@ -1127,7 +1176,14 @@ fn render_card(frame: &mut Frame, ctx: &Ctx<'_>, kind: PromptKind, area: Rect) {
             put(frame, body, body.x, y as u16, line);
         }
     }
+    // The helper row is kept whenever there is room for it, so the rows
+    // under the card do not jump when a status message appears.
+    let free_helper_row = (show_helper && helper.is_none() && card_height < area.height).then_some(card_height);
     if show_helper && let Some(helper) = helper {
         put_centered(frame, area, card_height, helper);
+    }
+    PromptExtent {
+        used: (card_height + u16::from(show_helper)).min(area.height),
+        free_helper_row,
     }
 }

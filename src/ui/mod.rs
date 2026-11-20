@@ -14,6 +14,7 @@ mod image_cache;
 pub mod key_picker;
 pub mod keyboard;
 pub mod keyboard_image;
+pub mod live_goal;
 pub mod menu;
 pub mod menu_summary;
 pub mod mode_select;

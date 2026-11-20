@@ -42,7 +42,7 @@ core_ratio = 0.65
 weekly_theme = true
 ```
 
-Set `daily_rotation = false` to use the P3 random selection unchanged. While playing `romaji` or Japanese `sentence`, press `F2` to report an incorrect reading, skip it immediately, and exclude it on later starts.
+Set `daily_rotation = false` to use the P3 random selection unchanged. While playing `romaji` or Japanese `sentence`, press `Ctrl+R` (or `F2`) to report an incorrect reading, skip it immediately, and exclude it on later starts.
 
 ## Romaji spellings
 

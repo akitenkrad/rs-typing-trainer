@@ -11,6 +11,7 @@ use crate::analysis::grades::{Component, Direction, LanguageGrade, Level, ranked
 use crate::config::{Config, MenuConfig, ModeKind};
 use crate::i18n::Lang;
 
+pub mod live_goal;
 pub mod progress;
 pub mod skills;
 
@@ -28,6 +29,9 @@ pub const MAX_STEP_MINUTES: u8 = 5;
 /// §4.2 (MYTASK-3626): a step that types long text (`sentence`,
 /// `endurance`) tires the arms sooner, so it is capped lower.
 pub const MAX_LONG_TEXT_MINUTES: u8 = 3;
+/// §3.2 `speed.pacer` (`target-with-accuracy`): the pacer target counts only
+/// at this accuracy or better.
+pub const PACER_ACCURACY_FLOOR: f64 = 0.95;
 
 /// Whether a menu mode types long text (`sentence` or `endurance`).
 pub fn is_long_text_mode(mode: &str) -> bool {
@@ -1693,7 +1697,7 @@ fn parse_language(language: &str) -> Result<Lang, String> {
     Lang::from_str(language).ok_or_else(|| format!("unknown menu language {language:?}"))
 }
 
-fn language_code(language: Lang) -> &'static str {
+pub(crate) fn language_code(language: Lang) -> &'static str {
     match language {
         Lang::En => "en",
         Lang::Ja => "ja",
@@ -2140,7 +2144,7 @@ pub fn current_metric_value(metric: MenuMetric, record: &crate::record::SessionR
             .ok()
             .and_then(|params| params.get("pacer_target_wpm").and_then(serde_json::Value::as_f64))
             .map(|target| {
-                if record.header.accuracy >= 0.95 && record.header.net_wpm >= target {
+                if record.header.accuracy >= PACER_ACCURACY_FLOOR && record.header.net_wpm >= target {
                     1.0
                 } else {
                     0.0

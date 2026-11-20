@@ -67,37 +67,10 @@ pub fn diagnose_style(records: &[SessionRecord], model: &PlayerModel) -> TypingS
         for item in &record.log.items {
             let keys = correct_chars(record, item.idx);
 
-            // The word-start interval runs from the space to the next word's first
-            // letter, so it is one keystroke interval like the within-word IKI it is
-            // divided by (the grade scale puts S at a ratio of 1.0).
-            let mut last_nonspace = None::<TimedChar<'_>>;
-            let mut space_after_word = None::<TimedChar<'_>>;
-            let mut previous_seq = None::<u32>;
-            for key in &keys {
-                // An interval that spans a mistype or Backspace includes the correction,
-                // not an inter-key interval, so start over after any gap in `seq`.
-                if previous_seq.is_some_and(|seq| key.key.seq != seq + 1) {
-                    last_nonspace = None;
-                    space_after_word = None;
-                }
-                previous_seq = Some(key.key.seq);
-                if key.character.is_whitespace() {
-                    if last_nonspace.is_some() {
-                        space_after_word = Some(*key);
-                    }
-                    continue;
-                }
-                if let Some(space) = space_after_word {
-                    let interval = key.key.t_us.saturating_sub(space.key.t_us) as f64 / 1_000.0;
-                    starts.push(interval);
-                    between_words.push(interval);
-                } else if let Some(previous) = last_nonspace {
-                    let interval = key.key.t_us.saturating_sub(previous.key.t_us) as f64 / 1_000.0;
-                    internal.push(interval);
-                }
-                last_nonspace = Some(*key);
-                space_after_word = None;
-            }
+            let (item_starts, item_internal) = item_intervals(&keys);
+            between_words.extend_from_slice(&item_starts);
+            starts.extend(item_starts);
+            internal.extend(item_internal);
 
             if !item.text.chars().any(char::is_whitespace)
                 && keys.len() >= 2
@@ -161,6 +134,78 @@ pub fn diagnose_style(records: &[SessionRecord], model: &PlayerModel) -> TypingS
             within_word_n: internal.len() as u64,
             between_word_n: between_words.len() as u64,
         },
+    }
+}
+
+/// Word-start and within-word intervals (ms) of one item's correct
+/// characters, in typing order.
+fn item_intervals(keys: &[TimedChar<'_>]) -> (Vec<f64>, Vec<f64>) {
+    let mut starts = Vec::new();
+    let mut internal = Vec::new();
+    // The word-start interval runs from the space to the next word's first
+    // letter, so it is one keystroke interval like the within-word IKI it is
+    // divided by (the grade scale puts S at a ratio of 1.0).
+    let mut last_nonspace = None::<TimedChar<'_>>;
+    let mut space_after_word = None::<TimedChar<'_>>;
+    let mut previous_seq = None::<u32>;
+    for key in keys {
+        // An interval that spans a mistype or Backspace includes the correction,
+        // not an inter-key interval, so start over after any gap in `seq`.
+        if previous_seq.is_some_and(|seq| key.key.seq != seq + 1) {
+            last_nonspace = None;
+            space_after_word = None;
+        }
+        previous_seq = Some(key.key.seq);
+        if key.character.is_whitespace() {
+            if last_nonspace.is_some() {
+                space_after_word = Some(*key);
+            }
+            continue;
+        }
+        if let Some(space) = space_after_word {
+            starts.push(key.key.t_us.saturating_sub(space.key.t_us) as f64 / 1_000.0);
+        } else if let Some(previous) = last_nonspace {
+            internal.push(key.key.t_us.saturating_sub(previous.key.t_us) as f64 / 1_000.0);
+        }
+        last_nonspace = Some(*key);
+        space_after_word = None;
+    }
+    (starts, internal)
+}
+
+/// Within-word intervals (ms) of one session in typing order: consecutive
+/// correct characters of a word, never across a mistype or Backspace (a gap
+/// in `seq`, MYTASK-3617). These are the intervals behind
+/// `RhythmBreakdown::within_word_cv` of [`diagnose_style`].
+pub fn within_word_intervals_ms(record: &SessionRecord) -> Vec<f64> {
+    if record.header.metrics_version <= 0 {
+        return Vec::new();
+    }
+    record
+        .log
+        .items
+        .iter()
+        .flat_map(|item| item_intervals(&correct_chars(record, item.idx)).1)
+        .collect()
+}
+
+/// The rhythm part of [`diagnose_style`] alone. It needs no player model, so
+/// a live display can follow it keystroke by keystroke (MYTASK-3633).
+pub fn rhythm_breakdown(records: &[SessionRecord]) -> RhythmBreakdown {
+    let mut between_words = Vec::new();
+    let mut internal = Vec::new();
+    for record in records.iter().filter(|record| record.header.metrics_version > 0) {
+        for item in &record.log.items {
+            let (starts, inside) = item_intervals(&correct_chars(record, item.idx));
+            between_words.extend(starts);
+            internal.extend(inside);
+        }
+    }
+    RhythmBreakdown {
+        within_word_cv: coefficient_of_variation(&internal),
+        between_word_cv: coefficient_of_variation(&between_words),
+        within_word_n: internal.len() as u64,
+        between_word_n: between_words.len() as u64,
     }
 }
 

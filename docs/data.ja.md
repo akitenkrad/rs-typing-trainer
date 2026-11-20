@@ -2,7 +2,7 @@
 
 # 出題データ
 
-rs-typing-trainer は，決定的に生成した6種類の gzip 圧縮 TSV を同梱します．`include_bytes!` で組み込み，起動時に1回だけ展開してキャッシュします．入力の SHA-256，生成日，フィルタ条件，出力の SHA-256，lindera と辞書の版は [`data/manifest.toml`](../data/manifest.toml) に記録しています．著作権表示と出典は [`data/NOTICE`](../data/NOTICE) にあります．
+rs-typing-trainer は，決定的に生成した6種類の gzip 圧縮 TSV と，和文の出典である青空文庫の作品表を同梱します．`include_bytes!` で組み込み，起動時に1回だけ展開してキャッシュします．入力の SHA-256，生成日，フィルタ条件，出力の SHA-256，lindera と辞書の版は [`data/manifest.toml`](../data/manifest.toml) に記録しています．著作権表示と出典は [`data/NOTICE`](../data/NOTICE) にあります．
 
 パブリックドメインの東雲フォント0.9.11も，12ドットと16ドットで同梱します．どちらも JIS X 0208 の全角6,879字，印字可能な ASCII 95字，JIS X 0201 の半角カナ63字を Unicode コードポイントで引けます．`data/NOTICE` には，UTF-8 に変換した `LICENSE` と `AUTHORS` の全文，配布元 URL を収録しています．
 
@@ -16,12 +16,13 @@ rs-typing-trainer は，決定的に生成した6種類の gzip 圧縮 TSV を�
 | `data/ja_phrases.tsv.gz` | 1,989 | `surface`，`reading`，`rank`，`tier` |
 | `data/en_sentences.tsv.gz` | 19,705 | `text`，`tatoeba_id`，`tier` |
 | `data/ja_sentences.tsv.gz` | 7,394 | `text`，`reading`，`source_id`，`author`，`tier` |
+| `data/aozora_works.tsv.gz` | 526 | `source_id`，`author`，`title` |
 | `data/font/shinonome12.bin.gz` | 7,037字形 | 固定長バイナリレコード |
 | `data/font/shinonome16.bin.gz` | 7,037字形 | 固定長バイナリレコード |
 
 展開後のフォントは，20バイトのヘッダから始まります．内容は `SHNFONT\0`，形式版，ドットの高さ，半角・全角のピクセル幅，リトルエンディアンの字形数，予約4バイトです．続く固定長レコードはコードポイント順で，Unicode の `u32`，幅1バイト，高さ分の `u16` 行をすべてリトルエンディアンで格納します．x 座標の画素は `15-x` ビットです．gzip の時刻は0です．圧縮後の大きさは，12ドットが113,046バイト，16ドットが150,545バイトです．
 
-読みは，ひらがなと各データで定めた約物からなり，句の読みには `！` と `？` も使えます．長音記号は，出題文の表記にも長音記号がある場合だけ現れます．日本語短文の出典 ID は，`tools/gen-data/sources/aozora_selection.tsv` にある6桁の作品 ID です．`tier=core` は英単語2,000語，英語句1,886件，英文2,068文，人手で点検した日本語の単語561語，書き下ろしの日本語句1,989件，和文537文で，それ以外は `tier=ext` です．
+読みは，ひらがなと各データで定めた約物からなり，句の読みには `！` と `？` も使えます．長音記号は，出題文の表記にも長音記号がある場合だけ現れます．日本語短文の出典 ID は，`tools/gen-data/sources/aozora_selection.tsv` にある6桁の作品 ID です．`data/aozora_works.tsv.gz` は，同梱の短文が引く作品だけを作品 ID 順に並べ，作者名と作品名を持たせた表です．練習画面はこの表と Tatoeba の文番号を使って短文の出典を表示します（[遊び方](gameplay.ja.md#プレイ画面の配置)）．`tier=core` は英単語2,000語，英語句1,886件，英文2,068文，人手で点検した日本語の単語561語，書き下ろしの日本語句1,989件，和文537文で，それ以外は `tier=ext` です．
 
 ## 出典とライセンス
 
@@ -52,7 +53,7 @@ CC0 の英語句は10〜29文字，英文は30〜90文字の印字可能 ASCII �
 
 通常は頻度上位の核65%と裾野35%です．誤った項目は，最後の誤りから1・3・7・14日後に全体の最大10%まで戻します．短文は `item_exposure.count = 0` を優先し，その後は出題回数の少ない順です．水曜は数字・記号を含む文，金曜は日本語の1人の作家，日曜は裾野50%を優先します．現在のテーマはタイトルとモード選択に表示します．
 
-日本語の単語または短文で読みが違う場合は `F2` を押します．その項目を飛ばし，次回以降は除外します．報告は設定した DB と同じディレクトリの `reading_reports.tsv` に `日時<TAB>kind<TAB>text<TAB>reading` で追記します．
+日本語の単語または短文で読みが違う場合は `Ctrl+R`（または `F2`．macOS の既定では `F2` に `fn` が要ります）を押します．その項目を飛ばし，次回以降は除外します．報告は設定した DB と同じディレクトリの `reading_reports.tsv` に `日時<TAB>kind<TAB>text<TAB>reading` で追記します．
 
 ## 再生成
 

@@ -50,3 +50,35 @@ fn f2_reports_and_immediately_leaves_the_bad_item() {
     let report = std::fs::read_to_string(directory.path().join("reading_reports.tsv")).unwrap();
     assert!(report.contains(&reported));
 }
+
+#[test]
+fn ctrl_r_reports_like_f2_because_macos_sends_f2_only_with_fn() {
+    let directory = tempfile::tempdir().unwrap();
+    let data = directory.path().join("sentences.tsv");
+    std::fs::write(&data, "短い文です。\tみじかいぶんです。\n").unwrap();
+    let date = chrono::NaiveDate::from_ymd_opt(2026, 11, 14).unwrap();
+    let mut config = Config::default();
+    config.mode.kind = ModeKind::Sentence;
+    config.mode.sentence.lang = "ja".into();
+    config.data.sentences_ja = Some(data);
+    config.storage.db_path = Some(directory.path().join("sessions.db"));
+    config.ui.animation_enabled = false;
+    let mut app = test_app_at(config, date);
+    let now = std::time::Instant::now();
+    app.handle_key_at(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+    app.handle_key_at(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+    app.on_tick_at_date(std::time::Duration::from_secs(3), now, date).unwrap();
+    app.on_tick_at_date(std::time::Duration::from_millis(1), now, date).unwrap();
+    let reported = app.game.as_ref().unwrap().current_prompt.text.clone();
+
+    app.handle_key_at(
+        KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL),
+        now + std::time::Duration::from_millis(2),
+    );
+
+    // MYTASK-3635: the report must not be typed as the character `r`.
+    assert_eq!(app.game.as_ref().unwrap().session.log().keystrokes.len(), 0);
+    assert_ne!(app.game.as_ref().unwrap().current_prompt.text, reported);
+    let report = std::fs::read_to_string(directory.path().join("reading_reports.tsv")).unwrap();
+    assert!(report.contains(&reported));
+}

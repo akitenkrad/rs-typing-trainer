@@ -42,7 +42,7 @@ core_ratio = 0.65
 weekly_theme = true
 ```
 
-`daily_rotation = false` なら，P3 の従来の抽選を使います．`romaji` または日本語の `sentence` のプレイ中に `F2` を押すと，読みの誤りを報告してその項目をすぐに飛ばし，次回以降は除外します．
+`daily_rotation = false` なら，P3 の従来の抽選を使います．`romaji` または日本語の `sentence` のプレイ中に `Ctrl+R`（または `F2`）を押すと，読みの誤りを報告してその項目をすぐに飛ばし，次回以降は除外します．
 
 ## ローマ字の綴り
 

@@ -422,7 +422,13 @@ fn japanese_phrase_stage(data: &DataCatalog, minimum: usize, maximum: usize, cou
 }
 
 fn sha256(value: &str) -> [u8; 32] {
-    let mut padded = value.as_bytes().to_vec();
+    sha256_digest(value.as_bytes())
+}
+
+/// SHA-256 of `bytes` (FIPS 180-4). Also used by the tests to check the
+/// bundled data against `data/manifest.toml` without another dependency.
+pub fn sha256_digest(bytes: &[u8]) -> [u8; 32] {
+    let mut padded = bytes.to_vec();
     let bit_length = (padded.len() as u64).wrapping_mul(8);
     padded.push(0x80);
     while padded.len() % 64 != 56 {

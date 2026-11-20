@@ -7,7 +7,7 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
 use crate::config::{KeyFilter, ModeConfig, ModeKind};
-use crate::data::{DataCatalog, TrainingDataSource};
+use crate::data::{DataCatalog, DataKind, PromptSource, TrainingDataSource};
 use crate::engine::item::Item;
 use crate::engine::romaji::{RomajiJudge, RomajiOptions};
 use crate::engine::session::ItemKind;
@@ -21,6 +21,9 @@ pub struct GeneratedPrompt {
     pub target: String,
     pub fallback: bool,
     pub kind: ItemKind,
+    /// Where the text comes from (bundled sentences only); shown under the
+    /// prompt being typed.
+    pub source: Option<PromptSource>,
     weight: usize,
     romaji_options: Option<RomajiOptions>,
 }
@@ -33,6 +36,7 @@ impl GeneratedPrompt {
             target,
             fallback: false,
             kind: ItemKind::Word,
+            source: None,
             weight: 1,
             romaji_options: Some(RomajiOptions::default()),
         }
@@ -94,6 +98,7 @@ impl ModeGenerator {
                         target: judge.guide().to_owned(),
                         fallback: false,
                         kind: ItemKind::Word,
+                        source: None,
                         weight: romaji_weight(&judge, &selected),
                         romaji_options: Some(romaji_options),
                     }
@@ -110,12 +115,22 @@ impl ModeGenerator {
                         target: judge.guide().to_owned(),
                         fallback: false,
                         kind: ItemKind::Word,
+                        source: data
+                            .sentence_source(DataKind::JapaneseSentence, &entry.text, Some(&entry.reading))
+                            .cloned(),
                         weight: 1,
                         romaji_options: Some(romaji_options),
                     }
                 })
                 .collect(),
-            ModeKind::Sentence | ModeKind::Endurance => data.sentences_en().iter().map(|sentence| exact_prompt(sentence, false, 1)).collect(),
+            ModeKind::Sentence | ModeKind::Endurance => data
+                .sentences_en()
+                .iter()
+                .map(|sentence| GeneratedPrompt {
+                    source: data.sentence_source(DataKind::EnglishSentence, sentence, None).cloned(),
+                    ..exact_prompt(sentence, false, 1)
+                })
+                .collect(),
             ModeKind::Phrase if config.phrase.lang == "ja" => data
                 .phrases_ja()
                 .iter()
@@ -127,6 +142,7 @@ impl ModeGenerator {
                         target: judge.guide().to_owned(),
                         fallback: false,
                         kind: ItemKind::Word,
+                        source: None,
                         weight: 1,
                         romaji_options: Some(romaji_options),
                     }
@@ -240,6 +256,7 @@ impl ModeGenerator {
                 } else {
                     ItemKind::Word
                 },
+                source: None,
                 weight: 1,
                 romaji_options: japanese.then_some(RomajiOptions::default()),
             })
@@ -345,6 +362,7 @@ fn exact_prompt(text: &str, fallback: bool, weight: usize) -> GeneratedPrompt {
         target: text.to_owned(),
         fallback,
         kind: ItemKind::Word,
+        source: None,
         weight,
         romaji_options: None,
     }
@@ -485,6 +503,7 @@ fn supplement_with_pseudo_words(candidates: &mut Vec<GeneratedPrompt>, config: &
             target: text,
             fallback: true,
             kind: ItemKind::Word,
+            source: None,
             weight: 1,
             romaji_options: None,
         });

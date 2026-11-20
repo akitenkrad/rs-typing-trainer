@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use rand::rngs::ThreadRng;
 use rand::{Rng, thread_rng};
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::analysis::metrics::{AnalysisSettings, DetailedMetrics, analyze_records};
 use crate::analysis::prescription::{
@@ -332,6 +332,10 @@ pub struct App {
     pub menu_step_reference: Option<crate::practice::menu::ReferenceJudgment>,
     pub menu_step_others: Vec<crate::practice::menu::progress::StepJudgment>,
     pub menu_step_deferral: Option<crate::practice::menu::progress::JudgmentDeferral>,
+    /// The live goal of the menu step being played (MYTASK-3633): the HUD of
+    /// the playing screen and the headline of its result screen. `None`
+    /// outside today's training and for steps without a live goal.
+    pub menu_live_goal: Option<crate::practice::menu::live_goal::LiveGoalState>,
     /// Data of the open menu summary screen.
     pub menu_summary: Option<crate::ui::menu_summary::MenuSummaryData>,
     analysis_as_of: chrono::NaiveDate,
@@ -529,6 +533,7 @@ impl App {
             menu_active_step: None,
             menu_step_outcome: None,
             menu_step_progress: None,
+            menu_live_goal: None,
             menu_step_reference: None,
             menu_step_others: Vec::new(),
             menu_step_deferral: None,
@@ -868,7 +873,10 @@ impl App {
             }
             return;
         }
-        if self.screen == Screen::Playing && key.code == KeyCode::F(2) {
+        // MYTASK-3635: macOS sends F2 only with fn by default, so Ctrl+R files the same report.
+        let reading_report_key = key.code == KeyCode::F(2)
+            || (key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('r') | KeyCode::Char('R')));
+        if self.screen == Screen::Playing && reading_report_key {
             self.abort_confirm_until = None;
             self.report_current_reading(now);
             return;
@@ -2369,6 +2377,7 @@ impl App {
         }
         Self::refresh_live_metrics(game, pause_ms);
         let burst_finished = self.config.mode.kind == ModeKind::Burst && game.metrics.completed_words as usize >= self.config.burst.words;
+        self.update_live_goal();
         if burst_finished {
             self.finish_game(now);
         }
@@ -2380,6 +2389,7 @@ impl App {
         let elapsed = now.saturating_duration_since(game.started_at);
         if game.session.input_backspace_with_code(elapsed, Some("Backspace".to_owned())) != InputEffect::Dropped {
             Self::refresh_live_metrics(game, pause_ms);
+            self.update_live_goal();
         }
     }
 
@@ -2939,7 +2949,62 @@ impl App {
             current_is_retry: false,
             last_rhythm_beat: 0,
         });
+        self.menu_live_goal = self.build_live_goal(session_duration);
         self.screen = Screen::Playing;
+    }
+
+    /// The live goal of the menu step about to be played (MYTASK-3633). Only
+    /// a menu step whose prescription has a live goal gets one; individual
+    /// training, benchmarks and the stand-alone warm-up never do.
+    fn build_live_goal(&self, planned: Duration) -> Option<crate::practice::menu::live_goal::LiveGoalState> {
+        use crate::practice::menu::live_goal::{GoalKind, GoalSetup, LiveGoal, LiveGoalState};
+
+        if self.active_bench_id.is_some() {
+            return None;
+        }
+        let step = self.daily_menu.as_ref()?.steps.get(self.menu_active_step?)?;
+        let kind = GoalKind::for_step(step)?;
+        let own_median = kind.own_median_metric().and_then(|metric| {
+            let run_id = self.menu_run_id?;
+            let db_path = self.db_path();
+            let context = crate::practice::menu::progress::JudgeContext {
+                db_path: &db_path,
+                home: &self.home_dir,
+                config: &self.config,
+                layout: self.practice_layout(),
+                as_of: self.analysis_as_of,
+            };
+            crate::practice::menu::progress::own_median_for_metric(&context, metric, crate::practice::menu::language_code(step.language), run_id)
+                .ok()
+                .flatten()
+        });
+        let setup = GoalSetup {
+            gate_min_accuracy: self.config.gate.min_accuracy,
+            pacer_target_wpm: self.config.pacer.target_wpm,
+            planned,
+            own_median,
+            previous_runs: if kind == GoalKind::Sprint {
+                self.burst_series.runs().to_vec()
+            } else {
+                Vec::new()
+            },
+        };
+        LiveGoal::new(step, setup).map(LiveGoalState::new)
+    }
+
+    /// Re-measure the live goal after a keystroke (MYTASK-3633). The live log
+    /// becomes a record through `SessionRecord::from_log`, as the finished
+    /// step does, so the HUD shows the values that are recorded and judged.
+    fn update_live_goal(&mut self) {
+        let Some(mut state) = self.menu_live_goal.take() else { return };
+        if let Some(game) = self.game.as_ref() {
+            let elapsed_us = game.session.log().keystrokes.last().map_or(0, |key| key.t_us);
+            let mut log = game.session.log().clone();
+            log.duration_us = state.goal.live_duration_us(elapsed_us);
+            let record = SessionRecord::from_log(&self.config, log, game.started_wall);
+            state.update(&record, Duration::from_micros(elapsed_us), self.practice_layout());
+        }
+        self.menu_live_goal = Some(state);
     }
 
     /// Called once per render tick. Drives countdown / animation / timeout.
@@ -3167,6 +3232,10 @@ impl App {
         if self.config.mode.kind == ModeKind::Burst {
             self.burst_series.push(record.header.net_wpm);
         }
+        if let Some(mut state) = self.menu_live_goal.take() {
+            state.finish(&record, self.practice_layout());
+            self.menu_live_goal = Some(state);
+        }
         record.header.release_events = self.release_events_supported;
         self.gate_failed = !crate::practice::gate::is_eligible(self.config.gate.min_accuracy, record.header.accuracy);
         self.next_pacer_target_wpm =
@@ -3352,6 +3421,7 @@ impl App {
     }
 
     fn clear_menu_step_result(&mut self) {
+        self.menu_live_goal = None;
         self.menu_step_outcome = None;
         self.menu_step_progress = None;
         self.menu_step_reference = None;
