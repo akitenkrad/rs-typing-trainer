@@ -10,6 +10,7 @@ en_phrases = "CC0; surrounding dialogue quotes removed; 10-29 characters; printa
 ja_phrases = "project-original phrases; 6-20 reading characters; no ASCII alphanumerics, whitespace, or sentence punctuation in surfaces; unique surfaces and readings"
 en_sentences = "CC0; surrounding dialogue quotes removed; 30-90 characters; printable ASCII; unique; blocklist; all matching rows"
 ja_sentences = "15-45 characters; allowed Japanese characters and punctuation; balanced quotes; no gaiji or unknown readings; at most 15 per work"
+ja_passages = "3-5 consecutive sentences of one paragraph, each meeting the ja_sentences conditions and overrides; joined without a separator; at most 160 characters; at most 8 per work, sampled with a fixed seed; unique; works listed in aozora_works.tsv.gz"
 
 [[inputs]]
 path = "aozora/selection.tsv"
@@ -2514,6 +2515,11 @@ count = 7394
 sha256 = "9a3890a22140008c28f157866cf6269efbf788696e34c12ea492a73e381ee303"
 
 [[outputs]]
+path = "ja_passages.tsv.gz"
+count = 2204
+sha256 = "313668663577e287295a27a0377ba7b593d898b0025a67fff9ee6ac8d41792cb"
+
+[[outputs]]
 path = "aozora_works.tsv.gz"
 count = 526
 sha256 = "e809e2830de8bf30abfe5410ade29f5ad9e138be6a218b8f6e5377481d2f7a7a"
@@ -2521,7 +2527,7 @@ sha256 = "e809e2830de8bf30abfe5410ade29f5ad9e138be6a218b8f6e5377481d2f7a7a"
 [[outputs]]
 path = "NOTICE"
 count = 1
-sha256 = "775e37415d653b369a1ce5457bf759ca48635075ea759d0328231cab100a64a0"
+sha256 = "00484f5d30b75231a9f46b855449b9edac4ca8f9c2b0845a3f34f3705baafb3f"
 
 [[outputs]]
 path = "font/shinonome12.bin.gz"

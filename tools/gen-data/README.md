@@ -56,6 +56,23 @@ English phrases use the same Tatoeba CC0 processing, blocklist, printable-ASCII 
 
 Japanese phrase surfaces reject ASCII alphanumerics, whitespace, and `、`/`。`; readings must contain 6–20 hiragana, long-vowel marks, or `！`/`？`. Surfaces and readings must each be unique. The IPADIC comparison uses the sentence-reading path: katakana readings are converted to hiragana, written particles `は`, `へ`, and `を` are preserved, and written `！`/`？` are retained.
 
+## Japanese passages
+
+`data/ja_passages.tsv.gz` holds passages of three to five consecutive sentences taken from one Aozora Bunko paragraph (one body line). Each row is `text<TAB>reading<TAB>work ID<TAB>author<TAB>ext`. Every sentence of a passage must pass the same conditions as a Japanese sentence: 15–45 characters, the allowed characters and punctuation, balanced quotes, no gaiji, no unknown IPADIC reading, and the same reading rules. `overrides/ja_sentences.tsv` applies to each sentence: `-` removes the sentence and cuts the passage there, and a reading replaces the generated one. A sentence that fails, or the end of a paragraph, cuts the run of sentences.
+
+Each run of at least three usable sentences is split into chunks of three to five sentences of nearly equal size. The sentence texts are joined without a separator, and so are their readings. A chunk longer than 160 characters drops sentences from its end until it fits; a chunk that would fall below three sentences is skipped. Each work contributes at most 8 passages, sampled with the fixed seed `JA_PASSAGE_SEED` mixed with the work ID through FNV-1a. Duplicate texts are removed, keeping the first work in ID order. Rows are ordered by work ID and position in the body. Only works listed in `data/aozora_works.tsv.gz` are used.
+
+To write the passages without touching any other bundled file, run:
+
+```sh
+cargo run --release --manifest-path tools/gen-data/Cargo.toml -- \
+  --passages-only --input /path/to/p4in --out data/
+```
+
+This mode needs only `aozora/selection.tsv` and `aozora/zips/` under the input directory, and reads `data/aozora_works.tsv.gz` for the work list. It writes `data/ja_passages.tsv.gz` and, when `data/manifest.toml` exists, sets its `ja_passages` filter line, its `ja_passages.tsv.gz` output block, and its NOTICE hash, leaving every other line unchanged. Use it instead of the full command when `data/ja_words.tsv.gz` or other outputs carry hand edits that a full regeneration would discard. The full command also writes the passages.
+
+Check that each downloaded archive matches its SHA-256 in the `[[inputs]]` of `data/manifest.toml` before generating; remove any archive that does not match.
+
 ## Review and overrides
 
 - `review/ja_words_top600.tsv`: surface, reading, rank, and ruby comparison result.

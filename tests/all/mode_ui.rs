@@ -118,9 +118,10 @@ fn title_opens_mode_select_then_key_picker() {
     app.handle_key(key(KeyCode::Enter));
     assert_eq!(app.screen, Screen::ModeSelect);
     let mode_text = text(&render(&app, 80, 24));
-    assert!(mode_text.contains("MODE SELECT"), "{mode_text}");
+    assert!(mode_text.contains("INDIVIDUAL TRAINING"), "{mode_text}");
 
-    app.handle_key(key(KeyCode::Down));
+    app.handle_key(key(KeyCode::Right));
+    app.handle_key(key(KeyCode::Right));
     app.handle_key(key(KeyCode::Enter));
     assert_eq!(app.config.mode.kind, ModeKind::Words);
     assert_eq!(app.screen, Screen::KeyPicker);
@@ -151,14 +152,19 @@ fn phrase_mode_is_shown_and_language_and_course_can_be_changed() {
         let mut app = test_app(config);
         app.handle_key(key(KeyCode::Enter));
         let output = text(&render(&app, 100, 28));
+        let compact = output.replace(' ', "");
         assert!(
-            output.contains(if lang == Lang::En { "phrase — Phrases" } else { "phrase — 句" }),
+            compact.contains(if lang == Lang::En {
+                "Prompts:Englishphrases"
+            } else {
+                "打つもの:英語の句"
+            }),
             "{output}"
         );
         assert!(output.contains("[L]"), "{output}");
         assert!(output.contains("[C]"), "{output}");
 
-        app.handle_key(key(KeyCode::Char('l')));
+        app.handle_key(key(KeyCode::Char('L')));
         app.handle_key(key(KeyCode::Char('c')));
         assert_eq!(app.config.mode.phrase.lang, "ja");
         assert_eq!(app.config.mode.phrase.course, "long");
@@ -184,7 +190,7 @@ fn benchmark_selection_uses_arrows_and_enter_for_part_d() {
 fn key_picker_and_history_instructions_are_left_aligned_at_80_by_24() {
     let mut app = test_app(Config::default());
     app.handle_key(key(KeyCode::Enter));
-    app.handle_key(key(KeyCode::Down));
+    app.handle_key(key(KeyCode::Right));
     app.handle_key(key(KeyCode::Enter));
     assert_eq!(app.screen, Screen::KeyPicker);
     let picker = render(&app, 80, 24);

@@ -83,15 +83,22 @@ fn cursor_position_uses_injected_elapsed_time() {
 }
 
 #[test]
-fn p_toggles_the_pacer_for_supported_modes() {
+fn the_speed_row_runs_the_pacer_and_the_normal_row_does_not() {
+    // MYTASK-3638: the pacer is the «speed» row of the individual-training
+    // table rather than a `[P]` toggle.
     let mut config = Config::default();
     config.mode.kind = rs_typing_trainer::config::ModeKind::Words;
     let mut app = test_app(config);
-    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE));
+    let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+    app.handle_key(enter);
+    app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    app.handle_key(enter);
+    app.handle_key(enter);
     assert!(app.config.pacer.enabled);
-    app.handle_key(KeyEvent::new(KeyCode::Char('P'), KeyModifiers::NONE));
-    assert!(!app.config.pacer.enabled);
+    assert!((app.config.pacer.ratio - 1.05).abs() < 1e-9);
+    app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE));
+    assert!(app.config.pacer.enabled, "P no longer toggles anything");
 }
 
 #[test]

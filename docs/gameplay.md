@@ -21,21 +21,22 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | Screen | Keys | Action |
 |---|---|---|
 | Title | `↑` / `↓` (`k` / `j`) | Move the menu selection |
-| Title | `Enter` | Run the selected item: Today's training (the practice menu, selected first), Individual training (mode selection), Benchmark, Analysis, History, Settings or Quit |
-| Title | `Space` | Open mode selection directly (Individual training) |
+| Title | `Enter` | Run the selected item: Today's training (the practice menu, selected first), Individual training (the table of skills × prompts), Benchmark, Analysis, History, Settings or Quit |
+| Title | `Space` | Open individual training directly |
 | Title | `H` | Open history |
 | Title | `B` | Open `bench-v2` selection |
 | Title | `A` | Open analysis |
 | Title | `M` | Open today's practice menu |
 | Title | `S` | Open settings |
 | Title | `Q` / `Esc` | Quit |
-| Mode selection | `↑` / `↓` (`k` / `j`) | Select any practice mode, or the 1-minute warm-up at the top |
-| Mode selection | `P` | Toggle the pacer on supported modes |
-| Mode selection | `L` | Switch the language for phrase or adaptive practice, or for the warm-up |
-| Mode selection | `C` | Cycle the phrase course: short / normal / long / mixed |
-| Mode selection | `[` / `]` | Decrease/increase preview items |
-| Mode selection | `Z` | Switch the prompt text between large and normal (saved when the mode starts) |
-| Mode selection | `Enter` | Continue to key selection or the countdown |
+| Individual training | `←` `↓` `↑` `→` (`h` `j` `k` `l`) | Move over the table: rows are skills, columns what you type (see [Individual training](modes.md#individual-training)) |
+| Individual training | `Enter` / `Space` | Start the cell (through the key picker for Letters, Combos and the Words cells of the first five rows); a `—` cell does not start |
+| Individual training | `L` | Switch the practice language of every cell: English ⇄ Japanese (saved) |
+| Individual training | `W` | Play the 1-minute warm-up on its own, in the practice language |
+| Individual training | `C` | In the Phrases column, cycle the course: short / normal / long / mixed |
+| Individual training | `[` / `]` | Decrease/increase preview items |
+| Individual training | `Z` | Switch the prompt text between large and normal (saved when the cell starts) |
+| Individual training | `Esc` / `Q` | Back to the title |
 | Benchmark selection | `↑` / `↓` (`k` / `j`) | Select Resume (when shown), Start, or optional Part D |
 | Benchmark selection | `Enter` | Run the selected action |
 | Benchmark selection | `Space` | Start the benchmark directly |
@@ -102,7 +103,7 @@ The playing screen shows, from top to bottom: the header (time, WPM, item count 
 
 A bundled sentence (`sentence`, `endurance`) shows its source in one muted row under the prompt: `Author, "Title" (Aozora Bunko)` for Japanese (`作者『作品名』（青空文庫）` when the display language is Japanese) and `Tatoeba #12345` for English. Only the sentence being typed has it, not the preview. Words, phrases and sentences from your own `[data]` files show none. When the screen has no row to spare, the row takes one of the prompt's optional blank rows (large text) or shares the row under the card with the status message (normal text); otherwise it is left out, and the prompt, the metrics and the bottom row are never given up for it.
 
-`display.prompt_style` chooses how the prompt is drawn: `large` (default) or `normal`. The settings screen calls it "Prompt text" with the values "Large text" and "Normal text", and `Z` on the mode selection screen toggles it.
+`display.prompt_style` chooses how the prompt is drawn: `large` (default) or `normal`. The settings screen calls it "Prompt text" with the values "Large text" and "Normal text", and `Z` on the individual-training screen toggles it.
 
 **Large text** draws the item being typed with the bundled Shinonome bitmap font. Four font dots become one terminal quadrant-block cell, so a 12-dot fullwidth character occupies 6×6 cells and a 16-dot character occupies 8×8 cells. One blank row separates each large block from the normal-size rows around it, and labels sit in a column to the left of the block they name, on its top row:
 
@@ -283,7 +284,7 @@ The detail keeps the original result charts and adds the recorded mode, language
 
 Press `A` to open the analysis screen. Its tabs are Today, Coach, Trend, Keyboard, Transitions, Fingers/Hands, Bench and Skills. Today, the first tab, sums up today's menu steps, individual sessions and totals against the 7-day average ([Today tab](analysis.md#today-tab)). The screen opens on Coach: current English and Japanese grades, the latest adaptive prescription result, one to three concrete opportunities, and stable habit findings. Large terminals draw the overall grade as a coloured badge; compact terminals keep the grade letter and value in normal text. The report always names its source (official, interim, provisional, or provisional with difficulty uncorrected), keeps evidence counts, and states when evidence is insufficient. `T` opens goal candidates derived from recent records; `Enter` persists the selected goal and its remaining gap is shown in the first section.
 
-The mode-selection heading carries a compact English/Japanese grade. Completing benchmark A or C shows that language's official or interim grade and any promotion or demotion on the result screen; ordinary practice does not show a grade change. After any completed session, the result screen may show the clearest session-specific observation. `[display].feedback = "summary"` limits this to one line, while `"detailed"` allows up to three; nothing is displayed when the session lacks usable evidence.
+The individual-training screen carries a compact English/Japanese grade above the table. Completing benchmark A or C shows that language's official or interim grade and any promotion or demotion on the result screen; ordinary practice does not show a grade change. After any completed session, the result screen may show the clearest session-specific observation. `[display].feedback = "summary"` limits this to one line, while `"detailed"` allows up to three; nothing is displayed when the session lacks usable evidence.
 
 ## Configuration
 

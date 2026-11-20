@@ -9,7 +9,7 @@ Every supported key is listed here. “Unset” means that the application deriv
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `general.lang` | `en` / `ja` | `"en"` | Interface language. |
-| `display.prompt_style` | `large` / `normal` | `"large"` | How the prompt is drawn. `large` uses image glyph tiles when terminal images are available, otherwise Shinonome bitmap glyphs (16-dot, or 12-dot when 16 does not fit), and falls back to normal text when neither fits; `normal` draws terminal-size text in a framed card with wider letter spacing. Also toggled with `Z` on the mode selection screen. The older `prompt_size` key is still read (`normal` → `normal`, anything else → `large`); saving from the app writes `prompt_style`. |
+| `display.prompt_style` | `large` / `normal` | `"large"` | How the prompt is drawn. `large` uses image glyph tiles when terminal images are available, otherwise Shinonome bitmap glyphs (16-dot, or 12-dot when 16 does not fit), and falls back to normal text when neither fits; `normal` draws terminal-size text in a framed card with wider letter spacing. Also toggled with `Z` on the individual-training screen. The older `prompt_size` key is still read (`normal` → `normal`, anything else → `large`); saving from the app writes `prompt_style`. |
 | `display.feedback` | `summary` / `detailed` | `"summary"` | Post-session coaching. `summary` shows the single clearest observation; `detailed` shows up to three. Insufficient evidence produces no invented value or message. |
 | `display.graphics` | `auto` / `kitty` / `sixel` / `iterm2` / `off` | `"auto"` | Terminal image protocol. `auto` queries the terminal once at startup. An explicit protocol still requires a usable cell pixel size. Non-terminal stdio is always `off`; `auto` is also `off` inside tmux/screen because passthrough cannot be verified. See [Terminal graphics](graphics.md). |
 | `display.big_font` | `biz-ud-gothic` / `shinonome` / font path | `"biz-ud-gothic"` | Font for image-rendered large prompt characters. `biz-ud-gothic` uses the bundled BIZ UD Gothic outlines; `shinonome` enlarges the bundled bitmap by an integer factor. Any other string is a TTF, OTF, or TTC path (face 0); `~/` is expanded relative to the home directory. An unreadable or invalid file falls back to BIZ UD Gothic and reports the reason on the settings screen. This setting has no effect when terminal images are unavailable. |
@@ -28,7 +28,7 @@ Every supported key is listed here. “Unset” means that the application deriv
 | `session.blind` | boolean | `false` | Hide typed progress until an item ends. |
 | `session.retry_on_error` | boolean | `false` | Repeat a mistyped item once. |
 | `session.result_input_delay_ms` | integer | `1500` | Ignore all press and repeat events for this many milliseconds after entering a just-played result or benchmark-summary screen. Zero disables the delay; values above 10000 are clamped to 10000. |
-| `mode.kind` | mode name | `"random"` | Initial practice mode. |
+| `mode.kind` | mode name | `"random"` | Initial practice mode; the individual-training table writes the mode of the cell last started. |
 | `mode.keys` | string | `"bmwvz"` | Selected characters for filtering or generation. |
 | `mode.key_filter` | `include` / `only` | `"include"` | Prompt-filter interpretation. |
 | `mode.base_keys` | string | `"home"` | Extra keys for `only`: `none`, `home`, or literal characters. |
@@ -39,10 +39,10 @@ Every supported key is listed here. “Unset” means that the application deriv
 | `mode.ngram.source` | `pairs` / `corpus` | `"pairs"` | Cartesian pairs or corpus n-grams. |
 | `mode.romaji.accept_apostrophe` | boolean | `true` | Accept `n'` for ん. |
 | `mode.romaji.accept_xn` | boolean | `true` | Accept `xn` for ん. |
-| `mode.sentence.lang` | `en` / `ja` | `"en"` | Sentence language. |
+| `mode.sentence.lang` | `en` / `ja` | `"en"` | Sentence language. `L` on the individual-training table sets it with the practice language. |
 | `mode.sentence.hide_typed` | boolean | `false` | Hide the completed sentence prefix. |
-| `mode.phrase.lang` | `en` / `ja` | `"en"` | Phrase language. Also changed with `L` on the mode selection screen. |
-| `mode.phrase.course` | `short` / `normal` / `long` / `mixed` | `"normal"` | Phrase-length course. Also cycled with `C` on the mode selection screen. |
+| `mode.phrase.lang` | `en` / `ja` | `"en"` | Phrase language. `L` on the individual-training table sets it with the practice language. |
+| `mode.phrase.course` | `short` / `normal` / `long` / `mixed` | `"normal"` | Phrase-length course. Also cycled with `C` on the individual-training screen (Phrases column). |
 | `data.words_en` | path | `—` | Replacement English-word TSV; unset uses bundled data. |
 | `data.words_ja` | path | `—` | Replacement Japanese-word TSV. |
 | `data.phrases_en` | path | `—` | Additional English-phrase TSV; bundled phrases remain available. |
@@ -60,9 +60,9 @@ Every supported key is listed here. “Unset” means that the application deriv
 | `analysis.spelling_suggestions` | boolean | `true` | Enable personalized romaji spelling suggestions. |
 | `adaptive.error_weight` | number | `—` | Mistype cost in milliseconds; unset derives it from IKI. |
 | `adaptive.drill_ratio` | number | `0.3` | Share of generated drills. |
-| `adaptive.lang` | `en` / `ja` | `"en"` | Adaptive-practice language. |
+| `adaptive.lang` | `en` / `ja` | `"en"` | Adaptive-practice language. `L` on the individual-training table sets it with the practice language. |
 | `adaptive.max_share` | number | `0.4` | Maximum generated share for one focus transition. |
-| `pacer.enabled` | boolean | `false` | Enable the pacer initially. |
+| `pacer.enabled` | boolean | `false` | Enable the pacer initially. Cells of the individual-training table set it themselves (on only in the speed row). |
 | `pacer.ratio` | number | `1.07` | Multiplier applied to a benchmark or recent median. |
 | `pacer.min_wpm` | number | `20.0` | Lower bound and no-history target. |
 | `unlock.order` | `frequency` / `rows` | `"frequency"` | Order in which keys unlock. |
@@ -74,6 +74,9 @@ Every supported key is listed here. “Unset” means that the application deriv
 | `endurance.minutes` | integer | `4` | Endurance duration, from 3 through 5 minutes. |
 | `menu.minutes` | integer | `15` | Practice-menu length: `10`, `15` or `20`; see [Practice menu](#practice-menu). |
 | `menu.languages` | array of `en` / `ja` | `—` | Practice languages; unset follows the interface language. See [Practice menu](#practice-menu). |
+| `drill.skill` | `normal` / `accuracy` / `speed` / `recovery` / `blind` / `weak` / `rhythm` / `burst` / `endurance` / `unlock` | `—` | Row of the individual-training table last started; unset follows `mode.kind`. See [Training modes](modes.md). |
+| `drill.unit` | `char` / `ngram` / `word` / `phrase` / `sentence` / `passage` | `—` | Column of the individual-training table last started; unset follows `mode.kind`. |
+| `drill.lang` | `en` / `ja` | `—` | Practice language of the individual-training table (`L`); unset follows the language of `mode.kind`. |
 | `ui.animation_enabled` | boolean | `true` | Enable item slide animations. |
 | `ui.animation_speed` | number | `1.0` | Animation speed multiplier. |
 | `ui.theme` | `default` / `mono` / `neon` | `"default"` | Colour theme. |

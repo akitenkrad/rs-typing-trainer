@@ -7,6 +7,26 @@ use tempfile::TempDir;
 
 const BLOCKLIST_EN: &str = include_str!("../../tools/gen-data/blocklist_en.txt");
 const MANIFEST: &str = include_str!("../../data/manifest.toml");
+const PASSAGES_JA_GZ: &[u8] = include_bytes!("../../data/ja_passages.tsv.gz");
+const AOZORA_WORKS_GZ: &[u8] = include_bytes!("../../data/aozora_works.tsv.gz");
+
+fn gunzip_text(bytes: &[u8]) -> String {
+    let mut text = String::new();
+    std::io::Read::read_to_string(&mut flate2::read::GzDecoder::new(bytes), &mut text).unwrap();
+    text
+}
+
+fn manifest_sha256(path: &str) -> String {
+    let manifest = MANIFEST.parse::<toml::Value>().unwrap();
+    manifest["outputs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|output| output["path"].as_str() == Some(path))
+        .and_then(|output| output["sha256"].as_str())
+        .unwrap()
+        .to_owned()
+}
 
 fn manifest_count(path: &str) -> usize {
     let manifest = MANIFEST.parse::<toml::Value>().unwrap();
@@ -228,6 +248,48 @@ fn bundled_fonts_have_the_expected_character_sets_and_japanese_coverage() {
     );
     assert!(words.2 >= 95.0, "word coverage is only {:.3}%", words.2);
     assert!(sentences.2 >= 95.0, "sentence coverage is only {:.3}%", sentences.2);
+}
+
+#[test]
+fn bundled_passages_match_the_manifest_and_cite_listed_works() {
+    let digest = rs_typing_trainer::bench::sha256_digest(PASSAGES_JA_GZ)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    assert_eq!(digest, manifest_sha256("ja_passages.tsv.gz"));
+
+    let works = gunzip_text(AOZORA_WORKS_GZ)
+        .lines()
+        .filter_map(|line| line.split('\t').next().map(str::to_owned))
+        .collect::<BTreeSet<_>>();
+    let passages = gunzip_text(PASSAGES_JA_GZ);
+    let rows = passages.lines().filter(|line| !line.is_empty()).collect::<Vec<_>>();
+    assert_eq!(rows.len(), manifest_count("ja_passages.tsv.gz"));
+    assert!(!rows.is_empty());
+
+    let mut texts = BTreeSet::new();
+    for row in rows {
+        let fields = row.split('\t').collect::<Vec<_>>();
+        assert_eq!(fields.len(), 5, "passage row needs five fields: {row}");
+        let (text, reading, source_id, tier) = (fields[0], fields[1], fields[2], fields[4]);
+        assert!(
+            works.contains(source_id),
+            "passage cites a work missing from aozora_works.tsv.gz: {source_id}"
+        );
+        assert_eq!(tier, "ext", "{row}");
+        assert!(texts.insert(text), "duplicate passage: {text}");
+        assert!(text.ends_with('。'), "{text}");
+        assert!(text.matches('。').count() >= 3, "a passage has at least three sentences: {text}");
+        assert!(text.chars().count() <= 160, "passage is too long: {text}");
+        assert!(
+            reading
+                .chars()
+                .all(|character| matches!(character, '\u{3041}'..='\u{3096}' | 'ー' | '、' | '。' | '「' | '」')),
+            "{text}\t{reading}"
+        );
+        assert_eq!(reading.matches('ー').count(), text.matches('ー').count(), "{text}\t{reading}");
+        assert!(guide_is_accepted(reading), "untypable passage: {text}\t{reading}");
+    }
 }
 
 use std::collections::BTreeSet;

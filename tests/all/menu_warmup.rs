@@ -11,8 +11,8 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use rs_typing_trainer::analysis::grades::{Component, ComponentGrade, GradeSource, GradeStatus, LanguageGrade, Level, OverallGrade};
-use rs_typing_trainer::app::{App, ModeEntry, Screen};
-use rs_typing_trainer::config::{Config, MenuConfig, ModeKind};
+use rs_typing_trainer::app::{App, Screen};
+use rs_typing_trainer::config::{Config, DrillCell, DrillSkill, MenuConfig, ModeKind, PromptUnit};
 use rs_typing_trainer::i18n::Lang;
 use rs_typing_trainer::practice::menu::{
     DailyMenu, MAX_LONG_TEXT_MINUTES, MAX_STEP_MINUTES, MenuBuildInput, MenuRole, PrescriptionState, build_menu, bundled_catalog, is_long_text_mode,
@@ -244,18 +244,15 @@ fn date() -> NaiveDate {
     NaiveDate::from_ymd_opt(2026, 11, 19).unwrap()
 }
 
-/// Title → mode select, cursor on the warm-up row.
+/// Title → individual training (MYTASK-3638: the warm-up sits above the
+/// table and starts with `W`).
 fn select_warmup(app: &mut App, now: Instant) {
     app.handle_key_at(key(KeyCode::Enter), now);
     assert_eq!(app.screen, Screen::ModeSelect);
-    for _ in 0..20 {
-        app.handle_key_at(key(KeyCode::Up), now);
-    }
-    assert_eq!(app.selected_mode_entry(), ModeEntry::Warmup);
 }
 
 fn start_warmup(app: &mut App, now: Instant) {
-    app.handle_key_at(key(KeyCode::Enter), now);
+    app.handle_key_at(key(KeyCode::Char('w')), now);
     assert!(matches!(app.screen, Screen::Countdown { .. }), "{:?}", app.screen);
     app.on_tick_at(Duration::from_secs(3), now).unwrap();
     assert_eq!(app.screen, Screen::Playing);
@@ -267,12 +264,9 @@ fn the_mode_select_warm_up_starts_a_one_minute_words_session_without_the_pacer()
     let now = Instant::now();
     select_warmup(&mut app, now);
     let screen = render(&app, 80, 24);
-    assert!(screen.contains("warmup — 1-minute warm-up"), "{screen}");
-    assert!(screen.contains("[L] Practice language: EN"), "{screen}");
-    assert!(!screen.contains("[P]"), "the warm-up keeps the pacer off:\n{screen}");
-    // `P` does not switch the pacer on for the warm-up.
-    app.handle_key_at(key(KeyCode::Char('p')), now);
-    assert!(app.config.pacer.enabled, "P does not touch the saved setting on the warm-up row");
+    assert!(screen.contains("[W] 1-minute warm-up"), "{screen}");
+    assert!(screen.contains("[L] Practice language: English"), "{screen}");
+    assert!(!screen.contains("[P]"), "the pacer is the speed row of the table now:\n{screen}");
 
     start_warmup(&mut app, now);
     assert!(app.warmup_active());
@@ -330,9 +324,10 @@ fn ordinary_words_after_a_warm_up_keep_the_users_settings() {
     let later = now + Duration::from_secs(70);
     app.handle_key_at(key(KeyCode::Char(' ')), later);
     assert_eq!(app.screen, Screen::ModeSelect);
-    assert_eq!(app.selected_mode_entry(), ModeEntry::Mode(ModeKind::Random));
-    app.handle_key_at(key(KeyCode::Down), later);
-    assert_eq!(app.selected_mode_entry(), ModeEntry::Mode(ModeKind::Words));
+    assert_eq!(app.drill_cell, DrillCell::new(DrillSkill::Normal, PromptUnit::Char));
+    app.handle_key_at(key(KeyCode::Right), later);
+    app.handle_key_at(key(KeyCode::Right), later);
+    assert_eq!(app.drill_cell, DrillCell::new(DrillSkill::Normal, PromptUnit::Word));
     app.handle_key_at(key(KeyCode::Enter), later);
     assert_eq!(app.screen, Screen::KeyPicker);
     app.handle_key_at(key(KeyCode::Enter), later);
@@ -341,8 +336,10 @@ fn ordinary_words_after_a_warm_up_keep_the_users_settings() {
     assert!(!app.warmup_active());
     assert_eq!(app.config.mode.kind, ModeKind::Words);
     assert_eq!(app.config.session.duration_seconds, 180);
-    assert!(app.config.pacer.enabled);
-    assert!(app.config.pacer.target_wpm.is_some());
+    // The «normal» row plays without the pacer (the speed row has it);
+    // the user's own gate stays.
+    assert!(!app.config.pacer.enabled);
+    assert!(app.config.pacer.target_wpm.is_none());
     assert_eq!(app.config.gate.min_accuracy, 0.9);
 }
 
@@ -377,11 +374,11 @@ fn a_japanese_warm_up_shows_surface_kana_and_romaji_rows() {
     let mut app = test_app_at(custom_config(Lang::Ja), date());
     let now = Instant::now();
     select_warmup(&mut app, now);
-    app.handle_key_at(key(KeyCode::Char('l')), now);
-    assert_eq!(app.warmup_language, Lang::Ja);
+    app.handle_key_at(key(KeyCode::Char('L')), now);
+    assert_eq!(app.practice_lang, Lang::Ja);
     let screen = render(&app, 80, 24).replace(' ', "");
-    assert!(screen.contains("warmup—1分のウォームアップ"), "{screen}");
-    assert!(screen.contains("[L]練習言語:JA"), "{screen}");
+    assert!(screen.contains("[W]1分のウォームアップ"), "{screen}");
+    assert!(screen.contains("[L]練習言語:日本語"), "{screen}");
 
     start_warmup(&mut app, now);
     assert_eq!(app.config.mode.kind, ModeKind::Words);

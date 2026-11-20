@@ -2,6 +2,7 @@
 
 pub mod adaptive;
 pub mod deck;
+pub mod drill;
 pub mod gate;
 pub mod ghost;
 pub mod keyboard_fade;

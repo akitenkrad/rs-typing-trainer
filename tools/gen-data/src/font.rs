@@ -481,7 +481,7 @@ pub fn update_bizud_manifest(manifest_path: &Path, font_dir: &Path, report: &Biz
     write_bytes_if_changed(manifest_path, output.as_bytes())
 }
 
-fn update_notice_hash(block: &str, notice_hash: Option<&str>) -> String {
+pub(crate) fn update_notice_hash(block: &str, notice_hash: Option<&str>) -> String {
     if block.contains("path = \"NOTICE\"")
         && let Some(hash) = notice_hash
     {

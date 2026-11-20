@@ -6,7 +6,7 @@ use rand::distributions::{Distribution, WeightedIndex};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
-use crate::config::{KeyFilter, ModeConfig, ModeKind};
+use crate::config::{KeyFilter, ModeConfig, ModeKind, PromptUnit};
 use crate::data::{DataCatalog, DataKind, PromptSource, TrainingDataSource};
 use crate::engine::item::Item;
 use crate::engine::romaji::{RomajiJudge, RomajiOptions};
@@ -80,14 +80,12 @@ impl ModeGenerator {
         let mut allowed = selected.clone();
         allowed.extend(base);
 
-        let mut candidates = match config.kind {
-            ModeKind::Random => Vec::new(),
-            ModeKind::Words | ModeKind::Adaptive | ModeKind::Unlock | ModeKind::Rhythm | ModeKind::Burst => data
-                .words_en()
-                .iter()
-                .map(|word| exact_prompt(word, false, occurrence_count(word, &selected)))
-                .collect(),
-            ModeKind::Romaji => data
+        let unit = config.prompt_unit();
+        let japanese_words = crate::practice::drill::japanese_words(&config);
+        let mut candidates = match unit {
+            PromptUnit::Char => random_prompt_pool(&config),
+            PromptUnit::Ngram => ngram_prompts(&config, &data, &selected),
+            PromptUnit::Word if japanese_words => data
                 .words_ja()
                 .iter()
                 .map(|entry| {
@@ -104,34 +102,16 @@ impl ModeGenerator {
                     }
                 })
                 .collect(),
-            ModeKind::Sentence | ModeKind::Endurance if config.sentence.lang == "ja" => data
-                .sentences_ja()
+            PromptUnit::Word => data
+                .words_en()
                 .iter()
-                .map(|entry| {
-                    let judge = RomajiJudge::new(&entry.reading);
-                    GeneratedPrompt {
-                        text: entry.text.clone(),
-                        reading: Some(entry.reading.clone()),
-                        target: judge.guide().to_owned(),
-                        fallback: false,
-                        kind: ItemKind::Word,
-                        source: data
-                            .sentence_source(DataKind::JapaneseSentence, &entry.text, Some(&entry.reading))
-                            .cloned(),
-                        weight: 1,
-                        romaji_options: Some(romaji_options),
-                    }
-                })
+                .map(|word| exact_prompt(word, false, occurrence_count(word, &selected)))
                 .collect(),
-            ModeKind::Sentence | ModeKind::Endurance => data
-                .sentences_en()
-                .iter()
-                .map(|sentence| GeneratedPrompt {
-                    source: data.sentence_source(DataKind::EnglishSentence, sentence, None).cloned(),
-                    ..exact_prompt(sentence, false, 1)
-                })
-                .collect(),
-            ModeKind::Phrase if config.phrase.lang == "ja" => data
+            PromptUnit::Sentence if config.sentence.lang == "ja" => japanese_sentence_prompts(&data, romaji_options),
+            PromptUnit::Sentence => english_sentence_prompts(&data),
+            PromptUnit::Passage if config.sentence.lang == "ja" => japanese_passage_prompts(&data, romaji_options),
+            PromptUnit::Passage => english_passage_prompts(&data, seed),
+            PromptUnit::Phrase if config.phrase.lang == "ja" => data
                 .phrases_ja()
                 .iter()
                 .map(|entry| {
@@ -149,21 +129,21 @@ impl ModeGenerator {
                 })
                 .filter(|prompt| phrase_length_matches(&config.phrase.course, prompt.reading.as_deref().unwrap_or(""), true))
                 .collect(),
-            ModeKind::Phrase => data
+            PromptUnit::Phrase => data
                 .phrases_en()
                 .iter()
                 .filter(|phrase| phrase_length_matches(&config.phrase.course, phrase, false))
                 .map(|phrase| exact_prompt(phrase, false, 1))
                 .collect(),
-            ModeKind::Ngram => ngram_prompts(&config, &data, &selected),
         };
 
-        if config.kind == ModeKind::Random {
-            candidates = random_prompt_pool(&config);
-        } else if !selected.is_empty() && !matches!(config.kind, ModeKind::Sentence | ModeKind::Phrase | ModeKind::Endurance | ModeKind::Ngram) {
+        if unit == PromptUnit::Word
+            && !selected.is_empty()
+            && !matches!(config.kind, ModeKind::Sentence | ModeKind::Phrase | ModeKind::Endurance | ModeKind::Ngram)
+        {
             candidates.retain(|prompt| match config.key_filter {
                 KeyFilter::Include => prompt.weight > 0,
-                KeyFilter::Only if config.kind == ModeKind::Romaji => prompt
+                KeyFilter::Only if japanese_words => prompt
                     .reading
                     .as_deref()
                     .is_some_and(|reading| RomajiJudge::with_options(reading, romaji_options).has_spelling_using(&allowed)),
@@ -187,7 +167,7 @@ impl ModeGenerator {
         {
             supplement_with_pseudo_words(&mut candidates, &config, &selected);
         }
-        let phrase_stages = if config.kind == ModeKind::Phrase && config.phrase.course == "mixed" {
+        let phrase_stages = if unit == PromptUnit::Phrase && config.phrase.course == "mixed" {
             let japanese = config.phrase.lang == "ja";
             (0..3)
                 .map(|stage| {
@@ -221,6 +201,7 @@ impl ModeGenerator {
             words.kind = if japanese { ModeKind::Romaji } else { ModeKind::Words };
             words.keys.clear();
             words.base_keys = "none".to_owned();
+            words.drill = None;
             let mut generator = Self::new(words, data, layout, seed);
             generator.config = config;
             return generator;
@@ -273,6 +254,44 @@ impl ModeGenerator {
             phrase_counter: 0,
             rng: StdRng::seed_from_u64(seed),
         }
+    }
+
+    /// Weak transitions in phrases and sentences (MYTASK-3638): prompts
+    /// that contain more of `transitions` are drawn more often, and when at
+    /// least [`crate::practice::menu::MIN_TARGET_WORDS`] prompts contain one,
+    /// the others are dropped.
+    pub fn prefer_transitions(&mut self, transitions: &[(String, String)]) {
+        if transitions.is_empty() {
+            return;
+        }
+        for prompt in &mut self.candidates {
+            prompt.weight = 1 + 4 * transition_count(&prompt.target, transitions);
+        }
+        if self.candidates.iter().filter(|prompt| prompt.weight > 1).count() >= crate::practice::menu::MIN_TARGET_WORDS {
+            self.candidates.retain(|prompt| prompt.weight > 1);
+        }
+        for stage in &mut self.phrase_stages {
+            for prompt in stage.iter_mut() {
+                prompt.weight = 1 + 4 * transition_count(&prompt.target, transitions);
+            }
+        }
+        self.original_texts = self.candidates.iter().map(|prompt| prompt.text.clone()).collect();
+        self.original_candidate_count = self.candidates.len();
+    }
+
+    /// Keep only the transition drills of an adaptive plan (weak transitions
+    /// as combinations, MYTASK-3638). Nothing changes when the plan has none.
+    pub fn retain_drills(&mut self) {
+        if self.candidates.iter().any(|prompt| prompt.kind == ItemKind::Drill) {
+            self.candidates.retain(|prompt| prompt.kind == ItemKind::Drill);
+            self.original_texts = self.candidates.iter().map(|prompt| prompt.text.clone()).collect();
+            self.original_candidate_count = self.candidates.len();
+        }
+    }
+
+    /// The candidate prompts with their weights, for tests.
+    pub fn weighted_candidates(&self) -> Vec<(GeneratedPrompt, usize)> {
+        self.candidates.iter().map(|prompt| (prompt.clone(), prompt.weight)).collect()
     }
 
     pub fn warning(&self) -> Option<&str> {
@@ -333,6 +352,105 @@ impl ModeGenerator {
             .retain(|prompt| prompt.text != text || prompt.reading.as_deref() != reading);
         self.original_texts.retain(|candidate| candidate != text);
     }
+}
+
+fn japanese_sentence_prompts(data: &DataCatalog, romaji_options: RomajiOptions) -> Vec<GeneratedPrompt> {
+    data.sentences_ja()
+        .iter()
+        .map(|entry| {
+            let judge = RomajiJudge::new(&entry.reading);
+            GeneratedPrompt {
+                text: entry.text.clone(),
+                reading: Some(entry.reading.clone()),
+                target: judge.guide().to_owned(),
+                fallback: false,
+                kind: ItemKind::Word,
+                source: data
+                    .sentence_source(DataKind::JapaneseSentence, &entry.text, Some(&entry.reading))
+                    .cloned(),
+                weight: 1,
+                romaji_options: Some(romaji_options),
+            }
+        })
+        .collect()
+}
+
+fn english_sentence_prompts(data: &DataCatalog) -> Vec<GeneratedPrompt> {
+    data.sentences_en()
+        .iter()
+        .map(|sentence| GeneratedPrompt {
+            source: data.sentence_source(DataKind::EnglishSentence, sentence, None).cloned(),
+            ..exact_prompt(sentence, false, 1)
+        })
+        .collect()
+}
+
+/// Japanese passages: bundled runs of consecutive sentences of one Aozora
+/// Bunko work (MYTASK-3639), each with its work as the source.
+fn japanese_passage_prompts(data: &DataCatalog, romaji_options: RomajiOptions) -> Vec<GeneratedPrompt> {
+    data.passages_ja()
+        .iter()
+        .map(|passage| {
+            let judge = RomajiJudge::new(&passage.reading);
+            GeneratedPrompt {
+                text: passage.text.clone(),
+                reading: Some(passage.reading.clone()),
+                target: judge.guide().to_owned(),
+                fallback: false,
+                kind: ItemKind::Word,
+                source: passage.source.clone(),
+                weight: 1,
+                romaji_options: Some(romaji_options),
+            }
+        })
+        .collect()
+}
+
+/// Shortest and longest English passage, in sentences.
+pub const ENGLISH_PASSAGE_SENTENCES: (usize, usize) = (3, 5);
+
+/// English passages: three to five consecutive bundled sentences joined into
+/// one prompt. The split points depend on the seed; the source lists the
+/// Tatoeba number of every sentence when all of them have one.
+fn english_passage_prompts(data: &DataCatalog, seed: u64) -> Vec<GeneratedPrompt> {
+    let sentences = data.sentences_en();
+    let (shortest, longest) = ENGLISH_PASSAGE_SENTENCES;
+    let mut rng = StdRng::seed_from_u64(seed ^ 0x7061_7373_6167_6573);
+    let mut prompts = Vec::new();
+    let mut start = 0;
+    while start + shortest <= sentences.len() {
+        let length = rng.gen_range(shortest..=longest).min(sentences.len() - start);
+        let group = &sentences[start..start + length];
+        start += length;
+        let text = group.iter().map(|sentence| sentence.trim()).collect::<Vec<_>>().join(" ");
+        let ids = group
+            .iter()
+            .map(|sentence| match data.sentence_source(DataKind::EnglishSentence, sentence, None) {
+                Some(PromptSource::Tatoeba { sentence_id }) => Some(sentence_id.clone()),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>();
+        prompts.push(GeneratedPrompt {
+            source: ids.map(|sentence_ids| PromptSource::TatoebaSet { sentence_ids }),
+            ..exact_prompt(&text, false, 1)
+        });
+    }
+    prompts
+}
+
+/// Occurrences of the given transitions (`from` then `to`) in a target.
+fn transition_count(target: &str, transitions: &[(String, String)]) -> usize {
+    let characters = target.chars().collect::<Vec<_>>();
+    characters
+        .windows(2)
+        .filter(|pair| {
+            transitions.iter().any(|(from, to)| {
+                let mut from = from.chars();
+                let mut to = to.chars();
+                from.next() == Some(pair[0]) && from.next().is_none() && to.next() == Some(pair[1]) && to.next().is_none()
+            })
+        })
+        .count()
 }
 
 fn phrase_stage(text: &str, japanese: bool) -> Option<usize> {

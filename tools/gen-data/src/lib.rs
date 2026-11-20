@@ -6,6 +6,7 @@ use anyhow::{Context, Result, bail};
 
 mod font;
 mod generate;
+mod passage;
 
 pub use font::{
     BIZUD_ARCHIVE, BIZUD_ARCHIVE_SHA256, BdfGlyph, BizUdGenerationOptions, BizUdGenerationReport, FontGenerationOptions, FontGenerationReport,
@@ -14,8 +15,14 @@ pub use font::{
     update_shinonome_manifest, update_shinonome_notice,
 };
 pub use generate::{
-    GenerationOptions, GenerationReport, aozora_works_from_selection, generate, prepare_english_phrase, prepare_english_sentence,
-    prepare_japanese_phrases, render_aozora_works,
+    GenerationOptions, GenerationReport, JA_PASSAGES_FILTER, PassageGenerationOptions, PassageGenerationReport, aozora_works_from_selection,
+    generate, generate_passages, prepare_english_phrase, prepare_english_sentence, prepare_japanese_phrases, render_aozora_works,
+    update_passage_manifest,
+};
+
+pub use passage::{
+    JA_PASSAGE_MAX_CHARS, JA_PASSAGE_MAX_SENTENCES, JA_PASSAGE_MIN_SENTENCES, JA_PASSAGE_SEED, JA_PASSAGES_PER_WORK, JapanesePassage,
+    PassageSentence, chunk_run, merge_passages, render_ja_passages, select_work_passages,
 };
 
 const SCOWL_LEVELS: [u8; 6] = [10, 20, 35, 40, 50, 60];

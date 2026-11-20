@@ -42,7 +42,7 @@ auto_difficulty = true
 
 ## Pacer
 
-Press `P` on the mode-selection screen to enable the pacer for `words`, `sentence`, `phrase` or `adaptive`. A `▾` cursor moves above the prompt at the target rate. The initial target is the most recent current-series benchmark A net WPM multiplied by `ratio`. If benchmark A is unavailable, the median net WPM of the latest five sessions is used. The target never falls below `min_wpm`; when neither benchmark nor practice records are available, `min_wpm` is used directly.
+Choose the Speed row of [individual training](modes.md#individual-training) to play any column with the pacer (the other rows play without it). A `▾` cursor moves above the prompt at the target rate. The initial target is the most recent current-series benchmark A net WPM multiplied by `ratio`. If benchmark A is unavailable, the median net WPM of the latest five sessions is used. The target never falls below `min_wpm`; when neither benchmark nor practice records are available, `min_wpm` is used directly.
 
 The initial ratio is 1.07. After a paced session, accuracy below 92% lowers the next target by 3%. Accuracy of at least 95% together with reaching the target raises it by 2%. Otherwise it stays unchanged. The result screen shows the next target.
 
@@ -96,7 +96,7 @@ blind = false
 
 ## Look-ahead practice
 
-Use `[` and `]` on the mode screen to choose zero through three preview items. `mode.sentence.hide_typed = true` removes the completed prefix so attention stays ahead of the current position. The range is an initial value. Whether to suggest more look-ahead is decided by the [practice menu](#practice-menu) from the grades, not by the title screen.
+Use `[` and `]` on the individual-training screen to choose zero through three preview items. `mode.sentence.hide_typed = true` removes the completed prefix so attention stays ahead of the current position. The range is an initial value. Whether to suggest more look-ahead is decided by the [practice menu](#practice-menu) from the grades, not by the title screen.
 
 ```toml
 [session]
@@ -203,7 +203,7 @@ When no practice language has enough data, the menu is: warm-up (1 min), transit
 
 ### Warm-up on its own
 
-Individual training lists `warmup — 1-minute warm-up` at the top of the mode selection. It plays the menu's warm-up step by itself: the same mode, length and settings as `fixed.warmup` in the catalog (`words` for 1 minute, pacer off, accuracy gate off). `L` switches its practice language; a Japanese warm-up gets Japanese words typed in romaji and shows the surface / kana / romaji rows, as the menu's Japanese warm-up does. The session is recorded as `words` and is not part of the day's menu run. Its settings apply to that session only: your configuration file is not changed, and the next ordinary session uses your own settings again. `Enter` on its result screen plays the warm-up once more.
+`W` on the individual-training screen (shown above the table as `[W] 1-minute warm-up`) plays the menu's warm-up step by itself: the same mode, length and settings as `fixed.warmup` in the catalog (`words` for 1 minute, pacer off, accuracy gate off). It uses the table's practice language (`L`); a Japanese warm-up gets Japanese words typed in romaji and shows the surface / kana / romaji rows, as the menu's Japanese warm-up does. The session is recorded as `words` and is not part of the day's menu run. Its settings apply to that session only: your configuration file is not changed, and the next ordinary session uses your own settings again. `Enter` on its result screen plays the warm-up once more.
 
 ### Two practice languages
 

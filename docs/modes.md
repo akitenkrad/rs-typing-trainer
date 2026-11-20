@@ -2,38 +2,86 @@
 
 # Training modes and romaji input
 
-## Modes
+## Individual training
 
-| Mode | Prompts | Key selection |
+Individual training is a table. Each row is the **skill** a session trains, each column **what you type**. Move with the arrow keys or `h` `j` `k` `l` and press `Enter` on a cell. Under the table, two lines say what the cell trains and what its prompts are.
+
+| Skill \ Prompts | Letters | Combos | Words | Phrases | Sentence | Passage |
+|---|---|---|---|---|---|---|
+| Normal | ○ | ○ | ○ | ○ | ○ | ○ |
+| Accuracy, Speed, Recovery, No-look | ○ | ○ | ○ | ○ | ○ | ○ |
+| Weak transitions | — | ○ | ○ | ○ | ○ | — |
+| Rhythm | — | ○ | ○ | ○ | ○ | — |
+| Burst | — | — | ○ | ○ | ○ | — |
+| Endurance | — | — | ○ | ○ | ○ | ○ |
+| Unlock keys | ○ | — | ○ | — | — | — |
+
+A `—` cell is shown dimmed. The cursor stops on it and the line under the table says why it cannot be played; `Enter` does nothing there.
+
+### Skills (rows)
+
+| Skill | What it does | Settings it applies |
 |---|---|---|
-| `warmup` | The practice menu's 1-minute warm-up (`words`, pacer and gate off), in English or Japanese | No key picker; `L` switches the language |
-| `random` | Pseudo-words made from `mode.keys` | The selected characters are the alphabet |
-| `words` | English words | `include` or `only` |
-| `romaji` | Japanese words shown with their kana reading | `include` or `only`, evaluated against accepted romaji spellings |
-| `sentence` | English or Japanese sentences | No key picker; set `mode.sentence.lang` to `en` or `ja` |
-| `phrase` | English or Japanese phrases | No key picker; choose the language and length course on the mode screen |
-| `ngram` | Two- or three-character transitions | Cartesian `pairs` or n-grams found in the bundled corpus |
-| `adaptive` | Cost-weighted weak transitions in real words and drills | Automatic from shrinkage estimates |
-| `unlock` | Words and fallback pseudo-words using unlocked keys | Automatic, stored per layout |
-| `rhythm` | Words paced one keystroke per metronome beat | Automatic |
-| `burst` | Three all-out sprints over 10–15 words; the fastest one is recorded | Automatic |
-| `endurance` | A 3–5-minute sentence session | No key picker; uses the sentence language |
+| Normal | The plain prompts with your own settings | Pacer off |
+| Accuracy | A typo stops the cursor; a run under 97% accuracy does not rank | The first level of the menu's `accuracy.gate` (`session.error_mode = "stop"`, `gate.min_accuracy = 0.97`, pacer off) |
+| Speed | A pacer 5% faster than your recent speed runs above the prompt, on every column | The first level of `speed.pacer` (`pacer.enabled = true`, `pacer.ratio = 1.05`) |
+| Recovery | A typo moves on and the missed prompt comes back once | The first level of `recovery.retry` (`session.error_mode = "advance"`, `session.retry_on_error = true`) |
+| No-look | Keys you know well fade from the on-screen keyboard | The first level of `blind.fade` (`keyboard.show = "auto"`) |
+| Weak transitions | More of your slow or error-prone key transitions (`adaptive`) | Pacer off |
+| Rhythm | One keystroke per metronome beat; the result shows the median drift from the beat (`rhythm`) | Pacer off |
+| Burst | Three all-out sprints; the fastest is recorded (`burst`) | Pacer off |
+| Endurance | `endurance.minutes` (3–5) without a break; the first and second halves are compared (`endurance`) | Pacer off |
+| Unlock keys | Start with a few keys and add one when you are fast on the newest (`unlock`) | Pacer off |
 
-The title opens the mode selector. `words`, `romaji`, and `ngram` then open the keyboard key picker. Move with the arrow keys, press `Space` to toggle a key, `Tab` to switch between `include` and `only`, and `Enter` to start. The selection is saved in `[mode]` without rewriting unrelated TOML keys.
+A cell's settings apply to that session only, the same way a step of today's training does: they are put on an in-memory copy of the configuration, your configuration file is not changed, and the next session starts from your own settings again. `Enter` on the result screen plays the same cell once more.
 
-`include` keeps prompts containing at least one selected key and weights the draw by the number of selected-key occurrences. `only` keeps prompts that can be typed using the selected keys plus `base_keys`; use `none`, `home`, or a literal character string. For romaji, any accepted spelling is sufficient, so `ち` can qualify through `chi` even when `t` is unavailable. An empty `keys` value disables key filtering for `words`, `romaji`, and `sentence`; `random` and `ngram` instead return to the key picker and ask for a selection.
+### Prompts (columns)
+
+| Column | Prompts |
+|---|---|
+| Letters | Pseudo-words made from the selected keys (`mode.keys`); for Unlock keys, from the unlocked keys |
+| Combos | Two- or three-character transitions of the selected keys (`mode.ngram`); for Weak transitions, the drills of your weak transitions |
+| Words | English words, or Japanese words typed in romaji |
+| Phrases | English or Japanese phrases of the course chosen with `C` |
+| Sentence | One English or Japanese sentence |
+| Passage | English: three to five bundled sentences in a row as one prompt. Japanese: consecutive sentences of one Aozora Bunko work, in the order of the text |
+
+How the new combinations work:
+
+- **Weak transitions × Phrases / Sentence**: phrases or sentences that contain more of the focus transitions of the adaptive plan are drawn more often (weight 1 + 4 × occurrences); when at least 20 of them contain one, the rest are left out. Without enough records the prompts are drawn evenly. **Weak transitions × Combos** keeps only the plan's drills.
+- **Rhythm × Combos / Phrases / Sentence**: the metronome and its measurement are unchanged; only the prompts differ.
+- **Burst × Phrases / Sentence**: a sprint is `burst.words` ÷ 3 phrases (4 by default) or one sentence, about the same distance as the word sprint.
+- **Endurance × Words / Phrases / Passage**: the same halves comparison over words, phrases or passages.
+
+Phrases, sentences and passages have no per-item timer in any row. Bundled sentences and passages show their source under the prompt (Tatoeba numbers, or the Aozora Bunko work).
+
+### Practice language
+
+The table has one practice language, shown above it; `L` switches English ⇄ Japanese for every cell. Words become `words` ⇄ `romaji`, and `mode.sentence.lang`, `mode.phrase.lang` and `adaptive.lang` follow it. Letters, Combos (except Weak transitions) and Unlock keys always use English letters and are recorded as English. The language and the cell are saved in `[drill]` and `[mode]` and come back on the next start.
+
+### Other keys
+
+`W` plays the 1-minute warm-up of today's training on its own in the practice language (see [Warm-up on its own](training.md#warm-up-on-its-own)). `C` cycles the phrase course while the cursor is in the Phrases column: short, normal, long and mixed. English length ranges are 10–15, 16–22 and 23–29 display characters; Japanese ranges are 6–10, 11–15 and 16–20 reading characters; mixed repeats five short, five normal and five long prompts in that order. `[` and `]` choose zero through three preview items, and `Z` switches the prompt text between large and normal.
+
+### Records
+
+A cell is recorded under the same `mode` as before the table existed, so history and analysis keep their series: Normal × Words is `words` (or `romaji` in Japanese), Normal × Sentence is `sentence`, Rhythm × Words is `rhythm`, Endurance × Sentence is `endurance`, and so on. Accuracy, Speed, Recovery and No-look record the mode of their column (`random`, `ngram`, `words`/`romaji`, `phrase`, `sentence`); Normal × Passage is `sentence`. Every cell also writes `drill` (`{"skill", "unit"}`) and `unit` into `mode_params`, which tells a rhythm session on sentences from one on words. The database schema is unchanged.
+
+## Key selection
+
+Letters, Combos, and the Words cells of the first five rows open the keyboard key picker before starting (Letters only when no key is selected yet). Move with the arrow keys, press `Space` to toggle a key, `Tab` to switch between `include` and `only`, and `Enter` to start. The selection is saved in `[mode]` without rewriting unrelated TOML keys.
+
+`include` keeps prompts containing at least one selected key and weights the draw by the number of selected-key occurrences. `only` keeps prompts that can be typed using the selected keys plus `base_keys`; use `none`, `home`, or a literal character string. For romaji, any accepted spelling is sufficient, so `ち` can qualify through `chi` even when `t` is unavailable. An empty `keys` value disables key filtering for words; Letters and Combos instead return to the key picker and ask for a selection.
 
 The previous ten prompts are excluded from each draw while enough candidates remain. With fewer than 20 matches, the UI warns. Only `words` with `only` adds pseudo-words, made strictly from the selected keys. `romaji`, `sentence`, and `words` with `include` repeat real candidates by relaxing the previous-ten rule.
 
-Japanese sentences and phrases display the surface form, kana reading, and live romaji guide as three independently wrapped rows. Completed kana use a distinct style. Sentence and phrase modes never apply or display the per-item timeout. Phrase mode still follows the normal session duration. Setting `item_timeout_seconds = 0` hides the timer in every timed mode.
-
-`warmup`, `phrase`, `adaptive`, `unlock`, `rhythm`, `burst` and `endurance` start directly. `warmup` is not a mode of its own: it runs `words` with the menu's warm-up settings for that session only and is recorded as `words` (see [Warm-up on its own](training.md#warm-up-on-its-own)). In phrase mode, `L` switches English/Japanese and `C` cycles short, normal, long and mixed. English length ranges are 10–15, 16–22 and 23–29 display characters; Japanese ranges are 6–10, 11–15 and 16–20 reading characters. Mixed repeats five short, five normal and five long prompts in that order. Press `P` on the mode-selection screen to toggle the pacer for `words`, `sentence`, `phrase` or `adaptive`; `L` on `adaptive` switches its practice language independently of the interface; `[` and `]` choose zero through three preview items. See [Training tools](training.md) for goals, initial values and configuration.
+Japanese sentences, passages and phrases display the surface form, kana reading, and live romaji guide as three independently wrapped rows. Completed kana use a distinct style. Setting `item_timeout_seconds = 0` hides the timer in every timed mode. See [Training tools](training.md) for goals, initial values and configuration.
 
 ## Daily rotation
 
 Practice modes use a deterministic daily deck. The complete bundled catalog remains available separately for fixed benchmarks. `include` and `only` filter the complete candidate population before it is divided into high-frequency core and broad-tail pools. A user-specific random salt stored in the session database keeps two installations from receiving the same deck.
 
-The default mix is 65% core. Previously mistyped items return after 1, 3, 7, and 14 days, up to 10% of a deck. Phrases and sentences not shown before are selected first, then less-exposed items. Weekly themes favor digits and symbols on Wednesday, one Japanese author on Friday, and a 50% broad tail on Sunday. The theme appears on the title and mode-selection screens.
+The default mix is 65% core. Previously mistyped items return after 1, 3, 7, and 14 days, up to 10% of a deck. Phrases and sentences not shown before are selected first, then less-exposed items. Weekly themes favor digits and symbols on Wednesday, one Japanese author on Friday, and a 50% broad tail on Sunday. The theme appears on the title and individual-training screens.
 
 ```toml
 [practice]
@@ -42,7 +90,7 @@ core_ratio = 0.65
 weekly_theme = true
 ```
 
-Set `daily_rotation = false` to use the P3 random selection unchanged. While playing `romaji` or Japanese `sentence`, press `Ctrl+R` (or `F2`) to report an incorrect reading, skip it immediately, and exclude it on later starts.
+Set `daily_rotation = false` to use the P3 random selection unchanged. While playing Japanese words or sentences, press `Ctrl+R` (or `F2`) to report an incorrect reading, skip it immediately, and exclude it on later starts.
 
 ## Romaji spellings
 

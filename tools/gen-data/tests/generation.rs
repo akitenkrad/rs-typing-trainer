@@ -6,6 +6,10 @@ use gen_data::{
     load_scowl_words, parse_bdf, prepare_english_phrase, prepare_english_sentence, prepare_japanese_phrases, render_aozora_works, stable_sample,
     update_bizud_manifest, update_bizud_notice, update_shinonome_manifest, update_shinonome_notice,
 };
+use gen_data::{
+    JA_PASSAGE_MAX_CHARS, JA_PASSAGES_FILTER, JA_PASSAGES_PER_WORK, PassageSentence, chunk_run, merge_passages, render_ja_passages,
+    select_work_passages, update_passage_manifest,
+};
 use tempfile::TempDir;
 
 const HALF_12: &str = r#"STARTFONT 2.1
@@ -587,4 +591,215 @@ fn bundled_aozora_work_table_matches_the_selection() {
         gzip_deterministic(expected.as_bytes()).unwrap(),
         "regenerate data/aozora_works.tsv.gz"
     );
+}
+
+/// A valid hiragana-only sentence of `length` characters (including `。`),
+/// distinct for each `seed`; its reading is the text itself.
+fn kana_sentence(seed: usize, length: usize) -> String {
+    let mut text = (0..length - 1)
+        .map(|index| char::from_u32(0x3042 + ((seed * 7 + index * 3 + seed / 11) % 77) as u32).unwrap())
+        .collect::<String>();
+    text.push('。');
+    text
+}
+
+fn passage_sentence(seed: usize, line: usize) -> PassageSentence {
+    let text = kana_sentence(seed, 20);
+    PassageSentence {
+        reading: Some(text.clone()),
+        text,
+        line,
+        start: seed * 100,
+    }
+}
+
+fn no_overrides() -> std::collections::BTreeMap<String, Option<String>> {
+    std::collections::BTreeMap::new()
+}
+
+#[test]
+fn passage_runs_are_cut_into_chunks_of_three_to_five_sentences() {
+    assert_eq!(chunk_run(0), vec![]);
+    assert_eq!(chunk_run(2), vec![]);
+    assert_eq!(chunk_run(3), vec![(0, 3)]);
+    assert_eq!(chunk_run(5), vec![(0, 5)]);
+    assert_eq!(chunk_run(6), vec![(0, 3), (3, 3)]);
+    assert_eq!(chunk_run(7), vec![(0, 4), (4, 3)]);
+    assert_eq!(chunk_run(11), vec![(0, 4), (4, 4), (8, 3)]);
+    for len in 3..200 {
+        let chunks = chunk_run(len);
+        assert_eq!(chunks.iter().map(|(_, size)| size).sum::<usize>(), len);
+        assert!(chunks.iter().all(|(_, size)| (3..=5).contains(size)), "{len}: {chunks:?}");
+    }
+}
+
+#[test]
+fn passages_join_consecutive_sentences_without_a_separator() {
+    let sentences = (0..4).map(|seed| passage_sentence(seed, 0)).collect::<Vec<_>>();
+    let passages = select_work_passages("000752", "夏目漱石", &sentences, &no_overrides());
+    assert_eq!(passages.len(), 1);
+    let expected = sentences.iter().map(|sentence| sentence.text.as_str()).collect::<String>();
+    assert_eq!(passages[0].text, expected);
+    assert_eq!(passages[0].reading, expected);
+    assert_eq!(passages[0].sentences, 4);
+    assert_eq!(passages[0].start, 0);
+    assert_eq!(render_ja_passages(&passages), format!("{expected}\t{expected}\t000752\t夏目漱石\text\n"));
+
+    let two = (0..2).map(|seed| passage_sentence(seed, 0)).collect::<Vec<_>>();
+    assert!(select_work_passages("000752", "夏目漱石", &two, &no_overrides()).is_empty());
+}
+
+#[test]
+fn passages_break_at_rejected_sentences_unknown_readings_and_paragraphs() {
+    // Too short, ASCII, unbalanced quote, and an unknown reading each cut the run.
+    for breaker in [
+        PassageSentence {
+            text: "短い。".to_owned(),
+            reading: Some("みじかい。".to_owned()),
+            line: 0,
+            start: 350,
+        },
+        PassageSentence {
+            text: format!("ABC{}", kana_sentence(90, 16)),
+            reading: Some(kana_sentence(90, 16)),
+            line: 0,
+            start: 350,
+        },
+        PassageSentence {
+            text: format!("「{}", kana_sentence(91, 16)),
+            reading: Some(format!("「{}", kana_sentence(91, 16))),
+            line: 0,
+            start: 350,
+        },
+        PassageSentence {
+            text: kana_sentence(92, 20),
+            reading: None,
+            line: 0,
+            start: 350,
+        },
+    ] {
+        let mut sentences = (0..3).map(|seed| passage_sentence(seed, 0)).collect::<Vec<_>>();
+        sentences.push(breaker);
+        sentences.extend((4..6).map(|seed| passage_sentence(seed, 0)));
+        let passages = select_work_passages("000001", "作者", &sentences, &no_overrides());
+        assert_eq!(passages.len(), 1, "{:?}", sentences[3]);
+        assert_eq!(passages[0].sentences, 3);
+        assert_eq!(passages[0].start, 0);
+    }
+
+    // Sentences of different paragraphs are not joined.
+    let mut sentences = (0..3).map(|seed| passage_sentence(seed, 0)).collect::<Vec<_>>();
+    sentences.extend((3..5).map(|seed| passage_sentence(seed, 1)));
+    let passages = select_work_passages("000001", "作者", &sentences, &no_overrides());
+    assert_eq!(passages.len(), 1);
+    assert_eq!(passages[0].sentences, 3);
+}
+
+#[test]
+fn passages_respect_the_length_limit_by_dropping_trailing_sentences() {
+    let sentences = (0..5)
+        .map(|seed| {
+            let text = kana_sentence(seed, 45);
+            PassageSentence {
+                reading: Some(text.clone()),
+                text,
+                line: 0,
+                start: seed * 100,
+            }
+        })
+        .collect::<Vec<_>>();
+    let passages = select_work_passages("000001", "作者", &sentences, &no_overrides());
+    assert_eq!(passages.len(), 1);
+    assert_eq!(passages[0].sentences, 3);
+    assert!(passages[0].text.chars().count() <= JA_PASSAGE_MAX_CHARS);
+    assert_eq!(passages[0].text.chars().count(), 135);
+}
+
+#[test]
+fn passages_per_work_are_capped_deterministically_and_ordered_by_position() {
+    // Forty separate paragraphs of three sentences each.
+    let sentences = (0..120).map(|seed| passage_sentence(seed, seed / 3)).collect::<Vec<_>>();
+    let first = select_work_passages("000081", "宮沢賢治", &sentences, &no_overrides());
+    let second = select_work_passages("000081", "宮沢賢治", &sentences, &no_overrides());
+    assert_eq!(first.len(), JA_PASSAGES_PER_WORK);
+    assert_eq!(first, second);
+    assert!(first.windows(2).all(|pair| pair[0].start < pair[1].start));
+    let texts = first.iter().map(|passage| passage.text.clone()).collect::<BTreeSet<_>>();
+    assert_eq!(texts.len(), JA_PASSAGES_PER_WORK);
+    // The seed depends on the work, so another work may pick other paragraphs,
+    // but it is still capped.
+    assert_eq!(
+        select_work_passages("000082", "宮沢賢治", &sentences, &no_overrides()).len(),
+        JA_PASSAGES_PER_WORK
+    );
+}
+
+#[test]
+fn duplicate_passages_are_removed_within_and_across_works() {
+    let mut sentences = (0..3).map(|seed| passage_sentence(seed, 0)).collect::<Vec<_>>();
+    sentences.extend((0..3).map(|seed| {
+        let mut sentence = passage_sentence(seed, 1);
+        sentence.start += 10_000;
+        sentence
+    }));
+    let one = select_work_passages("000002", "作者", &sentences, &no_overrides());
+    assert_eq!(one.len(), 1);
+    let other = select_work_passages("000001", "別の作者", &sentences[..3], &no_overrides());
+    let merged = merge_passages([one, other]);
+    assert_eq!(merged.len(), 1);
+    assert_eq!(merged[0].source_id, "000002");
+}
+
+#[test]
+fn sentence_overrides_apply_to_passage_sentences() {
+    let sentences = (0..6).map(|seed| passage_sentence(seed, 0)).collect::<Vec<_>>();
+
+    let mut excluded = no_overrides();
+    excluded.insert(sentences[2].text.clone(), None);
+    let passages = select_work_passages("000001", "作者", &sentences, &excluded);
+    assert_eq!(passages.len(), 1);
+    assert_eq!(passages[0].start, sentences[3].start);
+    assert!(!passages[0].text.contains(&sentences[2].text));
+
+    let replacement = kana_sentence(99, 20);
+    let mut replaced = no_overrides();
+    replaced.insert(sentences[1].text.clone(), Some(replacement.clone()));
+    let passages = select_work_passages("000001", "作者", &sentences[..3], &replaced);
+    assert_eq!(passages.len(), 1);
+    assert_eq!(passages[0].reading, format!("{}{}{}", sentences[0].text, replacement, sentences[2].text));
+
+    // An override whose reading breaks the reading rules also cuts the run.
+    let mut invalid = no_overrides();
+    invalid.insert(sentences[1].text.clone(), Some("ABC".to_owned()));
+    assert!(select_work_passages("000001", "作者", &sentences[..3], &invalid).is_empty());
+}
+
+#[test]
+fn passage_manifest_update_sets_filter_output_and_notice_hash_idempotently() {
+    let temp = TempDir::new().unwrap();
+    let manifest = temp.path().join("manifest.toml");
+    let notice = temp.path().join("NOTICE");
+    std::fs::write(&notice, "notice\n").unwrap();
+    std::fs::write(
+        &manifest,
+        "generated_date = \"2026-01-01\"\n\n[filters]\nja_sentences = \"s\"\nja_other = \"o\"\n\n[[inputs]]\npath = \"a\"\nsha256 = \"0\"\n\n[[outputs]]\npath = \"ja_sentences.tsv.gz\"\ncount = 1\nsha256 = \"1\"\n\n[[outputs]]\npath = \"NOTICE\"\ncount = 1\nsha256 = \"old\"\n",
+    )
+    .unwrap();
+    update_passage_manifest(&manifest, 42, "abc").unwrap();
+    let once = std::fs::read_to_string(&manifest).unwrap();
+    assert!(
+        once.contains(&format!("ja_sentences = \"s\"\nja_passages = \"{JA_PASSAGES_FILTER}\"\nja_other = \"o\"")),
+        "{once}"
+    );
+    assert!(
+        once.contains("path = \"ja_sentences.tsv.gz\"\ncount = 1\nsha256 = \"1\"\n\n[[outputs]]\npath = \"ja_passages.tsv.gz\"\ncount = 42\nsha256 = \"abc\"\n\n[[outputs]]\npath = \"NOTICE\""),
+        "{once}"
+    );
+    assert!(!once.contains("sha256 = \"old\""), "{once}");
+    update_passage_manifest(&manifest, 42, "abc").unwrap();
+    assert_eq!(std::fs::read_to_string(&manifest).unwrap(), once);
+    update_passage_manifest(&manifest, 7, "def").unwrap();
+    let changed = std::fs::read_to_string(&manifest).unwrap();
+    assert_eq!(changed.matches("ja_passages").count(), 2, "{changed}");
+    assert!(changed.contains("count = 7\nsha256 = \"def\""));
 }

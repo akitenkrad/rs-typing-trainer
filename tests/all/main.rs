@@ -26,6 +26,7 @@ mod data;
 mod data_bundled;
 mod deck;
 mod deck_sim;
+mod drill_table;
 mod error_diagnosis;
 mod error_mode;
 mod gate;

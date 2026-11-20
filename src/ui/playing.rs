@@ -329,7 +329,8 @@ fn timer_requested(app: &App) -> bool {
     !matches!(
         app.config.mode.kind,
         crate::config::ModeKind::Sentence | crate::config::ModeKind::Phrase | crate::config::ModeKind::Endurance
-    ) && !app.config.session.item_timeout().is_zero()
+    ) && !app.config.mode.prompt_unit().is_running_text()
+        && !app.config.session.item_timeout().is_zero()
 }
 
 fn prompt_rows(app: &App, size: Option<BigTextSize>, width: u16) -> u16 {

@@ -18,7 +18,7 @@ use crate::analysis::prescription::{
 use crate::bench::{
     BenchPart, BenchResultSummary, BenchResume, BenchSettings, generate_parallel_versions_for_series, next_parallel_index, parse_bench_id,
 };
-use crate::config::{Config, KeyFilter, KeyboardConfig, ModeConfig, ModeKind, SessionConfig};
+use crate::config::{Config, DrillCell, KeyFilter, KeyboardConfig, ModeConfig, ModeKind, PromptUnit, SessionConfig};
 use crate::data::{DataCatalog, DataKind, TrainingDataSource};
 use crate::engine::modes::{GeneratedPrompt, ModeGenerator};
 use crate::engine::romaji::RomajiJudge;
@@ -265,10 +265,12 @@ pub struct App {
     pub title_selected: usize,
     pub settings_selected: usize,
     pub settings_save_error: Option<String>,
-    pub mode_selected: usize,
-    /// Practice language of the stand-alone warm-up, switched with `L` on the
-    /// mode-select screen (MYTASK-3629). Not saved.
-    pub warmup_language: Lang,
+    /// The cell under the cursor on the individual-training table
+    /// (MYTASK-3638).
+    pub drill_cell: DrillCell,
+    /// The practice language of the individual-training table, switched with
+    /// `L`; it also sets the language of the stand-alone warm-up.
+    pub practice_lang: Lang,
     pub key_cursor_row: usize,
     pub key_cursor_col: usize,
     pub mode_warning: Option<String>,
@@ -357,6 +359,17 @@ pub struct App {
     /// The last session shown on the result screen was a stand-alone warm-up,
     /// so a retry starts the warm-up again.
     result_was_warmup: bool,
+    /// The table cell chosen with Enter, waiting for the key picker (or
+    /// started directly) (MYTASK-3638).
+    pending_cell: Option<DrillCell>,
+    /// The configuration before a table cell's settings replaced it;
+    /// restored when the session ends or is aborted.
+    cell_original_config: Option<Config>,
+    /// The table cell of the session on the result screen, so a retry plays
+    /// the same cell.
+    result_cell: Option<DrillCell>,
+    /// The cell of the burst series in progress.
+    burst_cell: Option<DrillCell>,
 }
 
 pub struct GameState {
@@ -424,7 +437,8 @@ impl App {
 
     fn new_without_storage(config: Config, home_dir: PathBuf, date: chrono::NaiveDate) -> Self {
         let now = Instant::now();
-        let mode_selected = mode_index(config.mode.kind);
+        let drill_cell = crate::practice::drill::initial_cell(&config);
+        let practice_lang = crate::practice::drill::initial_lang(&config);
         let practice_theme = weekly_theme(date, config.practice.weekly_theme);
         let layouts = builtin_layout_names()
             .into_iter()
@@ -477,8 +491,8 @@ impl App {
             title_selected: 0,
             settings_selected: 0,
             settings_save_error: None,
-            mode_selected,
-            warmup_language: Lang::En,
+            drill_cell,
+            practice_lang,
             key_cursor_row: 0,
             key_cursor_col: 0,
             mode_warning: None,
@@ -547,6 +561,10 @@ impl App {
             menu_original_config: None,
             warmup_original_config: None,
             result_was_warmup: false,
+            pending_cell: None,
+            cell_original_config: None,
+            result_cell: None,
+            burst_cell: None,
         }
     }
 
@@ -580,6 +598,12 @@ impl App {
             }
             if let Some(course) = params.get("course").and_then(serde_json::Value::as_str) {
                 config.mode.phrase.course = course.to_owned();
+            }
+            if let Some(cell) = params
+                .get("drill")
+                .and_then(|value| serde_json::from_value::<DrillCell>(value.clone()).ok())
+            {
+                config.mode.drill = Some(cell);
             }
             config.pacer.target_wpm = params.get("pacer_target_wpm").and_then(serde_json::Value::as_f64);
         }
@@ -979,25 +1003,22 @@ impl App {
     }
 
     fn open_mode_select(&mut self) {
-        self.mode_selected = mode_index(self.config.mode.kind);
+        self.drill_cell = crate::practice::drill::initial_cell(&self.config);
+        self.practice_lang = crate::practice::drill::initial_lang(&self.config);
+        self.mode_warning = None;
         self.refresh_mode_grade();
         self.screen = Screen::ModeSelect;
     }
 
-    /// The row under the cursor on the mode-select screen.
-    pub fn selected_mode_entry(&self) -> ModeEntry {
-        MODE_ENTRIES.get(self.mode_selected).copied().unwrap_or(ModeEntry::Warmup)
-    }
-
     /// Start the menu's warm-up on its own (MYTASK-3629): the catalog's
     /// `fixed.warmup` step (mode, minutes and settings) in
-    /// [`Self::warmup_language`], applied to an in-memory copy of the
+    /// [`Self::practice_lang`], applied to an in-memory copy of the
     /// configuration. The copy is dropped when the session ends or is
     /// aborted; nothing is written to the configuration file, and the session
     /// is not part of a menu run.
     fn start_warmup(&mut self) {
         let step = crate::practice::menu::bundled_catalog()
-            .and_then(|catalog| crate::practice::menu::warmup_step(catalog, self.config.general.lang, self.warmup_language));
+            .and_then(|catalog| crate::practice::menu::warmup_step(catalog, self.config.general.lang, self.practice_lang));
         let step = match step {
             Ok(step) => step,
             Err(error) => {
@@ -1025,10 +1046,123 @@ impl App {
         self.warmup_original_config.is_some()
     }
 
+    /// Whether the session being set up or played was started from a cell
+    /// of the individual-training table.
+    pub fn cell_active(&self) -> Option<DrillCell> {
+        self.cell_original_config.as_ref().and(self.config.mode.drill)
+    }
+
+    /// Put back the user's configuration after a stand-alone warm-up or a
+    /// table cell replaced it in memory.
     fn restore_warmup_config(&mut self) {
         if let Some(config) = self.warmup_original_config.take() {
             self.config = config;
         }
+        if let Some(config) = self.cell_original_config.take() {
+            self.config = config;
+        }
+    }
+
+    /// Start the session of a table cell: its settings on an in-memory copy
+    /// of the configuration (MYTASK-3638).
+    fn start_cell_session(&mut self, cell: DrillCell) {
+        let base = self.cell_original_config.take().unwrap_or_else(|| self.config.clone());
+        match crate::practice::drill::config_for_cell(&base, cell, self.practice_lang) {
+            Ok(config) => {
+                self.config = config;
+                self.cell_original_config = Some(base);
+                self.pending_cell = None;
+                self.start_countdown();
+            }
+            Err(error) => {
+                self.config = base;
+                self.mode_warning = Some(error);
+            }
+        }
+    }
+
+    /// Enter on a cell of the individual-training table.
+    fn activate_cell(&mut self) {
+        let cell = self.drill_cell;
+        let lang = self.practice_lang;
+        let Some(kind) = crate::practice::drill::mode_for(cell, lang) else {
+            self.mode_warning = Some(crate::ui::mode_select::unavailable_reason(cell, self.config.general.lang).to_owned());
+            return;
+        };
+        if cell.unit == PromptUnit::Passage && lang == Lang::Ja && !crate::data::has_bundled_japanese_passages() {
+            self.mode_warning = Some(crate::ui::mode_select::passages_missing(self.config.general.lang).to_owned());
+            return;
+        }
+        self.mode_warning = None;
+        self.config.mode.kind = kind;
+        self.config.drill.skill = Some(cell.skill);
+        self.config.drill.unit = Some(cell.unit);
+        self.config.drill.lang = Some(lang);
+        if kind == ModeKind::Burst && (self.burst_series.complete() || self.burst_cell != Some(cell)) {
+            self.burst_series = BurstSeries::default();
+        }
+        if kind == ModeKind::Burst {
+            self.burst_cell = Some(cell);
+        }
+        self.pending_cell = Some(cell);
+        if crate::practice::drill::uses_key_picker(cell) || (crate::practice::drill::requires_keys(cell) && self.config.mode.keys.is_empty()) {
+            self.key_cursor_row = 0;
+            self.key_cursor_col = 0;
+            if self.mode_requires_keys() && self.config.mode.keys.is_empty() {
+                self.mode_warning = Some(self.select_keys_message().to_owned());
+            } else {
+                self.refresh_mode_warning();
+            }
+            self.screen = Screen::KeyPicker;
+            return;
+        }
+        if let Err(error) = self.save_mode_choices() {
+            self.mode_warning = Some(error);
+            return;
+        }
+        self.start_cell_session(cell);
+    }
+
+    fn save_mode_choices(&self) -> Result<(), String> {
+        if let Some(path) = self.config_path.as_ref() {
+            crate::config::save_mode_selection(path, &self.config.mode).map_err(|error| error.to_string())?;
+            crate::config::save_mode_controls(path, &self.config).map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    }
+
+    /// `L` on the table: switch the practice language of every cell and
+    /// align the per-mode language settings with it.
+    fn toggle_practice_lang(&mut self) {
+        self.practice_lang = match self.practice_lang {
+            Lang::En => Lang::Ja,
+            Lang::Ja => Lang::En,
+        };
+        let code = match self.practice_lang {
+            Lang::En => "en",
+            Lang::Ja => "ja",
+        };
+        self.config.adaptive.lang = code.to_owned();
+        self.config.mode.phrase.lang = code.to_owned();
+        self.config.mode.sentence.lang = code.to_owned();
+        self.config.drill.lang = Some(self.practice_lang);
+        if let Some(path) = self.config_path.as_ref()
+            && let Err(error) = crate::config::save_mode_controls(path, &self.config)
+        {
+            self.mode_warning = Some(error.to_string());
+        }
+    }
+
+    /// Move the table cursor; `—` cells are visited (their reason is shown).
+    fn move_drill_cursor(&mut self, rows: isize, columns: isize) {
+        let skills = crate::config::DrillSkill::ALL;
+        let units = PromptUnit::ALL;
+        let row = skills.iter().position(|skill| *skill == self.drill_cell.skill).unwrap_or(0) as isize;
+        let column = units.iter().position(|unit| *unit == self.drill_cell.unit).unwrap_or(0) as isize;
+        let row = (row + rows).clamp(0, skills.len() as isize - 1) as usize;
+        let column = (column + columns).clamp(0, units.len() as isize - 1) as usize;
+        self.drill_cell = DrillCell::new(skills[row], units[column]);
+        self.mode_warning = None;
     }
 
     fn handle_menu_key(&mut self, key: KeyEvent, action: InputAction) {
@@ -1249,15 +1383,14 @@ impl App {
 
     fn handle_mode_select_key(&mut self, key: KeyEvent, action: InputAction) {
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => self.mode_selected = self.mode_selected.saturating_sub(1),
-            KeyCode::Down | KeyCode::Char('j') => self.mode_selected = (self.mode_selected + 1).min(MODE_ENTRIES.len() - 1),
-            KeyCode::Char('p') | KeyCode::Char('P') => {
-                if matches!(
-                    self.selected_mode_entry().mode(),
-                    Some(ModeKind::Words | ModeKind::Sentence | ModeKind::Phrase | ModeKind::Adaptive)
-                ) {
-                    self.config.pacer.enabled = !self.config.pacer.enabled;
-                }
+            KeyCode::Up | KeyCode::Char('k') => self.move_drill_cursor(-1, 0),
+            KeyCode::Down | KeyCode::Char('j') => self.move_drill_cursor(1, 0),
+            KeyCode::Left | KeyCode::Char('h') => self.move_drill_cursor(0, -1),
+            KeyCode::Right | KeyCode::Char('l') => self.move_drill_cursor(0, 1),
+            KeyCode::Char('L') => self.toggle_practice_lang(),
+            KeyCode::Char('w') | KeyCode::Char('W') => {
+                self.mode_warning = None;
+                self.start_warmup();
             }
             KeyCode::Char('z') | KeyCode::Char('Z') => {
                 self.config.display.prompt_style = if self.config.display.prompt_style == "normal" {
@@ -1267,19 +1400,7 @@ impl App {
                 }
                 .to_owned();
             }
-            KeyCode::Char('l') | KeyCode::Char('L') if self.selected_mode_entry() == ModeEntry::Warmup => {
-                self.warmup_language = match self.warmup_language {
-                    Lang::En => Lang::Ja,
-                    Lang::Ja => Lang::En,
-                };
-            }
-            KeyCode::Char('l') | KeyCode::Char('L') if self.selected_mode_entry() == ModeEntry::Mode(ModeKind::Adaptive) => {
-                self.config.adaptive.lang = if self.config.adaptive.lang == "en" { "ja" } else { "en" }.to_owned();
-            }
-            KeyCode::Char('l') | KeyCode::Char('L') if self.selected_mode_entry() == ModeEntry::Mode(ModeKind::Phrase) => {
-                self.config.mode.phrase.lang = if self.config.mode.phrase.lang == "en" { "ja" } else { "en" }.to_owned();
-            }
-            KeyCode::Char('c') | KeyCode::Char('C') if self.selected_mode_entry() == ModeEntry::Mode(ModeKind::Phrase) => {
+            KeyCode::Char('c') | KeyCode::Char('C') if self.drill_cell.unit == PromptUnit::Phrase => {
                 self.config.mode.phrase.course = match self.config.mode.phrase.course.as_str() {
                     "short" => "normal",
                     "normal" => "long",
@@ -1294,51 +1415,7 @@ impl App {
             KeyCode::Char('[') => {
                 self.config.session.preview_items = self.config.session.preview_items.saturating_sub(1);
             }
-            KeyCode::Enter | KeyCode::Char(' ') => {
-                let Some(kind) = self.selected_mode_entry().mode() else {
-                    self.start_warmup();
-                    return;
-                };
-                self.config.mode.kind = kind;
-                if self.config.mode.kind == ModeKind::Burst && self.burst_series.complete() {
-                    self.burst_series = BurstSeries::default();
-                }
-                if self.mode_requires_keys() && self.config.mode.keys.is_empty() {
-                    self.key_cursor_row = 0;
-                    self.key_cursor_col = 0;
-                    self.mode_warning = Some(self.select_keys_message().to_owned());
-                    self.screen = Screen::KeyPicker;
-                } else if matches!(
-                    self.config.mode.kind,
-                    ModeKind::Random
-                        | ModeKind::Sentence
-                        | ModeKind::Phrase
-                        | ModeKind::Adaptive
-                        | ModeKind::Unlock
-                        | ModeKind::Rhythm
-                        | ModeKind::Burst
-                        | ModeKind::Endurance
-                ) {
-                    if let Some(path) = self.config_path.as_ref()
-                        && let Err(error) = crate::config::save_mode_selection(path, &self.config.mode)
-                    {
-                        self.mode_warning = Some(error.to_string());
-                        return;
-                    }
-                    if let Some(path) = self.config_path.as_ref()
-                        && let Err(error) = crate::config::save_mode_controls(path, &self.config)
-                    {
-                        self.mode_warning = Some(error.to_string());
-                        return;
-                    }
-                    self.start_countdown();
-                } else {
-                    self.key_cursor_row = 0;
-                    self.key_cursor_col = 0;
-                    self.refresh_mode_warning();
-                    self.screen = Screen::KeyPicker;
-                }
-            }
+            KeyCode::Enter | KeyCode::Char(' ') => self.activate_cell(),
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => self.screen = Screen::Title,
             _ => {}
         }
@@ -1823,7 +1900,10 @@ impl App {
                     self.mode_warning = Some(error.to_string());
                     return;
                 }
-                self.start_countdown();
+                match self.pending_cell {
+                    Some(cell) => self.start_cell_session(cell),
+                    None => self.start_countdown(),
+                }
             }
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => self.screen = Screen::ModeSelect,
             _ => {}
@@ -1867,16 +1947,24 @@ impl App {
             return;
         }
         let layout = self.practice_layout().clone();
+        let mut mode = self.config.mode.clone();
+        if let Some(cell) = self.pending_cell {
+            mode.drill = Some(cell);
+            if cell.unit == PromptUnit::Word && self.practice_lang == Lang::Ja {
+                mode.sentence.lang = "ja".to_owned();
+            }
+        }
         self.mode_warning = match DataCatalog::load(&self.config.data, &self.home_dir) {
-            Ok(catalog) => ModeGenerator::new(self.config.mode.clone(), catalog, layout, 0)
-                .warning()
-                .map(str::to_owned),
+            Ok(catalog) => ModeGenerator::new(mode, catalog, layout, 0).warning().map(str::to_owned),
             Err(error) => Some(error.to_string()),
         };
     }
 
     fn mode_requires_keys(&self) -> bool {
-        matches!(self.config.mode.kind, ModeKind::Random | ModeKind::Ngram)
+        match self.pending_cell {
+            Some(cell) => crate::practice::drill::requires_keys(cell),
+            None => matches!(self.config.mode.kind, ModeKind::Random | ModeKind::Ngram),
+        }
     }
 
     fn select_keys_message(&self) -> &'static str {
@@ -2030,6 +2118,11 @@ impl App {
                 ResultOrigin::JustPlayed if self.result_was_warmup => self.start_warmup(),
                 ResultOrigin::JustPlayed if self.config.mode.kind == ModeKind::Burst && self.burst_series.complete() => {
                     self.screen = Screen::Title;
+                }
+                ResultOrigin::JustPlayed if self.result_cell.is_some() => {
+                    if let Some(cell) = self.result_cell {
+                        self.start_cell_session(cell);
+                    }
                 }
                 ResultOrigin::JustPlayed => self.start_countdown(),
                 ResultOrigin::History => self.open_history(),
@@ -2282,8 +2375,19 @@ impl App {
             ModeKind::Romaji => Some(ReadingReportKind::Romaji),
             ModeKind::Sentence if self.config.mode.sentence.lang == "ja" => Some(ReadingReportKind::Sentence),
             ModeKind::Words | ModeKind::Ngram | ModeKind::Unlock | ModeKind::Rhythm | ModeKind::Burst if japanese_word => {
-                Some(ReadingReportKind::Romaji)
+                // A table cell (MYTASK-3638) may feed these modes Japanese
+                // sentences rather than words.
+                if matches!(self.config.mode.prompt_unit(), PromptUnit::Sentence | PromptUnit::Passage) {
+                    Some(ReadingReportKind::Sentence)
+                } else {
+                    Some(ReadingReportKind::Romaji)
+                }
             }
+            ModeKind::Endurance | ModeKind::Adaptive if japanese_word && self.config.mode.drill.is_some() => match self.config.mode.prompt_unit() {
+                PromptUnit::Sentence | PromptUnit::Passage => Some(ReadingReportKind::Sentence),
+                PromptUnit::Word => Some(ReadingReportKind::Romaji),
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -2376,7 +2480,8 @@ impl App {
             InputEffect::Backspace => {}
         }
         Self::refresh_live_metrics(game, pause_ms);
-        let burst_finished = self.config.mode.kind == ModeKind::Burst && game.metrics.completed_words as usize >= self.config.burst.words;
+        let burst_finished =
+            self.config.mode.kind == ModeKind::Burst && game.metrics.completed_words as usize >= crate::practice::drill::burst_items(&self.config);
         self.update_live_goal();
         if burst_finished {
             self.finish_game(now);
@@ -2699,7 +2804,7 @@ impl App {
         if self.warmup_active() {
             // MYTASK-3629: a Japanese stand-alone warm-up is fed Japanese
             // words, as the menu's Japanese warm-up step is.
-            generator_config.kind = crate::practice::menu::generator_kind_for_step(generator_config.kind, self.warmup_language);
+            generator_config.kind = crate::practice::menu::generator_kind_for_step(generator_config.kind, self.practice_lang);
         }
         if let Some(step) = active_menu_step.as_ref() {
             // These modes use the English word pool by default. Keep their
@@ -2712,10 +2817,12 @@ impl App {
                 crate::practice::menu::restrict_catalog_to_step_targets(&mut catalog, step);
             }
         }
+        // The speed row of the table runs the pacer on every unit
+        // (MYTASK-3638); elsewhere only the modes that always offered it.
         let pacer_supported = matches!(
             self.config.mode.kind,
             ModeKind::Words | ModeKind::Sentence | ModeKind::Phrase | ModeKind::Adaptive
-        );
+        ) || self.config.mode.drill.is_some_and(|cell| cell.skill == crate::config::DrillSkill::Speed);
         self.config.pacer.target_wpm = (!is_bench && pacer_supported && self.config.pacer.enabled)
             .then(|| crate::practice::pacer::target_wpm(&records, self.config.pacer.ratio, self.config.pacer.min_wpm));
         if !is_bench
@@ -2859,14 +2966,29 @@ impl App {
             .collect::<Vec<_>>()
         });
         let mut mode_generator = if let Some(plan) = adaptive_plan.as_ref() {
-            ModeGenerator::new_adaptive(
-                self.config.mode.clone(),
-                catalog,
-                practice_layout,
-                seed,
-                plan,
-                self.config.adaptive.lang == "ja",
-            )
+            let unit = self.config.mode.prompt_unit();
+            if unit.is_running_text() {
+                // Weak transitions in phrases or sentences (MYTASK-3638):
+                // prompts rich in the plan's focus come first.
+                let mut generator = ModeGenerator::new(generator_config, catalog, practice_layout, seed);
+                if !plan.fallback_to_words {
+                    generator.prefer_transitions(&plan.focus());
+                }
+                generator
+            } else {
+                let mut generator = ModeGenerator::new_adaptive(
+                    self.config.mode.clone(),
+                    catalog,
+                    practice_layout,
+                    seed,
+                    plan,
+                    self.config.adaptive.lang == "ja",
+                );
+                if unit == PromptUnit::Ngram {
+                    generator.retain_drills();
+                }
+                generator
+            }
         } else {
             ModeGenerator::new(generator_config, catalog, practice_layout, seed)
         };
@@ -2900,7 +3022,9 @@ impl App {
         };
         let first = word_from_text(&first_prompt.target);
         let next = word_from_text(&next_prompt.target);
-        let item_timeout = if matches!(self.config.mode.kind, ModeKind::Sentence | ModeKind::Phrase | ModeKind::Endurance) {
+        let item_timeout = if matches!(self.config.mode.kind, ModeKind::Sentence | ModeKind::Phrase | ModeKind::Endurance)
+            || self.config.mode.prompt_unit().is_running_text()
+        {
             Duration::ZERO
         } else {
             self.config.session.item_timeout()
@@ -3377,6 +3501,7 @@ impl App {
         self.result_origin = ResultOrigin::JustPlayed;
         self.restore_menu_config();
         self.result_was_warmup = self.warmup_active();
+        self.result_cell = self.cell_active();
         self.restore_warmup_config();
         self.screen = Screen::Result;
         self.abort_confirm_until = None;
@@ -3628,42 +3753,26 @@ fn posterior_from_metrics(metrics: &DetailedMetrics, from: &str, to: &str, fallb
     )
 }
 
-/// One row of the mode-select screen: a training mode, or the menu's warm-up
-/// played on its own (MYTASK-3629). The warm-up is not a mode of its own; it
-/// runs `words` with the catalog's warm-up settings.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ModeEntry {
-    Warmup,
-    Mode(ModeKind),
-}
-
-impl ModeEntry {
-    /// The training mode of this row, or `None` for the warm-up.
-    pub fn mode(self) -> Option<ModeKind> {
-        match self {
-            Self::Warmup => None,
-            Self::Mode(kind) => Some(kind),
-        }
-    }
-}
-
-/// The rows of the mode-select screen, in display order.
-pub const MODE_ENTRIES: [ModeEntry; 12] = [
-    ModeEntry::Warmup,
-    ModeEntry::Mode(ModeKind::Random),
-    ModeEntry::Mode(ModeKind::Words),
-    ModeEntry::Mode(ModeKind::Romaji),
-    ModeEntry::Mode(ModeKind::Sentence),
-    ModeEntry::Mode(ModeKind::Phrase),
-    ModeEntry::Mode(ModeKind::Ngram),
-    ModeEntry::Mode(ModeKind::Adaptive),
-    ModeEntry::Mode(ModeKind::Unlock),
-    ModeEntry::Mode(ModeKind::Rhythm),
-    ModeEntry::Mode(ModeKind::Burst),
-    ModeEntry::Mode(ModeKind::Endurance),
-];
-
 fn daily_data_kind(config: &Config) -> Option<DataKind> {
+    if config.mode.drill.is_some() {
+        // A table cell (MYTASK-3638): the deck follows what the prompts are
+        // made of. Passages join consecutive sentences, so they skip the deck.
+        return match config.mode.prompt_unit() {
+            PromptUnit::Char | PromptUnit::Passage => None,
+            PromptUnit::Ngram => (config.mode.kind == ModeKind::Ngram && config.mode.ngram.source == "corpus").then_some(DataKind::EnglishWord),
+            PromptUnit::Word if config.mode.kind == ModeKind::Adaptive => Some(if config.adaptive.lang == "ja" {
+                DataKind::JapaneseWord
+            } else {
+                DataKind::EnglishWord
+            }),
+            PromptUnit::Word if crate::practice::drill::japanese_words(&config.mode) => Some(DataKind::JapaneseWord),
+            PromptUnit::Word => Some(DataKind::EnglishWord),
+            PromptUnit::Phrase if config.mode.phrase.lang == "ja" => Some(DataKind::JapanesePhrase),
+            PromptUnit::Phrase => Some(DataKind::EnglishPhrase),
+            PromptUnit::Sentence if config.mode.sentence.lang == "ja" => Some(DataKind::JapaneseSentence),
+            PromptUnit::Sentence => Some(DataKind::EnglishSentence),
+        };
+    }
     match config.mode.kind {
         ModeKind::Adaptive if config.adaptive.lang == "ja" => Some(DataKind::JapaneseWord),
         ModeKind::Words | ModeKind::Adaptive | ModeKind::Unlock | ModeKind::Rhythm | ModeKind::Burst => Some(DataKind::EnglishWord),
@@ -3723,10 +3832,6 @@ fn allowed_practice_characters(mode: &ModeConfig, layout: &KeyboardLayout) -> St
         characters.push_str(&mode.base_keys);
     }
     characters
-}
-
-fn mode_index(mode: ModeKind) -> usize {
-    MODE_ENTRIES.iter().position(|candidate| *candidate == ModeEntry::Mode(mode)).unwrap_or(1)
 }
 
 fn replay_mode_kind(name: &str) -> ModeKind {

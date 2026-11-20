@@ -56,6 +56,10 @@ pub struct Config {
     /// Daily practice menu (`[menu]`).
     #[serde(default)]
     pub menu: MenuConfig,
+    /// Individual training table (`[drill]`, MYTASK-3638): the last chosen
+    /// cell and practice language.
+    #[serde(default)]
+    pub drill: DrillConfig,
     /// Legacy v1 section retained as a compatibility view.
     #[serde(default)]
     pub game: GameConfig,
@@ -238,6 +242,137 @@ pub struct ModeConfig {
     pub sentence: SentenceModeConfig,
     #[serde(default)]
     pub phrase: PhraseModeConfig,
+    /// The individual-training cell being played (MYTASK-3638). Set only on
+    /// the in-memory configuration of a session started from the table; it
+    /// is never read from or written to the configuration file.
+    #[serde(skip)]
+    pub drill: Option<DrillCell>,
+}
+
+impl ModeConfig {
+    /// What the prompts are made of: the cell's unit for a session started
+    /// from the individual-training table, otherwise the mode's own unit.
+    pub fn prompt_unit(&self) -> PromptUnit {
+        self.drill.map_or_else(|| PromptUnit::natural(self.kind), |cell| cell.unit)
+    }
+}
+
+/// The skill a cell of the individual-training table trains (its row).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DrillSkill {
+    Normal,
+    Accuracy,
+    Speed,
+    Recovery,
+    Blind,
+    Weak,
+    Rhythm,
+    Burst,
+    Endurance,
+    Unlock,
+}
+
+impl DrillSkill {
+    pub const ALL: [Self; 10] = [
+        Self::Normal,
+        Self::Accuracy,
+        Self::Speed,
+        Self::Recovery,
+        Self::Blind,
+        Self::Weak,
+        Self::Rhythm,
+        Self::Burst,
+        Self::Endurance,
+        Self::Unlock,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Accuracy => "accuracy",
+            Self::Speed => "speed",
+            Self::Recovery => "recovery",
+            Self::Blind => "blind",
+            Self::Weak => "weak",
+            Self::Rhythm => "rhythm",
+            Self::Burst => "burst",
+            Self::Endurance => "endurance",
+            Self::Unlock => "unlock",
+        }
+    }
+}
+
+/// What the prompts of a cell are made of (its column).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PromptUnit {
+    /// Random letter groups.
+    Char,
+    /// Repeated two- or three-letter combinations.
+    Ngram,
+    Word,
+    Phrase,
+    /// One sentence.
+    Sentence,
+    /// Several sentences in a row.
+    Passage,
+}
+
+impl PromptUnit {
+    pub const ALL: [Self; 6] = [Self::Char, Self::Ngram, Self::Word, Self::Phrase, Self::Sentence, Self::Passage];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Char => "char",
+            Self::Ngram => "ngram",
+            Self::Word => "word",
+            Self::Phrase => "phrase",
+            Self::Sentence => "sentence",
+            Self::Passage => "passage",
+        }
+    }
+
+    /// The unit a mode draws its prompts from on its own.
+    pub fn natural(kind: ModeKind) -> Self {
+        match kind {
+            ModeKind::Random => Self::Char,
+            ModeKind::Ngram => Self::Ngram,
+            ModeKind::Words | ModeKind::Romaji | ModeKind::Adaptive | ModeKind::Unlock | ModeKind::Rhythm | ModeKind::Burst => Self::Word,
+            ModeKind::Sentence | ModeKind::Endurance => Self::Sentence,
+            ModeKind::Phrase => Self::Phrase,
+        }
+    }
+
+    /// Prompts of running text, typed without the per-item timer.
+    pub fn is_running_text(self) -> bool {
+        matches!(self, Self::Phrase | Self::Sentence | Self::Passage)
+    }
+}
+
+/// One cell of the individual-training table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DrillCell {
+    pub skill: DrillSkill,
+    pub unit: PromptUnit,
+}
+
+impl DrillCell {
+    pub const fn new(skill: DrillSkill, unit: PromptUnit) -> Self {
+        Self { skill, unit }
+    }
+}
+
+/// `[drill]`: the cell and practice language last chosen on the
+/// individual-training table. Unset keys follow the mode in `[mode]`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DrillConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skill: Option<DrillSkill>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<PromptUnit>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lang: Option<Lang>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -576,6 +711,7 @@ impl Default for ModeConfig {
             romaji: RomajiModeConfig::default(),
             sentence: SentenceModeConfig::default(),
             phrase: PhraseModeConfig::default(),
+            drill: None,
         }
     }
 }
@@ -844,6 +980,7 @@ impl Default for Config {
             burst: BurstConfig::default(),
             endurance: EnduranceConfig::default(),
             menu: MenuConfig::default(),
+            drill: DrillConfig::default(),
             game: GameConfig::default(),
             characters: CharactersConfig::default(),
             ui: UiConfig::default(),
@@ -1152,11 +1289,32 @@ pub fn save_mode_selection(path: &Path, mode: &ModeConfig) -> AppResult<()> {
 /// Persist controls edited directly on the mode-selection screen.
 pub fn save_mode_controls(path: &Path, config: &Config) -> AppResult<()> {
     let raw = if path.exists() { std::fs::read_to_string(path)? } else { String::new() };
-    let mut document = document_with_sections(&raw, &["mode", "session", "adaptive", "pacer", "display"])?;
+    let mut sections = vec!["mode", "session", "adaptive", "pacer", "display"];
+    let drill = &config.drill;
+    if drill.skill.is_some() || drill.unit.is_some() || drill.lang.is_some() {
+        sections.push("drill");
+    }
+    let mut document = document_with_sections(&raw, &sections)?;
     set_integer_preserving_decor(&mut document["session"]["preview_items"], config.session.preview_items as i64);
     set_prompt_style(&mut document, &config.display.prompt_style);
     set_string_preserving_decor(&mut document["adaptive"]["lang"], &config.adaptive.lang);
     set_string_preserving_decor(&mut document["mode"]["phrase"]["lang"], &config.mode.phrase.lang);
+    set_string_preserving_decor(&mut document["mode"]["sentence"]["lang"], &config.mode.sentence.lang);
+    if let Some(skill) = drill.skill {
+        set_string_preserving_decor(&mut document["drill"]["skill"], skill.as_str());
+    }
+    if let Some(unit) = drill.unit {
+        set_string_preserving_decor(&mut document["drill"]["unit"], unit.as_str());
+    }
+    if let Some(lang) = drill.lang {
+        set_string_preserving_decor(
+            &mut document["drill"]["lang"],
+            match lang {
+                Lang::En => "en",
+                Lang::Ja => "ja",
+            },
+        );
+    }
     set_string_preserving_decor(&mut document["mode"]["phrase"]["course"], &config.mode.phrase.course);
     set_bool_preserving_decor(&mut document["pacer"]["enabled"], config.pacer.enabled);
     if let Some(parent) = path.parent() {

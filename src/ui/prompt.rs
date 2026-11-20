@@ -23,7 +23,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::{App, GameState};
-use crate::config::ModeKind;
+use crate::config::{ModeKind, PromptUnit};
 use crate::game::word::{ExitKind, WordState};
 use crate::graphics::GraphicsMode;
 use crate::i18n::{Lang, Msg};
@@ -51,6 +51,15 @@ enum PromptKind {
 
 fn prompt_kind(app: &App, game: &GameState) -> PromptKind {
     let japanese = game.current_prompt.reading.is_some();
+    // A table cell (MYTASK-3638) can feed any mode sentences or passages;
+    // they are laid out as running text.
+    if app.config.mode.drill.is_some() && matches!(app.config.mode.prompt_unit(), PromptUnit::Sentence | PromptUnit::Passage) {
+        return if japanese {
+            PromptKind::Japanese { sentence: true }
+        } else {
+            PromptKind::Sentence
+        };
+    }
     match app.config.mode.kind {
         ModeKind::Romaji => PromptKind::Japanese { sentence: false },
         ModeKind::Phrase if japanese => PromptKind::Japanese { sentence: false },

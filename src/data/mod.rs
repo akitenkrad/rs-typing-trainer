@@ -20,6 +20,9 @@ const SENTENCES_JA_GZ: &[u8] = include_bytes!("../../data/ja_sentences.tsv.gz");
 /// Aozora Bunko works cited by the bundled Japanese sentences:
 /// `id<TAB>author<TAB>title`.
 const AOZORA_WORKS_GZ: &[u8] = include_bytes!("../../data/aozora_works.tsv.gz");
+/// Japanese passages (MYTASK-3639): consecutive sentences of one Aozora
+/// Bunko work, `text<TAB>reading<TAB>work id<TAB>author<TAB>tier`.
+const PASSAGES_JA_GZ: &[u8] = include_bytes!("../../data/ja_passages.tsv.gz");
 
 static BUNDLED: OnceLock<Result<BundledText, String>> = OnceLock::new();
 
@@ -59,6 +62,7 @@ struct BundledText {
     phrases_ja: String,
     sentences_en: String,
     sentences_ja: String,
+    passages_ja: String,
     aozora_works: String,
 }
 
@@ -69,6 +73,8 @@ pub enum PromptSource {
     Aozora { work_id: String, author: String, title: String },
     /// A sentence of the Tatoeba CC0 export, by its sentence number.
     Tatoeba { sentence_id: String },
+    /// Several Tatoeba sentences typed as one passage, in order.
+    TatoebaSet { sentence_ids: Vec<String> },
 }
 
 impl PromptSource {
@@ -78,8 +84,20 @@ impl PromptSource {
             (Self::Aozora { author, title, .. }, Lang::Ja) => format!("{author}『{title}』（青空文庫）"),
             (Self::Aozora { author, title, .. }, Lang::En) => format!("{author}, \"{title}\" (Aozora Bunko)"),
             (Self::Tatoeba { sentence_id }, _) => format!("Tatoeba #{sentence_id}"),
+            (Self::TatoebaSet { sentence_ids }, _) => {
+                format!("Tatoeba {}", sentence_ids.iter().map(|id| format!("#{id}")).collect::<Vec<_>>().join(" "))
+            }
         }
     }
+}
+
+/// A passage of consecutive sentences of one work, typed as one prompt
+/// (MYTASK-3638/3639).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JapanesePassage {
+    pub text: String,
+    pub reading: String,
+    pub source: Option<PromptSource>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -105,6 +123,7 @@ pub struct DataCatalog {
     phrases_ja: Vec<JapaneseText>,
     sentences_en: Vec<String>,
     sentences_ja: Vec<JapaneseText>,
+    passages_ja: Vec<JapanesePassage>,
     fixed: Vec<DataItem>,
     /// Sources of the bundled sentences, by `DataItem::key`. Sentences read
     /// from the user's own files have none.
@@ -175,6 +194,7 @@ impl DataCatalog {
             phrases_ja,
             sentences_en: load_one_column_source(&sentences_en_source, config.sentences_en.is_none())?,
             sentences_ja: load_japanese_source(&sentences_ja_source)?,
+            passages_ja: parse_japanese_passages(&bundled.passages_ja, &bundled.aozora_works)?,
             fixed,
             sources,
         })
@@ -189,6 +209,12 @@ impl DataCatalog {
             _ => return None,
         };
         self.sources.get(&key)
+    }
+
+    /// Bundled Japanese passages (consecutive sentences of one work). Empty
+    /// when the build carries none.
+    pub fn passages_ja(&self) -> &[JapanesePassage] {
+        &self.passages_ja
     }
 
     /// Immutable complete data used by benchmarks and daily-deck construction.
@@ -221,6 +247,8 @@ impl DataCatalog {
     }
 
     pub fn exclude_readings(&mut self, excluded: &HashSet<(String, String)>) {
+        self.passages_ja
+            .retain(|row| !excluded.contains(&(row.text.clone(), row.reading.clone())));
         self.words_ja.retain(|row| !excluded.contains(&(row.text.clone(), row.reading.clone())));
         self.phrases_ja.retain(|row| !excluded.contains(&(row.text.clone(), row.reading.clone())));
         self.sentences_ja
@@ -413,9 +441,8 @@ fn parse_japanese_items(source: &str, kind: DataKind, bundled: bool) -> AppResul
     Ok(items)
 }
 
-/// Sources of the bundled sentences: Tatoeba numbers for English, and the
-/// Aozora Bunko work (looked up in the bundled work table) for Japanese.
-fn sentence_sources(items: &[DataItem], aozora_works: &str) -> AppResult<HashMap<String, PromptSource>> {
+/// The Aozora Bunko work table: `id → (author, title)`.
+fn aozora_work_table(aozora_works: &str) -> AppResult<HashMap<&str, (&str, &str)>> {
     let mut works = HashMap::new();
     for (index, line) in aozora_works.lines().enumerate() {
         if line.trim().is_empty() || line.starts_with('#') {
@@ -427,6 +454,48 @@ fn sentence_sources(items: &[DataItem], aozora_works: &str) -> AppResult<HashMap
         }
         works.insert(fields[0], (fields[1], fields[2]));
     }
+    Ok(works)
+}
+
+/// Japanese passages, `text<TAB>reading<TAB>work id<TAB>author<TAB>tier`;
+/// the title comes from the work table.
+pub fn parse_japanese_passages(source: &str, aozora_works: &str) -> AppResult<Vec<JapanesePassage>> {
+    let works = aozora_work_table(aozora_works)?;
+    let mut passages = Vec::new();
+    for (index, line) in source.lines().enumerate() {
+        if line.trim().is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let fields = line.split('\t').collect::<Vec<_>>();
+        if fields.len() < 2 || fields[0].is_empty() || fields[1].is_empty() {
+            return Err(AppError::Record(format!("bundled passage line {} needs text and reading", index + 1)));
+        }
+        let source = fields.get(2).filter(|id| !id.is_empty()).map(|id| {
+            let (author, title) = works.get(id).copied().unwrap_or((fields.get(3).copied().unwrap_or_default(), ""));
+            PromptSource::Aozora {
+                work_id: (*id).to_owned(),
+                author: author.to_owned(),
+                title: title.to_owned(),
+            }
+        });
+        passages.push(JapanesePassage {
+            text: fields[0].to_owned(),
+            reading: fields[1].to_owned(),
+            source,
+        });
+    }
+    Ok(passages)
+}
+
+/// Whether the build carries Japanese passages.
+pub fn has_bundled_japanese_passages() -> bool {
+    bundled_text().is_ok_and(|bundled| bundled.passages_ja.lines().any(|line| !line.trim().is_empty() && !line.starts_with('#')))
+}
+
+/// Sources of the bundled sentences: Tatoeba numbers for English, and the
+/// Aozora Bunko work (looked up in the bundled work table) for Japanese.
+fn sentence_sources(items: &[DataItem], aozora_works: &str) -> AppResult<HashMap<String, PromptSource>> {
+    let works = aozora_work_table(aozora_works)?;
     let mut sources = HashMap::new();
     for item in items {
         let Some(id) = item.source_id.as_deref() else {
@@ -480,6 +549,7 @@ fn bundled_text() -> AppResult<&'static BundledText> {
                 phrases_ja: decompress(PHRASES_JA_GZ)?,
                 sentences_en: decompress(SENTENCES_EN_GZ)?,
                 sentences_ja: decompress(SENTENCES_JA_GZ)?,
+                passages_ja: decompress(PASSAGES_JA_GZ)?,
                 aozora_works: decompress(AOZORA_WORKS_GZ)?,
             })
         })

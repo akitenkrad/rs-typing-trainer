@@ -4,8 +4,8 @@ use anyhow::Result;
 use chrono::NaiveDate;
 use clap::Parser;
 use gen_data::{
-    BizUdGenerationOptions, FontGenerationOptions, GenerationOptions, generate, generate_bizud_font, generate_fonts, update_bizud_manifest,
-    update_bizud_notice, update_shinonome_manifest, update_shinonome_notice,
+    BizUdGenerationOptions, FontGenerationOptions, GenerationOptions, PassageGenerationOptions, generate, generate_bizud_font, generate_fonts,
+    generate_passages, update_bizud_manifest, update_bizud_notice, update_shinonome_manifest, update_shinonome_notice,
 };
 
 #[derive(Debug, Parser)]
@@ -32,6 +32,10 @@ struct Cli {
     out: PathBuf,
     #[arg(long, value_parser = parse_date)]
     date: Option<NaiveDate>,
+    /// Write only `ja_passages.tsv.gz` (and reconcile its manifest entry);
+    /// every other bundled file is left untouched.
+    #[arg(long, requires = "input", conflicts_with_all = ["font_source", "bizud_source", "date", "font_notice", "font_manifest"])]
+    passages_only: bool,
 }
 
 fn parse_date(value: &str) -> Result<NaiveDate, String> {
@@ -89,6 +93,21 @@ fn main() -> Result<()> {
     if cli.font_notice.is_some() || cli.font_manifest.is_some() {
         anyhow::bail!("--font-notice and --font-manifest require --font-source or --bizud-source");
     }
+    if cli.passages_only {
+        let report = generate_passages(&PassageGenerationOptions {
+            input: cli.input.expect("clap requires --input with --passages-only"),
+            extra_aozora: cli.extra_aozora,
+            out: cli.out,
+        })?;
+        println!("Japanese passage works: {}", report.works);
+        println!("Japanese passages: {}", report.passages);
+        println!("Japanese passages SHA-256: {}", report.sha256);
+        println!("Manifest updated: {}", report.manifest_updated);
+        for id in report.missing_aozora_ids {
+            println!("Missing Aozora work: {id}");
+        }
+        return Ok(());
+    }
     let input = cli
         .input
         .ok_or_else(|| anyhow::anyhow!("--input, --font-source, or --bizud-source is required"))?;
@@ -104,6 +123,7 @@ fn main() -> Result<()> {
     println!("Japanese phrases: {}", report.ja_phrases);
     println!("English sentences: {}", report.en_sentences);
     println!("Japanese sentences: {}", report.ja_sentences);
+    println!("Japanese passages: {}", report.ja_passages);
     println!("Japanese phrase reading mismatches: {}", report.phrase_reading_mismatches);
     for example in report.phrase_reading_mismatch_examples {
         println!("Japanese phrase reading mismatch: {example}");

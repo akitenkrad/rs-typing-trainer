@@ -9,7 +9,7 @@
 | キー | 型 | 既定値 | 説明 |
 |---|---|---|---|
 | `general.lang` | `en` / `ja` | `"en"` | 表示言語． |
-| `display.prompt_style` | `large` / `normal` | `"large"` | 問題文の描き方．`large` は端末画像を使える場合は字ごとの画像タイル，それ以外は東雲の大きな字形（16ドット，入らなければ12ドット）で描き，どちらも入らなければ通常の文字にする．`normal` は端末の文字の大きさのまま，枠で囲んだカードに字間を広げて描く．モード選択画面の `Z` でも切り替えられる．旧キー `prompt_size` も読み込む（`normal` → `normal`，それ以外 → `large`）．アプリから保存すると `prompt_style` で書き戻す． |
+| `display.prompt_style` | `large` / `normal` | `"large"` | 問題文の描き方．`large` は端末画像を使える場合は字ごとの画像タイル，それ以外は東雲の大きな字形（16ドット，入らなければ12ドット）で描き，どちらも入らなければ通常の文字にする．`normal` は端末の文字の大きさのまま，枠で囲んだカードに字間を広げて描く．個別の訓練の画面の `Z` でも切り替えられる．旧キー `prompt_size` も読み込む（`normal` → `normal`，それ以外 → `large`）．アプリから保存すると `prompt_style` で書き戻す． |
 | `display.feedback` | `summary` / `detailed` | `"summary"` | セッション後の気づき．`summary` は最も目立つ内容を 1 行，`detailed` は最大 3 行を示す．根拠が足りないときは値や文言を補わない． |
 | `display.graphics` | `auto` / `kitty` / `sixel` / `iterm2` / `off` | `"auto"` | 端末画像の方式．`auto` は起動時に 1 回だけ端末へ問い合わせる．方式を明示しても，1 セルの画素数を取得できなければ使わない．標準入出力が端末でなければ常に `off`．tmux／screen 内の `auto` も passthrough を確かめられないため `off`．詳しくは[端末画像](graphics.ja.md)を参照． |
 | `display.big_font` | `biz-ud-gothic` / `shinonome` / フォントのパス | `"biz-ud-gothic"` | 画像で描く出題の大きな文字に使う書体．`biz-ud-gothic` は同梱の BIZ UDゴシックの輪郭，`shinonome` は同梱のビットマップを整数倍に拡大して使う．それ以外の文字列は TTF・OTF・TTC（0 番目）のパスとして読み，`~/` はホームディレクトリを基準に展開する．ファイルを読めない・解析できない場合は BIZ UDゴシックへ戻し，理由を設定画面に表示する．端末画像を使えない場合，この設定は描画に影響しない． |
@@ -28,7 +28,7 @@
 | `session.blind` | 真偽値 | `false` | 項目終了まで入力済み部分を隠す． |
 | `session.retry_on_error` | 真偽値 | `false` | 誤打した項目を 1 回出し直す． |
 | `session.result_input_delay_ms` | 整数 | `1500` | 終了直後の結果画面とベンチまとめ画面で，この時間（ms）だけ押下・リピート入力を無視する．0 で無効．10000 を超える値は 10000 に丸める． |
-| `mode.kind` | モード名 | `"random"` | 起動時の練習モード． |
+| `mode.kind` | モード名 | `"random"` | 起動時の練習モード．個別の訓練の表は，最後に始めた升目のモードを書く． |
 | `mode.keys` | 文字列 | `"bmwvz"` | 絞り込み・生成に使う文字． |
 | `mode.key_filter` | `include` / `only` | `"include"` | 出題を絞り込む方法． |
 | `mode.base_keys` | 文字列 | `"home"` | `only` に追加するキー．`none`，`home`，または文字列． |
@@ -39,10 +39,10 @@
 | `mode.ngram.source` | `pairs` / `corpus` | `"pairs"` | 直積または同梱データ中の n-gram． |
 | `mode.romaji.accept_apostrophe` | 真偽値 | `true` | んの `n'` を受理する． |
 | `mode.romaji.accept_xn` | 真偽値 | `true` | んの `xn` を受理する． |
-| `mode.sentence.lang` | `en` / `ja` | `"en"` | 短文の言語． |
+| `mode.sentence.lang` | `en` / `ja` | `"en"` | 短文の言語．個別の訓練の表の `L` で練習言語と一緒に変わる． |
 | `mode.sentence.hide_typed` | 真偽値 | `false` | 入力済みの短文接頭部を隠す． |
-| `mode.phrase.lang` | `en` / `ja` | `"en"` | 句の言語．モード選択画面の `L` でも切り替える． |
-| `mode.phrase.course` | `short` / `normal` / `long` / `mixed` | `"normal"` | 句の長さのコース．モード選択画面の `C` でも切り替える． |
+| `mode.phrase.lang` | `en` / `ja` | `"en"` | 句の言語．個別の訓練の表の `L` で練習言語と一緒に変わる． |
+| `mode.phrase.course` | `short` / `normal` / `long` / `mixed` | `"normal"` | 句の長さのコース．個別の訓練の画面の `C`（句の列）でも切り替える． |
 | `data.words_en` | パス | `—` | 英単語 TSV の置換．未設定なら同梱データ． |
 | `data.words_ja` | パス | `—` | 日本語単語 TSV の置換． |
 | `data.phrases_en` | パス | `—` | 追加する英語句 TSV．同梱の句も残る． |
@@ -60,9 +60,9 @@
 | `analysis.spelling_suggestions` | 真偽値 | `true` | 本人向けのローマ字綴り案を有効にする． |
 | `adaptive.error_weight` | 数値 | `—` | 誤打のコスト（ms）．未設定なら IKI から求める． |
 | `adaptive.drill_ratio` | 数値 | `0.3` | 生成ドリルの割合． |
-| `adaptive.lang` | `en` / `ja` | `"en"` | 適応練習の言語． |
+| `adaptive.lang` | `en` / `ja` | `"en"` | 適応練習の言語．個別の訓練の表の `L` で練習言語と一緒に変わる． |
 | `adaptive.max_share` | 数値 | `0.4` | 1 重点遷移が占める最大割合． |
-| `pacer.enabled` | 真偽値 | `false` | 起動時からペーサーを有効にする． |
+| `pacer.enabled` | 真偽値 | `false` | 起動時からペーサーを有効にする．個別の訓練の升目は自分で決める（速さの行だけ有効）． |
 | `pacer.ratio` | 数値 | `1.07` | ベンチまたは直近中央値へ掛ける倍率． |
 | `pacer.min_wpm` | 数値 | `20.0` | 目標の下限と，履歴が無いときの目標． |
 | `unlock.order` | `frequency` / `rows` | `"frequency"` | キーを解放する順序． |
@@ -74,6 +74,9 @@
 | `endurance.minutes` | 整数 | `4` | 持久練習の時間．3〜5 分． |
 | `menu.minutes` | 整数 | `15` | 練習メニューの長さ．`10`・`15`・`20`．[練習メニュー](#練習メニュー)を参照． |
 | `menu.languages` | `en` / `ja` の配列 | `—` | 練習する言語．未設定なら表示言語に従います．[練習メニュー](#練習メニュー)を参照． |
+| `drill.skill` | `normal` / `accuracy` / `speed` / `recovery` / `blind` / `weak` / `rhythm` / `burst` / `endurance` / `unlock` | `—` | 個別の訓練の表で最後に始めた行．未設定なら `mode.kind` に従う．[練習モード](modes.ja.md)を参照． |
+| `drill.unit` | `char` / `ngram` / `word` / `phrase` / `sentence` / `passage` | `—` | 個別の訓練の表で最後に始めた列．未設定なら `mode.kind` に従う． |
+| `drill.lang` | `en` / `ja` | `—` | 個別の訓練の練習言語（`L`）．未設定なら `mode.kind` の言語に従う． |
 | `ui.animation_enabled` | 真偽値 | `true` | 項目のスライドを有効にする． |
 | `ui.animation_speed` | 数値 | `1.0` | アニメーション速度の倍率． |
 | `ui.theme` | `default` / `mono` / `neon` | `"default"` | 配色テーマ． |

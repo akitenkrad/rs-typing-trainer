@@ -2,7 +2,7 @@
 
 # Prompt data
 
-rs-typing-trainer bundles six deterministic gzip-compressed TSV datasets and a table of the Aozora Bunko works the Japanese sentences come from. They are embedded with `include_bytes!`, decompressed once at startup, and cached. Their exact input hashes, generation date, filters, output hashes, lindera version, and dictionary version are recorded in [`data/manifest.toml`](../data/manifest.toml). Copyright and attribution details are in [`data/NOTICE`](../data/NOTICE).
+rs-typing-trainer bundles seven deterministic gzip-compressed TSV datasets and a table of the Aozora Bunko works the Japanese sentences and passages come from. They are embedded with `include_bytes!`, decompressed once at startup, and cached. Their exact input hashes, generation date, filters, output hashes, lindera version, and dictionary version are recorded in [`data/manifest.toml`](../data/manifest.toml). Copyright and attribution details are in [`data/NOTICE`](../data/NOTICE).
 
 The application also bundles the public-domain Shinonome 0.9.11 font at 12 and 16 dots. Both files contain 6,879 JIS X 0208 fullwidth glyphs, 95 printable ASCII glyphs, and 63 JIS X 0201 halfwidth-kana glyphs, keyed by Unicode code point. `data/NOTICE` includes the complete UTF-8-converted `LICENSE` and `AUTHORS` files and the upstream URL.
 
@@ -16,18 +16,19 @@ The application also bundles the public-domain Shinonome 0.9.11 font at 12 and 1
 | `data/ja_phrases.tsv.gz` | 1,989 | `surface`, `reading`, `rank`, `tier` |
 | `data/en_sentences.tsv.gz` | 19,705 | `text`, `tatoeba_id`, `tier` |
 | `data/ja_sentences.tsv.gz` | 7,394 | `text`, `reading`, `source_id`, `author`, `tier` |
+| `data/ja_passages.tsv.gz` | 2,204 | `text`, `reading`, `source_id`, `author`, `tier` |
 | `data/aozora_works.tsv.gz` | 526 | `source_id`, `author`, `title` |
 | `data/font/shinonome12.bin.gz` | 7,037 glyphs | fixed binary records |
 | `data/font/shinonome16.bin.gz` | 7,037 glyphs | fixed binary records |
 
 Each uncompressed font starts with a 20-byte header: `SHNFONT\0`, format version, dot height, halfwidth pixel width, fullwidth pixel width, a little-endian glyph count, and four reserved bytes. Code-point-sorted fixed records then contain a little-endian `u32` Unicode value, one width byte, and `height` little-endian `u16` rows. Pixel x is bit `15-x`. Gzip timestamps are zero. The compressed 12-dot and 16-dot files are 113,046 and 150,545 bytes respectively.
 
-Readings are hiragana with the documented punctuation; phrase readings may also contain `！` and `？`. A long-vowel mark appears only when it is also present in the written prompt. The source ID for a Japanese sentence is the six-digit work ID in `tools/gen-data/sources/aozora_selection.tsv`. `data/aozora_works.tsv.gz` lists, in ID order, the author and title of exactly the works that the bundled sentences cite; the playing screen uses it and the Tatoeba IDs to show where a sentence comes from (see [Playing](gameplay.md#playing-screen-layout)). `tier=core` contains 2,000 English words, 1,886 English phrases, 2,068 English sentences, 561 hand-reviewed Japanese words, all 1,989 original Japanese phrases, and 537 hand-reviewed Japanese sentences; all other rows use `tier=ext`.
+Readings are hiragana with the documented punctuation; phrase readings may also contain `！` and `？`. A long-vowel mark appears only when it is also present in the written prompt. The source ID for a Japanese sentence or passage is the six-digit work ID in `tools/gen-data/sources/aozora_selection.tsv`. `data/aozora_works.tsv.gz` lists, in ID order, the author and title of exactly the works that the bundled sentences cite; the playing screen uses it and the Tatoeba IDs to show where a sentence comes from (see [Playing](gameplay.md#playing-screen-layout)). `tier=core` contains 2,000 English words, 1,886 English phrases, 2,068 English sentences, 561 hand-reviewed Japanese words, all 1,989 original Japanese phrases, and 537 hand-reviewed Japanese sentences; all other rows, including every Japanese passage, use `tier=ext`.
 
 ## Sources and licenses
 
 - English word frequencies come from 30 public-domain books plus Tatoeba's CC0 English sentences. SCOWL levels through 60 restrict the result to English and American spellings. The complete SCOWL copyright and permission text is retained in `data/NOTICE`.
-- Japanese words and sentences come from 560 public-domain Japanese works. `data/NOTICE` retains each title, author, and input contributor.
+- Japanese words, sentences, and passages come from 560 public-domain Japanese works. `data/NOTICE` retains each title, author, and input contributor.
 - Japanese readings are produced with lindera 6.2.0 and the embedded IPADIC `mecab-ipadic-2.7.0-20250920` dictionary. The complete NAIST permission and warranty disclaimer, including the ICOT terms, is retained in `data/NOTICE`.
 - English phrases and sentences come from Tatoeba's CC0 English export. The source is credited as `tatoeba.org` even though CC0 does not require attribution.
 - Japanese phrases were written for this project and use the same license as the repository.
@@ -42,6 +43,8 @@ English book headers and distribution notices are removed at the `START OF` and 
 Japanese archives are decoded from Shift_JIS. The title, author, legend, annotations, ruby markup, and colophon are removed from the body, while ruby pairs are retained for reading checks. IPADIC nouns, independent verbs and adjectives, and adverbs are counted by base form. Each base form is segmented again and its `reading` fields are joined to obtain the word reading.
 
 Sentence candidates have 15–45 characters, balanced Japanese quotation marks, and only the documented Japanese characters and punctuation. Their readings join IPADIC `reading` fields, not `pronunciation` fields. The written particles `は`, `へ`, and `を` are preserved, ruby readings take precedence at annotated positions, and candidates containing an unknown `*` reading are excluded. The review and override files record the manual correction stage.
+
+Japanese passages join three to five consecutive sentences of one paragraph (one line of the Aozora body). Every sentence must meet the sentence conditions above, and the sentence overrides apply to it; an excluded or failing sentence, or the end of a paragraph, cuts the passage. A run of usable sentences is split into chunks of three to five sentences of nearly equal size, the texts and readings are joined without a separator, and a chunk over 160 characters drops sentences from its end until it fits or is skipped below three sentences. Each work contributes at most 8 passages, chosen with a fixed seed and FNV-1a; duplicates are removed and rows are ordered by work ID and position. Only the works in `data/aozora_works.tsv.gz` are used. The generator writes this file alone with `--passages-only` (see `tools/gen-data/README.md`).
 
 English CC0 phrases have 10–29 printable ASCII characters, while sentences have 30–90. For rows made entirely of quoted dialogue parts, the surrounding double quotes are removed and the trimmed parts are joined with one space before filtering. Every matching unique, non-blocklisted row is included, retaining the first Tatoeba ID for duplicate text.
 

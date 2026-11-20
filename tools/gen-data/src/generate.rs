@@ -16,6 +16,7 @@ use lindera::segmenter::Segmenter;
 use sha2::{Digest, Sha256};
 use zip::ZipArchive;
 
+use crate::passage::{JapanesePassage, PassageSentence, merge_passages, render_ja_passages, select_work_passages};
 use crate::{AozoraDocument, extract_aozora, extract_english_body, katakana_to_hiragana, load_scowl_words, stable_sample};
 
 const EN_WORD_LIMIT: usize = 20_000;
@@ -30,6 +31,8 @@ const IPADIC_COPYING: &str = include_str!("../licenses/IPADIC-COPYING.txt");
 const REVIEWED_JA_WORDS: &str = include_str!("../reviewed/ja_words.tsv");
 const REVIEWED_JA_SENTENCES: &str = include_str!("../reviewed/ja_sentences.tsv");
 const JA_PHRASES: &str = include_str!("../phrases/ja_phrases.tsv");
+/// The `[filters]` entry recorded for `ja_passages.tsv.gz`.
+pub const JA_PASSAGES_FILTER: &str = "3-5 consecutive sentences of one paragraph, each meeting the ja_sentences conditions and overrides; joined without a separator; at most 160 characters; at most 8 per work, sampled with a fixed seed; unique; works listed in aozora_works.tsv.gz";
 
 #[derive(Clone, Debug)]
 pub struct GenerationOptions {
@@ -47,6 +50,7 @@ pub struct GenerationReport {
     pub ja_phrases: usize,
     pub en_sentences: usize,
     pub ja_sentences: usize,
+    pub ja_passages: usize,
     pub phrase_reading_mismatches: usize,
     pub phrase_reading_mismatch_examples: Vec<String>,
     pub ruby_compared: usize,
@@ -154,6 +158,7 @@ pub fn generate(options: &GenerationOptions) -> Result<GenerationReport> {
 
     let sentence_overrides = load_overrides(&overrides_dir.join("ja_sentences.tsv"))?;
     let ja_sentences = generate_japanese_sentences(&works, &segmenter, fields, &sentence_overrides)?;
+    let ja_passages = generate_japanese_passages(&works, &segmenter, fields, &sentence_overrides)?;
     let en_sentences = generate_english_sentences(&options.input, &blocklist)?;
     let ja_phrases = parse_japanese_phrases(JA_PHRASES)?;
     let en_phrases = generate_english_phrases(&options.input, &blocklist)?;
@@ -186,6 +191,11 @@ pub fn generate(options: &GenerationOptions) -> Result<GenerationReport> {
         &used_work_ids,
     );
     let aozora_works_count = aozora_works_tsv.lines().count();
+    let ja_passages = ja_passages
+        .into_iter()
+        .filter(|passage| used_work_ids.contains(passage.source_id.as_str()))
+        .collect::<Vec<_>>();
+    let ja_passages_tsv = render_ja_passages(&ja_passages);
 
     let outputs = [
         ("en_words.tsv.gz", gzip(en_words_tsv.as_bytes())?, en_words.len()),
@@ -194,6 +204,7 @@ pub fn generate(options: &GenerationOptions) -> Result<GenerationReport> {
         ("ja_phrases.tsv.gz", gzip(ja_phrases_tsv.as_bytes())?, ja_phrases.len()),
         ("en_sentences.tsv.gz", gzip(en_sentences_tsv.as_bytes())?, en_sentences.len()),
         ("ja_sentences.tsv.gz", gzip(ja_sentences_tsv.as_bytes())?, ja_sentences.len()),
+        ("ja_passages.tsv.gz", gzip(ja_passages_tsv.as_bytes())?, ja_passages.len()),
         ("aozora_works.tsv.gz", gzip(aozora_works_tsv.as_bytes())?, aozora_works_count),
         ("NOTICE", notice.into_bytes(), 1),
     ];
@@ -213,6 +224,7 @@ pub fn generate(options: &GenerationOptions) -> Result<GenerationReport> {
         ja_phrases: ja_phrases.len(),
         en_sentences: en_sentences.len(),
         ja_sentences: ja_sentences.len(),
+        ja_passages: ja_passages.len(),
         phrase_reading_mismatches: phrase_mismatches.len(),
         phrase_reading_mismatch_examples: phrase_mismatches.iter().take(10).cloned().collect(),
         ruby_compared,
@@ -220,6 +232,108 @@ pub fn generate(options: &GenerationOptions) -> Result<GenerationReport> {
         ruby_mismatch_examples,
         missing_aozora_ids,
     })
+}
+
+#[derive(Clone, Debug)]
+pub struct PassageGenerationOptions {
+    pub input: PathBuf,
+    pub extra_aozora: Option<PathBuf>,
+    pub out: PathBuf,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PassageGenerationReport {
+    pub works: usize,
+    pub passages: usize,
+    pub sha256: String,
+    pub manifest_updated: bool,
+    pub missing_aozora_ids: Vec<String>,
+}
+
+/// Writes only `<out>/ja_passages.tsv.gz`, from the works listed in
+/// `<out>/aozora_works.tsv.gz`. Every other bundled file is left untouched;
+/// when `<out>/manifest.toml` exists, only its passage filter, its passage
+/// output block, and its NOTICE hash are reconciled.
+pub fn generate_passages(options: &PassageGenerationOptions) -> Result<PassageGenerationReport> {
+    let selection = options.input.join("aozora/selection.tsv");
+    ensure!(selection.exists(), "missing input: {}", selection.display());
+    let works_table_path = options.out.join("aozora_works.tsv.gz");
+    let mut works_table = String::new();
+    flate2::read::GzDecoder::new(File::open(&works_table_path).with_context(|| format!("failed to open {}", works_table_path.display()))?)
+        .read_to_string(&mut works_table)
+        .with_context(|| format!("failed to read {}", works_table_path.display()))?;
+    let listed = works_table
+        .lines()
+        .filter_map(|line| line.split('\t').next())
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+
+    let (mut works, missing) = load_aozora_works(&options.input, options.extra_aozora.as_deref())?;
+    works.retain(|work| listed.contains(&work.id));
+    let missing_aozora_ids = missing.into_iter().filter(|id| listed.contains(id)).collect::<Vec<_>>();
+    let dictionary = load_dictionary("embedded://ipadic").context("failed to load embedded IPADIC")?;
+    let segmenter = Segmenter::new(Mode::Normal, dictionary, None);
+    let fields = IpadicFields::from_segmenter(&segmenter)?;
+    let overrides = load_overrides(&Path::new(env!("CARGO_MANIFEST_DIR")).join("overrides/ja_sentences.tsv"))?;
+    let passages = generate_japanese_passages(&works, &segmenter, fields, &overrides)?;
+    ensure!(!passages.is_empty(), "no Japanese passages survived");
+
+    let bytes = gzip(render_ja_passages(&passages).as_bytes())?;
+    let sha256 = sha256_bytes(&bytes);
+    write_bytes_if_changed(&options.out.join("ja_passages.tsv.gz"), &bytes)?;
+    let manifest = options.out.join("manifest.toml");
+    let manifest_updated = manifest.exists();
+    if manifest_updated {
+        update_passage_manifest(&manifest, passages.len(), &sha256)?;
+    }
+    Ok(PassageGenerationReport {
+        works: works.len(),
+        passages: passages.len(),
+        sha256,
+        manifest_updated,
+        missing_aozora_ids,
+    })
+}
+
+/// Sets the `ja_passages` filter line, the `ja_passages.tsv.gz` output block
+/// (placed after `ja_sentences.tsv.gz`), and the NOTICE hash, leaving every
+/// other line as it is. Running it twice gives the same file.
+pub fn update_passage_manifest(manifest_path: &Path, count: usize, sha256: &str) -> Result<()> {
+    let source = fs::read_to_string(manifest_path).with_context(|| format!("failed to read {}", manifest_path.display()))?;
+    let notice_path = manifest_path.parent().unwrap_or_else(|| Path::new(".")).join("NOTICE");
+    let notice_hash = notice_path.exists().then(|| sha256_file(&notice_path)).transpose()?;
+    let filter_line = format!("ja_passages = \"{}\"", toml_escape(JA_PASSAGES_FILTER));
+    let output_block = format!("[[outputs]]\npath = \"ja_passages.tsv.gz\"\ncount = {count}\nsha256 = \"{sha256}\"");
+    let mut blocks = Vec::new();
+    for block in source.trim_end().split("\n\n") {
+        if block.contains("path = \"ja_passages.tsv.gz\"") {
+            continue;
+        }
+        if block.starts_with("[filters]") {
+            let mut lines = block
+                .lines()
+                .filter(|line| !line.starts_with("ja_passages = "))
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            let position = lines
+                .iter()
+                .position(|line| line.starts_with("ja_sentences = "))
+                .map_or(lines.len(), |index| index + 1);
+            lines.insert(position, filter_line.clone());
+            blocks.push(lines.join("\n"));
+            continue;
+        }
+        blocks.push(crate::font::update_notice_hash(block, notice_hash.as_deref()));
+    }
+    let position = blocks
+        .iter()
+        .position(|block| block.starts_with("[[outputs]]") && block.contains("path = \"ja_sentences.tsv.gz\""))
+        .map_or(blocks.len(), |index| index + 1);
+    blocks.insert(position, output_block);
+    let mut output = blocks.join("\n\n");
+    output.push('\n');
+    write_bytes_if_changed(manifest_path, output.as_bytes())
 }
 
 fn validate_inputs(input: &Path) -> Result<()> {
@@ -543,12 +657,7 @@ fn generate_japanese_sentences(
     for work in works {
         let mut candidates = Vec::new();
         for (start, text) in sentence_slices(&work.document.body) {
-            let character_count = text.chars().count();
-            if !(15..=45).contains(&character_count)
-                || !valid_sentence_text(text)
-                || !balanced_quotes(text)
-                || work.document.has_gaiji_in(start, start + text.len())
-            {
+            if !valid_sentence_text_shape(text) || work.document.has_gaiji_in(start, start + text.len()) {
                 continue;
             }
             let Some(generated) = sentence_reading(&work.document, start, text, segmenter, fields)? else {
@@ -559,12 +668,7 @@ fn generate_japanese_sentences(
                 Some(Some(reading)) => reading.clone(),
                 None => generated,
             };
-            if !reading
-                .chars()
-                .all(|character| is_reading_character(character) || matches!(character, '、' | '。' | '「' | '」'))
-                || reading.contains(['ゐ', 'ゑ'])
-                || reading.matches('ー').count() != text.matches('ー').count()
-            {
+            if !valid_sentence_reading(text, &reading) {
                 continue;
             }
             candidates.push(JapaneseSentence {
@@ -583,6 +687,53 @@ fn generate_japanese_sentences(
     let selected = all.into_values().collect::<Vec<_>>();
     ensure!(selected.len() >= 3_000, "only {} Japanese sentence candidates survived", selected.len());
     Ok(selected)
+}
+
+/// The text conditions shared by sentences and the sentences of a passage:
+/// 15–45 characters, allowed characters only, ends with `。`, balanced quotes.
+pub(crate) fn valid_sentence_text_shape(text: &str) -> bool {
+    (15..=45).contains(&text.chars().count()) && valid_sentence_text(text) && balanced_quotes(text)
+}
+
+/// The reading conditions shared by sentences and the sentences of a passage.
+pub(crate) fn valid_sentence_reading(text: &str, reading: &str) -> bool {
+    reading
+        .chars()
+        .all(|character| is_reading_character(character) || matches!(character, '、' | '。' | '「' | '」'))
+        && !reading.contains(['ゐ', 'ゑ'])
+        && reading.matches('ー').count() == text.matches('ー').count()
+}
+
+fn generate_japanese_passages(
+    works: &[Work],
+    segmenter: &Segmenter,
+    fields: IpadicFields,
+    overrides: &BTreeMap<String, Option<String>>,
+) -> Result<Vec<JapanesePassage>> {
+    let mut per_work = Vec::with_capacity(works.len());
+    for work in works {
+        let body = &work.document.body;
+        let mut sentences = Vec::new();
+        let mut line = 0;
+        let mut counted_to = 0;
+        for (start, text) in sentence_slices(body) {
+            line += body[counted_to..start].matches('\n').count();
+            counted_to = start;
+            let reading = if valid_sentence_text_shape(text) && !work.document.has_gaiji_in(start, start + text.len()) {
+                sentence_reading(&work.document, start, text, segmenter, fields)?
+            } else {
+                None
+            };
+            sentences.push(PassageSentence {
+                text: text.to_owned(),
+                reading,
+                line,
+                start,
+            });
+        }
+        per_work.push(select_work_passages(&work.id, &work.author, &sentences, overrides));
+    }
+    Ok(merge_passages(per_work))
 }
 
 fn sentence_slices(body: &str) -> Vec<(usize, &str)> {
@@ -1008,7 +1159,7 @@ fn render_notice(input: &Path, works: &[Work]) -> Result<String> {
     notice.push_str("\n\n\nIPADIC\n======\n\n");
     notice.push_str(IPADIC_COPYING.trim_end());
     notice.push_str("\n\n\nJapanese public-domain works\n============================\n\n");
-    notice.push_str("Japanese sentences were taken from these works as published by Aozora Bunko (https://www.aozora.gr.jp/).\n\n");
+    notice.push_str("Japanese sentences and passages were taken from these works as published by Aozora Bunko (https://www.aozora.gr.jp/).\n\n");
     notice.push_str("Title\tAuthor\tInput by\n");
     for work in works {
         notice.push_str(&format!("{}\t{}\t{}\n", work.title, work.author, work.input_by));
@@ -1101,7 +1252,7 @@ fn render_manifest(
     outputs: &[(&str, Vec<u8>, usize)],
 ) -> Result<String> {
     let mut manifest = format!(
-        "generated_date = \"{generated_date}\"\nlindera_version = \"{LINDERA_VERSION}\"\ndictionary = \"{IPADIC_VERSION}\"\ndictionary_license = \"NAIST and ICOT terms\"\n\n[filters]\nen_words = \"SCOWL levels 10,20,35,40,50,60; ASCII letters; no apostrophes; top 20000 by public-domain books and Tatoeba CC0 frequency; blocklist\"\nja_words = \"selected IPADIC POS; base forms reanalyzed for readings; 2-8 mora; no old kana or old-style glyphs; top 12000 by corpus frequency\"\nen_phrases = \"CC0; surrounding dialogue quotes removed; 10-29 characters; printable ASCII; unique; blocklist; all matching rows\"\nja_phrases = \"project-original phrases; 6-20 reading characters; no ASCII alphanumerics, whitespace, or sentence punctuation in surfaces; unique surfaces and readings\"\nen_sentences = \"CC0; surrounding dialogue quotes removed; 30-90 characters; printable ASCII; unique; blocklist; all matching rows\"\nja_sentences = \"15-45 characters; allowed Japanese characters and punctuation; balanced quotes; no gaiji or unknown readings; at most 15 per work\"\n"
+        "generated_date = \"{generated_date}\"\nlindera_version = \"{LINDERA_VERSION}\"\ndictionary = \"{IPADIC_VERSION}\"\ndictionary_license = \"NAIST and ICOT terms\"\n\n[filters]\nen_words = \"SCOWL levels 10,20,35,40,50,60; ASCII letters; no apostrophes; top 20000 by public-domain books and Tatoeba CC0 frequency; blocklist\"\nja_words = \"selected IPADIC POS; base forms reanalyzed for readings; 2-8 mora; no old kana or old-style glyphs; top 12000 by corpus frequency\"\nen_phrases = \"CC0; surrounding dialogue quotes removed; 10-29 characters; printable ASCII; unique; blocklist; all matching rows\"\nja_phrases = \"project-original phrases; 6-20 reading characters; no ASCII alphanumerics, whitespace, or sentence punctuation in surfaces; unique surfaces and readings\"\nen_sentences = \"CC0; surrounding dialogue quotes removed; 30-90 characters; printable ASCII; unique; blocklist; all matching rows\"\nja_sentences = \"15-45 characters; allowed Japanese characters and punctuation; balanced quotes; no gaiji or unknown readings; at most 15 per work\"\nja_passages = \"{JA_PASSAGES_FILTER}\"\n"
     );
     for path in input_files {
         let relative = if path == &japanese_phrase_source_path() {

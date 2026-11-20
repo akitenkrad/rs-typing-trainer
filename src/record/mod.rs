@@ -110,8 +110,15 @@ impl SessionRecord {
             "prompt_style": config.display.prompt_style,
             "accuracy_gate": config.gate.min_accuracy,
         });
-        if config.mode.kind == crate::config::ModeKind::Phrase {
+        if config.mode.kind == crate::config::ModeKind::Phrase || config.mode.prompt_unit() == crate::config::PromptUnit::Phrase {
             mode_params["course"] = serde_json::Value::String(config.mode.phrase.course.clone());
+        }
+        // A session from the individual-training table (MYTASK-3638) keeps
+        // its `mode` as before and adds the cell: the skill (row) and what
+        // the prompts were made of (column).
+        if let Some(cell) = config.mode.drill {
+            mode_params["drill"] = serde_json::to_value(cell).expect("drill cell serializes");
+            mode_params["unit"] = serde_json::Value::String(cell.unit.as_str().to_owned());
         }
         let mode_params = mode_params.to_string();
         Self {
