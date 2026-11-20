@@ -1199,15 +1199,20 @@ fn skill_chart_spec() -> SkillChartSpec {
     let point = |day: u32, value: f64| TrendPoint { date: date(day), value };
     SkillChartSpec {
         cells: Size::new(30, 3),
-        x_range: TrendDateRange {
+        x_axis: TrendDateRange {
             start: date(1),
             end: date(10),
-        },
+        }
+        .into(),
+        x_ticks: Vec::new(),
         y_range: (1.3, 1.7),
         points: (1..=10).map(|day| point(day, 1.7 - f64::from(day) * 0.03)).collect(),
         medians: (5..=10).map(|day| point(day, 1.62 - f64::from(day) * 0.02)).collect(),
         bench: vec![point(3, 1.5)],
         boundaries: vec![2.2, 2.0, 1.8, 1.6, 1.5, 1.4, 1.3, 1.2, 1.1],
+        current_band: Some(4),
+        current_color: Color::LightBlue,
+        point_color: Color::White,
         line_color: Color::LightCyan,
         bench_color: Color::LightYellow,
     }

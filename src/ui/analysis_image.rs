@@ -107,23 +107,70 @@ pub struct SparklineSpec {
     pub cells: Size,
 }
 
-/// One component chart of the «skills» tab (§8.4): each run as a faint point,
-/// the 7-run moving median as a thick line, bench sessions as diamonds, and
-/// the grade boundaries as faint bands behind them. The x axis is calendar
-/// days over `x_range`, as in the trend tab.
+/// One component chart of the «skills» tab (§8.4): each run as a point, the
+/// median of the latest runs as a thick line, bench sessions as diamonds, and
+/// the grade bands behind them, the current grade's band highlighted. The x
+/// axis is the tab's shared [`TrendAxis`] (long gaps cut out), padded by
+/// [`skill_axis_fraction`] so that a single day still sits inside the plot.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SkillChartSpec {
     pub cells: Size,
-    pub x_range: TrendDateRange,
+    pub x_axis: TrendAxis,
+    /// Dates of the vertical grid lines (the ticks labelled under the tab).
+    pub x_ticks: Vec<NaiveDate>,
     /// (minimum, maximum) of the y axis.
     pub y_range: (f64, f64),
     pub points: Vec<TrendPoint>,
     pub medians: Vec<TrendPoint>,
     pub bench: Vec<TrendPoint>,
-    /// Grade boundaries (raw values) inside or around `y_range`.
+    /// Grade boundaries in score order: `boundaries[i]` scores `i`, so the
+    /// band between `boundaries[i]` and `boundaries[i + 1]` is the `i`-th
+    /// grade (G = 0 … S = 7). Either direction (rising or falling values).
     pub boundaries: Vec<f64>,
+    /// Index (G = 0 … S = 7) of the band drawn highlighted.
+    pub current_band: Option<usize>,
+    pub current_color: Color,
+    pub point_color: Color,
     pub line_color: Color,
     pub bench_color: Color,
+}
+
+/// Padding, in axis units (days), on each side of the skills tab's x axis:
+/// half a day for a one-day axis, else 3 % of its span.
+pub fn skill_axis_padding(axis: &TrendAxis) -> f64 {
+    let span = axis.span();
+    if span <= 0.0 { 0.5 } else { span * 0.03 }
+}
+
+/// Position of `date` on the skills tab's x axis as a fraction of the plot
+/// width (0 = left edge, 1 = right edge), with [`skill_axis_padding`] on
+/// both sides.
+pub fn skill_axis_fraction(axis: &TrendAxis, date: NaiveDate) -> f64 {
+    let pad = skill_axis_padding(axis);
+    (axis.position(date) + pad) / (axis.span() + 2.0 * pad)
+}
+
+/// The day shown at `fraction` of the skills tab's x axis, or `None` inside a
+/// cut-out gap or outside the axis.
+pub fn skill_axis_date_at(axis: &TrendAxis, fraction: f64) -> Option<NaiveDate> {
+    let pad = skill_axis_padding(axis);
+    let units = fraction * (axis.span() + 2.0 * pad) - pad;
+    let mut offset = 0.0;
+    for (index, segment) in axis.segments().iter().enumerate() {
+        let length = (segment.end - segment.start).num_days() as f64;
+        let low = if index == 0 { f64::NEG_INFINITY } else { offset - 0.5 };
+        let high = if index + 1 == axis.segments().len() {
+            f64::INFINITY
+        } else {
+            offset + length + 0.5
+        };
+        if (low..high).contains(&units) {
+            let day = (units - offset).round().clamp(0.0, length) as i64;
+            return Some(segment.start + chrono::Duration::days(day));
+        }
+        offset += length + TREND_BREAK_WIDTH_DAYS as f64;
+    }
+    None
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -620,13 +667,15 @@ enum AnalysisImageKey {
     },
     SkillChart {
         cells: Size,
-        x_range: TrendDateRange,
+        x_axis: TrendAxis,
+        x_ticks: Vec<NaiveDate>,
         y_range: (u64, u64),
         points: Vec<PointKey>,
         medians: Vec<PointKey>,
         bench: Vec<PointKey>,
         boundaries: Vec<u64>,
-        colors: [[u8; 3]; 2],
+        current_band: Option<usize>,
+        colors: [[u8; 3]; 4],
     },
     TransitionBars {
         rows: Vec<(u64, u64, bool)>,
@@ -980,13 +1029,20 @@ fn skill_chart_key(spec: &SkillChartSpec) -> AnalysisImageKey {
     };
     AnalysisImageKey::SkillChart {
         cells: spec.cells,
-        x_range: spec.x_range,
+        x_axis: spec.x_axis.clone(),
+        x_ticks: spec.x_ticks.clone(),
         y_range: (spec.y_range.0.to_bits(), spec.y_range.1.to_bits()),
         points: points(&spec.points),
         medians: points(&spec.medians),
         bench: points(&spec.bench),
         boundaries: spec.boundaries.iter().map(|value| value.to_bits()).collect(),
-        colors: [color_rgb(spec.line_color, [255, 255, 255]), color_rgb(spec.bench_color, [255, 220, 120])],
+        current_band: spec.current_band,
+        colors: [
+            color_rgb(spec.line_color, [255, 255, 255]),
+            color_rgb(spec.bench_color, [255, 220, 120]),
+            color_rgb(spec.point_color, [235, 235, 235]),
+            color_rgb(spec.current_color, [120, 200, 255]),
+        ],
     }
 }
 
@@ -1592,42 +1648,104 @@ pub fn render_skill_chart(cell_pixels: CellPixels, spec: &SkillChartSpec) -> Res
     let right = (width as f32 - 3.0).max(left);
     let top = 2.0_f32;
     let bottom = (height as f32 - 3.0).max(top);
-    let total_days = (spec.x_range.end - spec.x_range.start).num_days().max(1) as f64;
-    let x = |date: NaiveDate| left + ((date - spec.x_range.start).num_days() as f64 / total_days).clamp(0.0, 1.0) as f32 * (right - left);
+    let x = |date: NaiveDate| left + skill_axis_fraction(&spec.x_axis, date).clamp(0.0, 1.0) as f32 * (right - left);
     let y = |value: f64| top + ((max_y - value) / (max_y - min_y)).clamp(0.0, 1.0) as f32 * (bottom - top);
 
-    // Grade bands: alternate faint fills between consecutive boundaries,
-    // with a faint line on each boundary.
-    let mut edges = spec.boundaries.iter().copied().filter(|value| value.is_finite()).collect::<Vec<_>>();
-    edges.sort_by(f64::total_cmp);
-    for (index, pair) in edges.windows(2).enumerate() {
-        let (low, high) = (pair[0].max(min_y), pair[1].min(max_y));
+    // Grade bands: the other bands alternate two faint greys, the current
+    // band is tinted with its grade colour and outlined.
+    let current = color_rgb(spec.current_color, [120, 200, 255]);
+    let mut current_edges = None;
+    for (index, pair) in spec.boundaries.windows(2).enumerate() {
+        if !(pair[0].is_finite() && pair[1].is_finite()) {
+            continue;
+        }
+        let (low, high) = (pair[0].min(pair[1]).max(min_y), pair[0].max(pair[1]).min(max_y));
         if high <= low {
             continue;
         }
-        if index % 2 == 0
-            && let Some(rect) = tiny_skia::Rect::from_ltrb(0.0, y(high), width as f32, y(low))
-        {
-            fill_path(&mut pixmap, &PathBuilder::from_rect(rect), GRID_COLOR, 22);
+        let Some(rect) = tiny_skia::Rect::from_ltrb(0.0, y(high), width as f32, y(low)) else {
+            continue;
+        };
+        if spec.current_band == Some(index) {
+            fill_path(&mut pixmap, &PathBuilder::from_rect(rect), current, 46);
+            current_edges = Some((y(high), y(low)));
+        } else {
+            let alpha = if index % 2 == 0 { 26 } else { 12 };
+            fill_path(&mut pixmap, &PathBuilder::from_rect(rect), GRID_COLOR, alpha);
         }
     }
-    for edge in edges.iter().copied().filter(|edge| (min_y..=max_y).contains(edge)) {
+    for edge in spec
+        .boundaries
+        .iter()
+        .copied()
+        .filter(|edge| edge.is_finite() && (min_y..=max_y).contains(edge))
+    {
         stroke_line(&mut pixmap, (0.0, y(edge)), (width as f32, y(edge)), GRID_COLOR, 70, 1.0, None);
     }
-
-    let line = color_rgb(spec.line_color, [255, 255, 255]);
-    for point in &spec.points {
-        if let Some(circle) = PathBuilder::from_circle(x(point.date), y(point.value), 2.2) {
-            fill_path(&mut pixmap, &circle, line, 95);
+    if let Some((high, low)) = current_edges {
+        for edge in [high, low] {
+            if edge > 0.5 && edge < height as f32 - 0.5 {
+                stroke_line(&mut pixmap, (0.0, edge), (width as f32, edge), current, 170, 1.5, None);
+            }
         }
     }
-    if let Some(path) = polygonal_line_path(spec.medians.iter().map(|point| (x(point.date), y(point.value)))) {
-        stroke_path(&mut pixmap, &path, line, 255, 3.2);
+
+    // Vertical grid lines at the tick dates, as faint as the trend tab's.
+    for &date in &spec.x_ticks {
+        let tx = x(date).floor() + 0.5;
+        if (left..=right).contains(&tx) {
+            stroke_line(&mut pixmap, (tx, 0.0), (tx, height as f32), GRID_COLOR, 60, 1.0, None);
+        }
+    }
+    // Axis breaks: a dashed vertical line.
+    let pad = skill_axis_padding(&spec.x_axis);
+    let full = spec.x_axis.span() + 2.0 * pad;
+    for fraction in spec.x_axis.break_fractions() {
+        let units = fraction * spec.x_axis.span().max(1.0);
+        let bx = left + ((units + pad) / full) as f32 * (right - left);
+        stroke_line(
+            &mut pixmap,
+            (bx, 0.0),
+            (bx, height as f32),
+            GRID_COLOR,
+            140,
+            1.0,
+            StrokeDash::new(vec![3.0, 3.0], 0.0),
+        );
+    }
+
+    let point_color = color_rgb(spec.point_color, [235, 235, 235]);
+    let radius = (f32::from(cell_pixels.height) * 0.17).clamp(2.5, 4.0);
+    for point in &spec.points {
+        if let Some(circle) = PathBuilder::from_circle(x(point.date), y(point.value), radius) {
+            fill_path(&mut pixmap, &circle, point_color, 200);
+        }
+    }
+    // The median line, cut at the axis breaks.
+    let line = color_rgb(spec.line_color, [255, 255, 255]);
+    let mut runs = Vec::<Vec<(f32, f32)>>::new();
+    let mut previous: Option<NaiveDate> = None;
+    for point in &spec.medians {
+        let vertex = (x(point.date), y(point.value));
+        match (runs.last_mut(), previous) {
+            (Some(run), Some(previous)) if !spec.x_axis.crosses_break(previous, point.date) => run.push(vertex),
+            _ => runs.push(vec![vertex]),
+        }
+        previous = Some(point.date);
+    }
+    for run in &runs {
+        if run.len() >= 2 {
+            if let Some(path) = polygonal_line_path(run.iter().copied()) {
+                stroke_path(&mut pixmap, &path, line, 255, 3.0);
+            }
+        } else if let Some(&(cx, cy)) = run.first() {
+            stroke_line(&mut pixmap, (cx - 4.0, cy), (cx + 4.0, cy), line, 255, 3.0, None);
+        }
     }
     let bench = color_rgb(spec.bench_color, [255, 220, 120]);
     for point in &spec.bench {
         let (cx, cy) = (x(point.date), y(point.value));
-        let size = 4.5;
+        let size = 5.0;
         let mut diamond = PathBuilder::new();
         diamond.move_to(cx, cy - size);
         diamond.line_to(cx + size, cy);

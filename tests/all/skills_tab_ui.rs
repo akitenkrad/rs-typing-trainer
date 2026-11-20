@@ -304,8 +304,8 @@ fn skills_tab_renders_with_and_without_images_and_fits_80_by_24() {
                     };
                     assert!(compact(&output).contains(label), "{lang:?} {graphics:?}: {output}");
                     let legend_end = match lang {
-                        Lang::Ja => "帯:段F〜S",
-                        Lang::En => "bandsF–S",
+                        Lang::Ja => "帯:段G〜S",
+                        Lang::En => "bandsG–S",
                     };
                     assert!(
                         compact(&output).contains(legend_end),

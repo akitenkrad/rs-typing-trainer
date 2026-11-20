@@ -287,41 +287,44 @@ Missing values are shown as `— (no data)` on screen, `null` in JSON and an emp
 
 ### Skills tab
 
-The text version of the Skills tab at 80×24 (sample data; with terminal images each chart is drawn as an image with grade bands):
+The text version of the Skills tab at 80×24 (sample data; with terminal images each chart is drawn as an image, with the current grade's band tinted and a faint vertical line at each date tick):
 
 ```text
 ┌ ANALYSIS ────────────────────────────────────────────────────────────────────┐
 │   Today  Coach  Trend  Keyboard  Transitions  Fingers/Hands  Bench  Skills   │
 │                                                                              │
-│English — · run (faint)  ━ 7-run median  █ bench (speed, accuracy)  bands F–S │
-│Prescriptions (ref.)▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀│
-│upper A / lower B, no control: ■Widen preview ①  ■Accuracy gate ①             │
-│Speed D 58.0        ⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒•⠒⠒⠒⠒⠒⠒•⠒⠒⠒⠒⠒⠒█│
-│med 55.0 →C +2.0    •      █      •      •              ⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠊⠉⠉⠉│
-│Accuracy C 96.6     ⠒⠒⠒⠒⠒⠒⠒█⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒█│
-│med 96.0 →B +0.4    •⠉⠉⠉⠉⠉⠉•⠉⠉⠉⠉⠉⠉•⠉⠉⠉⠉⠉⠉•⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠔⠒⠒⠒│
-│Rhythm                                                                        │
-│— (no data)                                                                   │
-│Transitions                                                                   │
-│— (no data)                                                                   │
-│Preview C 1.54      •      •      •      •              ⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⣀⣀⣀⣀⣀⣀⣀⡀   │
-│med 1.60 →B -0.14   ⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉•⠉⠉⠉⠉⠉⠉•⠉⠉⠉⠉⠉⠉•⠉⠉⠉⠈⠉⠉⠉│
-│Recovery                                                                      │
-│— (no data)                                                                   │
-│Overlap                                                                       │
-│— (no data)                                                                   │
-│                                                                              │
+│English — • each run  ━ median of last 7 runs  █ bench  bands G–S             │
+│Prescriptions (ref.)    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀        │
+│top half = A, bottom = B (no control): ■Widen preview ①  ■Accuracy gate ①     │
+│Speed D 58.0 WPM        ⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤█⠤ C≥60.0 │
+│+2.0 WPM to C                                       •    •    •    ⣀•         │
+│median 55.0 WPM          •  ⢀⣀⣀█⣀⣀⣀⣀•⣀⣀⠤⠤•⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠒⠒⠒⠒⠒⠒⠒⠒⠒⠊⠉⠉    D≥48.0 │
+│                        ⠤⠈⠉⠉⠁⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤ E≥36.0 │
+│Accuracy C 96.6%        ⠒⠒⠒⠒⠒⠒⠒█⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒█⠒ A≥98.0 │
+│+0.4% to B              ⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒•⠒⠒⠒⠒•⠒⠒⠒⠒⠒•⠒ B≥97.0 │
+│median 96.0%            ⠉•⠤⠤⠤⠤⠤•⠤⠤⠤⠤•⠤⠤⠤⠤•⠤⠤⠤⠤⠤⠒⠒⠒⠒⠒•⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠉⠉⠁⠉ C≥96.0 │
+│Rhythm  no records                                                            │
+│Transitions  no records                                                       │
+│Preview C 1.54          ⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒ B≤1.40 │
+│-0.14 to B              ⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀•⣀⣀⣀⣀•⣀⣀⣀⣀•⣀⣀⣀⣀⣀•⣀ C≤1.60 │
+│median 1.60              •⠤⠤⠤⠤⠤•⠤⠤⠤⠤•⠤⠤⠒⠒•⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠊⠉⠉⠉⠉⠉     D≤1.85 │
+│Recovery  no records                                                          │
+│Overlap  no records                                                           │
+│day                     2026/11/02           11/06     11/08     11/10        │
 │        [Tab/←→] tab   [P] period: 30 days   [M] mode: all   [ESC] back       │
 │                             [L] language: English                            │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-The analysis screen's last tab, Skills, draws the series of one language. Its header reads `English — · run (faint)  ━ 7-run median  ◆ bench (speed, accuracy)  bands F–S`.
+The analysis screen's last tab, Skills, draws the series of one language. Its header reads `English — ● each run  ━ median of last 7 runs  ◆ bench  bands G–S` (`•` and `█` in the text chart).
 
-- Each component has a label column — name, grade and latest value, then `med` with the moving median and the gap to the next grade (for example `→B +0.12`) — and a chart. Each run is a faint point and the 7-run moving median is a bold line. The F–S grade boundaries are drawn behind them as faint bands, so the distance from the line to the next band shows how close the next grade is. The horizontal axis is calendar time; unlike the Trend tab, long gaps are not cut out.
+- Each component with records has a label column and a chart. The label column gives the name, the grade and the latest value with its unit (`Speed D 58.0 WPM`), then how far the next grade is (`+2.0 WPM to C`; `top grade` at S), then the median of the latest runs (`median 55.0 WPM`) when the row is tall enough. A component without any record takes a single row (`Rhythm  no records`), and the rows left over go to the charts.
+- In each chart, every run is a point and the median of the latest 7 runs is a bold line. The line starts at the first run: until there are 7 runs it is the median of all runs so far (the stored moving median of `stats --skills` still needs 5 runs; from the fifth run on the two agree).
+- The grade bands are drawn behind the series. The band of the latest run's grade is highlighted — tinted in its grade colour on the image, its edges drawn in that colour in the text chart — and the other bands stay faint. The vertical range always contains the whole current band, so the next grade's threshold is in view. The column right of each chart names the bands in view, each with the value that enters it (`C≥60.0`); for components where lower is better the chart is drawn upside down, so the better band is always above, and the names read `B≤1.40`.
+- The horizontal axis is shared by every chart and the prescription band. It runs from the first to the last day with a record in the selected period — the period only limits which records are used, so a few recent days fill the width instead of sitting at the right end of a 30-day axis. A single day is drawn in the middle. As on the Trend tab, gaps longer than 14 days are cut out and marked with `≈`, and lines are not drawn across them. The bottom row (`day`) labels the first day (`YYYY/MM/DD`), the last day (`MM/DD`) and tick dates between them where they fit; the image charts draw a faint vertical line at each labelled tick.
 - Benchmark results are overlaid only on speed (net WPM) and accuracy, the two components that the benchmark trend records per session (part A for English, part C for Japanese). They use a different mark — `◆` with terminal images, `█` in the text chart — so official and practice values stay distinguishable. The other five components have no benchmark points.
-- The **prescription history** band above the charts shows which prescription was played on each menu day: the upper half of a cell is primary A and the lower half primary B, and each menu day's colour continues until the next menu day. The legend lists each prescription with the levels played. It is labelled `Prescriptions (ref.)` and `upper A / lower B, no control`: comparing the line before and after a prescription started has no control, so it is a reference, not evidence of an effect.
-- `L` switches the series language when both languages have records (by default the interface language, else the first language with records). `P` limits the displayed period to all time, 30 days or 7 days; moving medians are still computed over the whole series, so the first point of a period uses earlier runs. `M` (mode filter) does not change this tab, because its series come only from menu check steps and benchmark points are always taken from benchmark sessions.
+- The **prescription history** band above the charts shows, on the same axis, which prescription was played on each menu day: the upper half of a cell is prescription A and the lower half prescription B, and each menu day's colour continues until the next menu day. The legend reads `top half = A, bottom = B (no control):` followed by each prescription with the levels played. It is labelled `Prescriptions (ref.)`: comparing the line before and after a prescription started has no control, so it is a reference, not evidence of an effect.
+- `L` switches the series language when both languages have records (by default the interface language, else the first language with records). `P` limits the displayed period to all time, 30 days or 7 days; medians are still computed over the whole series, so the first point of a period uses earlier runs. `M` (mode filter) does not change this tab, because its series come only from menu check steps and benchmark points are always taken from benchmark sessions.
 - Without any skill record the tab shows `No skill records yet. Shown after finishing the check step of a practice menu.` Without terminal images every chart is drawn with text.
 
 ## CLI and CSV columns

@@ -85,6 +85,7 @@ mod schema_v2;
 mod session_log;
 mod settings_write;
 mod shrinkage;
+mod skills_tab_readability;
 mod skills_tab_ui;
 mod stats_csv;
 mod storage_path;
