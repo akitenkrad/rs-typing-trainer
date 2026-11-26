@@ -92,10 +92,10 @@ pub fn build_sections(info: &AboutInfo, lang: Lang) -> Vec<AboutSection> {
         .to_owned()
     });
     let release_events = match (lang, info.release_events_supported) {
-        (Lang::En, true) => "available",
-        (Lang::En, false) => "unavailable",
-        (Lang::Ja, true) => "取れる",
-        (Lang::Ja, false) => "取れない",
+        (Lang::En, true) => "available (rollover and key hold times are measured)",
+        (Lang::En, false) => "unavailable (this terminal cannot measure rollover or key hold times)",
+        (Lang::Ja, true) => "取れる（重なりと押下時間を測れます）",
+        (Lang::Ja, false) => "取れない（この端末では重なりと押下時間を測りません）",
     };
 
     match lang {
@@ -127,7 +127,10 @@ pub fn build_sections(info: &AboutInfo, lang: Lang) -> Vec<AboutSection> {
             },
             AboutSection {
                 title: "Terminal".to_owned(),
-                rows: vec![field("Graphics", info.graphics.clone()), field("Key releases", release_events.to_owned())],
+                rows: vec![
+                    field("Graphics", info.graphics.clone()),
+                    field("Key-release timing", release_events.to_owned()),
+                ],
             },
             AboutSection {
                 title: "Bundled data sources".to_owned(),
@@ -171,7 +174,10 @@ pub fn build_sections(info: &AboutInfo, lang: Lang) -> Vec<AboutSection> {
             },
             AboutSection {
                 title: "端末".to_owned(),
-                rows: vec![field("画像の表示", info.graphics.clone()), field("キーを離す", release_events.to_owned())],
+                rows: vec![
+                    field("画像の表示", info.graphics.clone()),
+                    field("キーを離した時刻", release_events.to_owned()),
+                ],
             },
             AboutSection {
                 title: "同梱データの出典".to_owned(),

@@ -131,3 +131,20 @@ fn every_about_close_key_returns_to_the_title() {
         assert_eq!(app.screen, Screen::Title, "{code:?}");
     }
 }
+
+#[test]
+fn about_explains_what_key_release_timing_is_for() {
+    for (lang, label, value) in [
+        (Lang::Ja, "キーを離した時刻", "取れない（この端末では重なりと押下時間を測りません）"),
+        (
+            Lang::En,
+            "Key-release timing",
+            "unavailable (this terminal cannot measure rollover or key hold times)",
+        ),
+    ] {
+        // The test app has no terminal, so key releases are unavailable.
+        let text = without_whitespace(&all_scrolled_text(lang, 120, 40));
+        assert!(text.contains(&without_whitespace(label)), "{lang:?}: {text}");
+        assert!(text.contains(&without_whitespace(value)), "{lang:?}: {text}");
+    }
+}
