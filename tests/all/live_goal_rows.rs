@@ -137,7 +137,7 @@ fn start_cell(app: &mut App, cell: DrillCell, practice: Lang, now: Instant) -> I
     crate::common::accept_briefing(app, now);
     assert!(matches!(app.screen, Screen::Countdown { .. }), "{cell:?}: {:?}", app.screen);
     let started = now + Duration::from_secs(4);
-    app.on_tick_at(Duration::from_secs(3), started).unwrap();
+    app.on_tick_at_date(Duration::from_secs(3), started, date()).unwrap();
     assert_eq!(app.screen, Screen::Playing, "{cell:?}");
     started
 }
@@ -224,7 +224,7 @@ fn start_menu(app: &mut App, steps: Vec<MenuStep>, now: Instant) -> Instant {
     assert!(matches!(app.screen, Screen::Briefing), "{:?}", app.screen);
     app.handle_key_at(key(KeyCode::Enter), now + Duration::from_millis(10));
     let started = now + Duration::from_secs(4);
-    app.on_tick_at(Duration::from_secs(3), started).unwrap();
+    app.on_tick_at_date(Duration::from_secs(3), started, date()).unwrap();
     assert_eq!(app.screen, Screen::Playing);
     started
 }
@@ -236,7 +236,7 @@ fn start_menu(app: &mut App, steps: Vec<MenuStep>, now: Instant) -> Instant {
 fn type_keys(app: &mut App, mut at: Instant, count: usize, gap: impl Fn(usize) -> u64, wrong: impl Fn(usize) -> bool) -> Instant {
     let mut previous: Option<char> = None;
     for index in 0..count {
-        app.on_tick_at(Duration::from_millis(1), at).unwrap();
+        app.on_tick_at_date(Duration::from_millis(1), at, date()).unwrap();
         if app.screen != Screen::Playing {
             break;
         }
@@ -278,7 +278,7 @@ fn finish(app: &mut App, started: Instant) {
         })
         .max(Duration::from_secs(app.config.session.duration_seconds));
     if app.screen == Screen::Playing {
-        app.on_tick_at(Duration::from_secs(1), started + planned + Duration::from_secs(1))
+        app.on_tick_at_date(Duration::from_secs(1), started + planned + Duration::from_secs(1), date())
             .unwrap();
     }
     assert_eq!(app.screen, Screen::Result);
@@ -356,6 +356,10 @@ fn play_and_check(app: &mut TestApp, kind: GoalKind, started: Instant, lang: Lan
     let record = saved_record(app);
     let recorded = recorded_value(app, kind, &record, language);
     let finished = app.menu_live_goal.as_ref().unwrap().finished.clone().unwrap();
+    // Recovery is measured against a player model whose decay depends on
+    // `as_of`, so the ticks above advance time on `date()` too: a wall-clock
+    // tick would move the live goal's date away from the judged one
+    // (MYTASK-3662).
     assert_same(finished.value, recorded, &format!("{what}: finished"));
     // The speed rows show WPM over the time so far, so the value at the
     // last keystroke differs from the value over the whole session; every
@@ -462,7 +466,7 @@ fn play_cell(app: &mut TestApp, cell: DrillCell, now: Instant, keys: usize, gap:
         }
         assert!(matches!(app.screen, Screen::Countdown { .. }), "{:?}", app.screen);
         let started = now + Duration::from_secs(4);
-        app.on_tick_at(Duration::from_secs(3), started).unwrap();
+        app.on_tick_at_date(Duration::from_secs(3), started, date()).unwrap();
         assert_eq!(app.screen, Screen::Playing);
         started
     } else {
