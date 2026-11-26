@@ -201,9 +201,9 @@ pub fn analyze_progress(
     as_of: DateTime<Utc>,
     references: &ReferencePrompts,
 ) -> Progress {
-    // Benchmarks participate in the player model for every series. This keeps
-    // v3 consistent with the existing v1/v2 treatment; downstream grades,
-    // skill axes, and practice-menu generation still receive legacy-only data.
+    // Benchmarks participate in both the player model and chronological
+    // difficulty correction for every series. A v3 part therefore follows
+    // the same coverage and prior-keystroke gates as v1/v2.
     let mut ordered = records
         .iter()
         .filter(|record| record.header.metrics_version > 0)
@@ -230,7 +230,6 @@ pub fn analyze_progress(
             && expected.coverage >= MIN_FORM_COVERAGE
             && expected.wpm > 0.0
             && reference.wpm > 0.0
-            && !record.header.bench_id.as_deref().is_some_and(crate::bench::is_v3_bench_id)
         {
             let form = record.header.net_wpm / expected.wpm;
             forms.push(SessionForm {

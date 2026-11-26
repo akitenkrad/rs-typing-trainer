@@ -10,7 +10,7 @@ use rs_typing_trainer::analysis::errors::ConfusionMetric;
 use rs_typing_trainer::analysis::metrics::KeyMetric;
 use rs_typing_trainer::analysis::model::KeyMapMetric;
 use rs_typing_trainer::app::Screen;
-use rs_typing_trainer::config::{Config, ModeKind};
+use rs_typing_trainer::config::{BenchSeries, Config, ModeKind};
 use rs_typing_trainer::engine::item::Item;
 use rs_typing_trainer::engine::session::Session;
 use rs_typing_trainer::i18n::Lang;
@@ -452,6 +452,18 @@ fn analysis_bench_tab_shows_v3_trajectories_reliability_and_previous_v2_series()
                     "{width}x{height}, {lang:?}, missing {expected:?}:\n{output}"
                 );
             }
+            let transition_reliability = match lang {
+                Lang::En => "Transitions: SEM 21.2 WPM · MDC95 58.8 WPM · n=2",
+                Lang::Ja => "移り変わり: SEM 21.2 WPM・MDC95 58.8 WPM・n=2",
+            };
+            assert!(
+                normalized.contains(&compact(transition_reliability)),
+                "{width}x{height}, {lang:?}, missing PW reliability:\n{output}"
+            );
+            assert!(
+                normalized.contains("·") && normalized.contains("━"),
+                "{width}x{height}, {lang:?}, missing raw-point/rolling-mainline text figure:\n{output}"
+            );
             assert!(
                 normalized.contains(&compact("A: 35.0 → 42.0 WPM")),
                 "{width}x{height}, {lang:?}:\n{output}"
@@ -571,6 +583,7 @@ fn japanese_analysis_tabs_do_not_contain_english_ui_phrases() {
 fn japanese_benchmark_selection_and_result_are_localized() {
     let mut config = Config::default();
     config.general.lang = Lang::Ja;
+    config.bench.series = BenchSeries::V2;
     let mut app = test_app(config.clone());
     app.handle_key(key(KeyCode::Char('b')));
     let selection = render(&app);

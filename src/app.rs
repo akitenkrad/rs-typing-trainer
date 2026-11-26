@@ -1921,17 +1921,11 @@ impl App {
         let today = self.analysis_as_of;
         let since = self.analysis_period.start_date(today);
         self.analysis_records = db::load_records_filtered(&self.db_path(), since, self.analysis_mode_filter.as_deref()).unwrap_or_default();
-        let legacy_records = self
-            .analysis_records
-            .iter()
-            .filter(|record| !record.header.bench_id.as_deref().is_some_and(is_v3_bench_id))
-            .cloned()
-            .collect::<Vec<_>>();
         let geometry = crate::layout::geometry::geometry(&self.config.keyboard.geometry)
             .or_else(|| crate::layout::geometry::geometry("ansi"))
             .expect("bundled ansi geometry");
         self.analysis_details = analyze_records(
-            &legacy_records,
+            &self.analysis_records,
             self.practice_layout(),
             &geometry,
             AnalysisSettings {
@@ -1941,7 +1935,7 @@ impl App {
             },
         );
         self.analysis_summary = crate::analysis::summary::generate_with_metrics(
-            &legacy_records,
+            &self.analysis_records,
             &self.config,
             self.practice_layout(),
             &self.analysis_details,
@@ -1949,13 +1943,9 @@ impl App {
             self.config.general.lang,
         );
         let bench_records = if matches!(self.analysis_mode_filter.as_deref(), None | Some("bench")) {
-            legacy_records.clone()
+            self.analysis_records.clone()
         } else {
-            db::load_records_filtered(&self.db_path(), since, Some("bench"))
-                .unwrap_or_default()
-                .into_iter()
-                .filter(|record| !record.header.bench_id.as_deref().is_some_and(is_v3_bench_id))
-                .collect()
+            db::load_records_filtered(&self.db_path(), since, Some("bench")).unwrap_or_default()
         };
         self.analysis_skills =
             crate::practice::menu::skills::load_skills_tab(&self.db_path(), &self.config.keyboard.layout, &bench_records).unwrap_or_default();
@@ -2208,6 +2198,18 @@ impl App {
             }
         }
         self.bench_summary_current = selected.into_values().collect();
+        let prescriptions = db::load_prescriptions(&self.db_path()).unwrap_or_default();
+        if let Ok(report) = crate::analysis::coach::build(
+            &records,
+            &self.config,
+            &self.home_dir,
+            &prescriptions,
+            None,
+            self.analysis_as_of,
+            self.config.general.lang,
+        ) {
+            self.bench_summary_grades = report.grades;
+        }
         self.bench_summary_records = records;
     }
 

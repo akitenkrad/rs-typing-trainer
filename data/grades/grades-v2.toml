@@ -1,0 +1,127 @@
+version = "grades-v2"
+
+[languages.en.speed]
+metric = "accuracy_adjusted_wpm"
+direction = "higher"
+unit = "WPM"
+weight = 2
+score_zero = 8.0
+boundaries = [22.5, 33.5, 45.4, 57.6, 72.8, 88.2, 108.9]
+score_eight = 129.7
+
+[languages.en.accuracy]
+metric = "accuracy_percent"
+direction = "higher"
+unit = "%"
+weight = 1
+score_zero = 80
+boundaries = [90, 93, 94.5, 96, 97, 98, 99]
+score_eight = 99.8
+
+[languages.en.rhythm]
+metric = "within_word_iki_cv"
+direction = "lower"
+unit = ""
+weight = 1
+score_zero = 0.90
+boundaries = [0.72, 0.63, 0.55, 0.48, 0.42, 0.36, 0.30]
+score_eight = 0.22
+
+[languages.en.transition]
+metric = "transition_loss_percent"
+direction = "lower"
+unit = "%"
+weight = 1
+score_zero = 50
+boundaries = [35, 27, 21, 16, 12, 8, 5]
+score_eight = 2
+
+[languages.en.preview]
+metric = "word_start_ratio"
+direction = "lower"
+unit = ""
+weight = 1
+score_zero = 3.0
+boundaries = [2.50, 2.15, 1.85, 1.60, 1.40, 1.25, 1.10]
+score_eight = 1.0
+
+[languages.en.recovery]
+metric = "post_error_excess_ms"
+direction = "lower"
+unit = "ms"
+weight = 1
+score_zero = 220
+boundaries = [160, 125, 95, 70, 50, 35, 20]
+score_eight = 5
+
+[languages.en.overlap]
+metric = "rollover_percent"
+direction = "higher"
+unit = "%"
+weight = 1
+score_zero = 0
+boundaries = [6, 12, 18, 25, 32, 40, 50]
+score_eight = 65
+
+[languages.ja.speed]
+metric = "accuracy_adjusted_wpm"
+direction = "higher"
+unit = "WPM"
+weight = 2
+score_zero = 6.4
+boundaries = [19.8, 29.8, 39.7, 50.9, 64.0, 78.4, 94.1]
+score_eight = 114.8
+
+[languages.ja.accuracy]
+metric = "accuracy_percent"
+direction = "higher"
+unit = "%"
+weight = 1
+score_zero = 80
+boundaries = [90, 93, 94.5, 96, 97, 98, 99]
+score_eight = 99.8
+
+[languages.ja.rhythm]
+metric = "within_word_iki_cv"
+direction = "lower"
+unit = ""
+weight = 1
+score_zero = 0.90
+boundaries = [0.72, 0.63, 0.55, 0.48, 0.42, 0.36, 0.30]
+score_eight = 0.22
+
+[languages.ja.transition]
+metric = "transition_loss_percent"
+direction = "lower"
+unit = "%"
+weight = 1
+score_zero = 50
+boundaries = [35, 27, 21, 16, 12, 8, 5]
+score_eight = 2
+
+[languages.ja.preview]
+metric = "word_start_ratio"
+direction = "lower"
+unit = ""
+weight = 1
+score_zero = 3.0
+boundaries = [2.50, 2.15, 1.85, 1.60, 1.40, 1.25, 1.10]
+score_eight = 1.0
+
+[languages.ja.recovery]
+metric = "post_error_excess_ms"
+direction = "lower"
+unit = "ms"
+weight = 1
+score_zero = 220
+boundaries = [160, 125, 95, 70, 50, 35, 20]
+score_eight = 5
+
+[languages.ja.overlap]
+metric = "rollover_percent"
+direction = "higher"
+unit = "%"
+weight = 1
+score_zero = 0
+boundaries = [6, 12, 18, 25, 32, 40, 50]
+score_eight = 65

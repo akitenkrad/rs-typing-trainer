@@ -125,8 +125,9 @@ fn auto_difficulty_defaults_to_enabled() {
 }
 
 #[test]
-fn benchmark_series_defaults_to_v2_and_accepts_only_v2_or_v3() {
-    assert_eq!(Config::default().bench.series, BenchSeries::V2);
+fn benchmark_series_defaults_to_v3_and_accepts_only_v2_or_v3() {
+    assert_eq!(Config::default().bench.series, BenchSeries::V3);
+    assert_eq!(Config::from_toml("").unwrap().bench.series, BenchSeries::V3);
     assert_eq!(Config::from_toml("[bench]\nseries = \"v2\"\n").unwrap().bench.series, BenchSeries::V2);
     assert_eq!(Config::from_toml("[bench]\nseries = \"v3\"\n").unwrap().bench.series, BenchSeries::V3);
     assert!(Config::from_toml("[bench]\nseries = \"v4\"\n").is_err());

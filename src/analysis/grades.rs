@@ -6,12 +6,13 @@ use std::sync::OnceLock;
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::analysis::bench_v3::{BenchV3Group, BenchV3Metrics, bench_v3_record_order, bench_v3_run_key, compute_bench_v3_group_metrics};
 use crate::analysis::errors::diagnose_errors;
 use crate::analysis::metrics::AnalysisSettings;
 use crate::analysis::model::{ModelView, PlayerModel, build_player_model, session_language};
 use crate::analysis::progress::SessionForm;
 use crate::analysis::style::diagnose_style;
-use crate::bench::{BenchPart, is_preferred_bench_series, parse_bench_id, preferred_bench_series};
+use crate::bench::{BenchPart, is_preferred_bench_series, parse_bench_id, parse_v3_bench_id, preferred_bench_series};
 use crate::data::JapaneseText;
 use crate::engine::romaji::RomajiJudge;
 use crate::layout::KeyboardLayout;
@@ -19,7 +20,9 @@ use crate::layout::geometry::KeyboardGeometry;
 use crate::record::SessionRecord;
 
 pub const GRADE_VERSION: &str = "grades-v1";
+pub const GRADE_VERSION_V2: &str = "grades-v2";
 const GRADE_DATA: &str = include_str!("../../data/grades/grades-v1.toml");
+const GRADE_DATA_V2: &str = include_str!("../../data/grades/grades-v2.toml");
 const COMPONENTS: [Component; 7] = [
     Component::Speed,
     Component::Accuracy,
@@ -257,8 +260,8 @@ impl GradeThresholds {
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        if self.version != GRADE_VERSION {
-            return Err(format!("grade version must be {GRADE_VERSION}"));
+        if !matches!(self.version.as_str(), GRADE_VERSION | GRADE_VERSION_V2) {
+            return Err(format!("unknown grade version {}", self.version));
         }
         for language in ["en", "ja"] {
             let table = self.language(language).ok_or_else(|| format!("missing language {language}"))?;
@@ -301,17 +304,47 @@ pub fn bundled_thresholds() -> Result<&'static GradeThresholds, String> {
         .get_or_init(|| {
             let parsed = toml::from_str::<GradeThresholds>(GRADE_DATA).map_err(|error| error.to_string())?;
             parsed.validate()?;
+            if parsed.version != GRADE_VERSION {
+                return Err(format!("grade version must be {GRADE_VERSION}"));
+            }
             Ok(parsed)
         })
         .as_ref()
         .map_err(Clone::clone)
 }
 
+pub fn bundled_thresholds_v2() -> Result<&'static GradeThresholds, String> {
+    static THRESHOLDS: OnceLock<Result<GradeThresholds, String>> = OnceLock::new();
+    THRESHOLDS
+        .get_or_init(|| {
+            let parsed = toml::from_str::<GradeThresholds>(GRADE_DATA_V2).map_err(|error| error.to_string())?;
+            parsed.validate()?;
+            if parsed.version != GRADE_VERSION_V2 {
+                return Err(format!("grade version must be {GRADE_VERSION_V2}"));
+            }
+            Ok(parsed)
+        })
+        .as_ref()
+        .map_err(Clone::clone)
+}
+
+fn thresholds_for_version(version: &str) -> Result<&'static GradeThresholds, String> {
+    match version {
+        GRADE_VERSION => bundled_thresholds(),
+        GRADE_VERSION_V2 => bundled_thresholds_v2(),
+        _ => Err(format!("unknown grade version {version}")),
+    }
+}
+
 pub fn grade_component(language: &str, component: Component, value: f64) -> Result<ComponentGrade, String> {
+    grade_component_with_version(language, component, value, GRADE_VERSION)
+}
+
+pub fn grade_component_with_version(language: &str, component: Component, value: f64, version: &str) -> Result<ComponentGrade, String> {
     if !value.is_finite() {
         return Err("grade value must be finite".to_owned());
     }
-    let row = bundled_thresholds()?.component(language, component)?;
+    let row = thresholds_for_version(version)?.component(language, component)?;
     let points = std::iter::once(row.score_zero)
         .chain(row.boundaries.iter().copied())
         .chain(std::iter::once(row.score_eight))
@@ -369,6 +402,13 @@ pub fn bench_language_grade(
     english_corpus: &[String],
     japanese_corpus: &[JapaneseText],
 ) -> Option<(LanguageGrade, NaiveDate)> {
+    let v3_records = v3_language_records(records, language, Some(as_of));
+    if !v3_records.is_empty() {
+        let runs = v3_grade_runs(&v3_records, language, options.model.pause_ms);
+        let date = runs.last()?.date;
+        let grade = v3_bench_grade(language, &v3_records, layout, geometry, options, as_of, english_corpus, japanese_corpus)?;
+        return Some((grade, date));
+    }
     let benches = benchmark_records(records, language, Some(as_of));
     let date = benches
         .last()
@@ -378,10 +418,25 @@ pub fn bench_language_grade(
     Some((grade, date))
 }
 
-/// The benchmark sessions of `language` (part A for English, part C for
-/// Japanese, preferred series) that the bench grade is computed from, oldest
-/// first.
+/// The preferred benchmark sessions of `language`, oldest first. Once the
+/// language has any v3 part, v1/v2 sessions are not mixed into this result.
 pub fn language_bench_records<'a>(records: &'a [SessionRecord], language: &str) -> Vec<&'a SessionRecord> {
+    let group = v3_group(language);
+    let mut v3 = records
+        .iter()
+        .filter(|record| {
+            record
+                .header
+                .bench_id
+                .as_deref()
+                .and_then(parse_v3_bench_id)
+                .is_some_and(|(part, _)| group.parts().contains(&part))
+        })
+        .collect::<Vec<_>>();
+    if !v3.is_empty() {
+        v3.sort_by_key(|record| parse_time(&record.header.started_at));
+        return v3;
+    }
     benchmark_records(records, language, None)
 }
 
@@ -432,9 +487,20 @@ pub fn evaluate_language(
     status: GradeStatus,
     n_sessions: usize,
 ) -> Result<LanguageGrade, String> {
+    evaluate_language_with_version(language, values, source, status, n_sessions, GRADE_VERSION)
+}
+
+pub fn evaluate_language_with_version(
+    language: &str,
+    values: &[ComponentValue],
+    source: GradeSource,
+    status: GradeStatus,
+    n_sessions: usize,
+    version: &str,
+) -> Result<LanguageGrade, String> {
     let mut components = values
         .iter()
-        .map(|value| grade_component(language, value.component, value.value))
+        .map(|value| grade_component_with_version(language, value.component, value.value, version))
         .collect::<Result<Vec<_>, _>>()?;
     components.sort_by_key(|row| row.component);
     let present = components.iter().map(|row| row.component).collect::<BTreeSet<_>>();
@@ -452,7 +518,7 @@ pub fn evaluate_language(
         components,
         overall,
         missing,
-        version: GRADE_VERSION.to_owned(),
+        version: version.to_owned(),
     })
 }
 
@@ -514,12 +580,6 @@ pub fn analyze_grades(
     english_corpus: &[String],
     japanese_corpus: &[JapaneseText],
 ) -> GradesAnalysis {
-    let filtered = records
-        .iter()
-        .filter(|record| !record.header.bench_id.as_deref().is_some_and(crate::bench::is_v3_bench_id))
-        .cloned()
-        .collect::<Vec<_>>();
-    let records = filtered.as_slice();
     let mut languages = Vec::new();
     for language in ["en", "ja"] {
         if let Some(grade) = current_language_grade(
@@ -553,6 +613,24 @@ fn current_language_grade(
     english_corpus: &[String],
     japanese_corpus: &[JapaneseText],
 ) -> Option<LanguageGrade> {
+    let v3_records = v3_language_records(records, language, Some(as_of));
+    if !v3_records.is_empty() {
+        if let Some(grade) = v3_bench_grade(language, &v3_records, layout, geometry, options, as_of, english_corpus, japanese_corpus) {
+            return Some(grade);
+        }
+        return provisional_grade(
+            language,
+            records,
+            forms,
+            layout,
+            geometry,
+            options,
+            as_of,
+            english_corpus,
+            japanese_corpus,
+            GRADE_VERSION_V2,
+        );
+    }
     let benches = benchmark_records(records, language, Some(as_of));
     if !benches.is_empty() {
         return bench_grade(language, &benches, layout, geometry, options, as_of, english_corpus, japanese_corpus);
@@ -567,7 +645,124 @@ fn current_language_grade(
         as_of,
         english_corpus,
         japanese_corpus,
+        GRADE_VERSION,
     )
+}
+
+fn v3_group(language: &str) -> BenchV3Group {
+    if language == "ja" {
+        BenchV3Group::Japanese
+    } else {
+        BenchV3Group::English
+    }
+}
+
+fn v3_language_records(records: &[SessionRecord], language: &str, at: Option<DateTime<Utc>>) -> Vec<SessionRecord> {
+    let group = v3_group(language);
+    records
+        .iter()
+        .filter(|record| {
+            record
+                .header
+                .bench_id
+                .as_deref()
+                .and_then(parse_v3_bench_id)
+                .is_some_and(|(part, _)| group.parts().contains(&part))
+        })
+        .filter(|record| at.is_none_or(|at| parse_time(&record.header.started_at).is_some_and(|started| started <= at)))
+        .cloned()
+        .collect()
+}
+
+struct GradeV3Run {
+    date: NaiveDate,
+    metrics: BenchV3Metrics,
+    records: Vec<SessionRecord>,
+    order: (DateTime<Utc>, i64),
+}
+
+fn v3_grade_runs(records: &[SessionRecord], language: &str, pause_ms: u64) -> Vec<GradeV3Run> {
+    let group = v3_group(language);
+    let mut grouped = BTreeMap::<(NaiveDate, u8), Vec<SessionRecord>>::new();
+    for record in records {
+        let Some((part, _)) = record.header.bench_id.as_deref().and_then(parse_v3_bench_id) else {
+            continue;
+        };
+        if !group.parts().contains(&part) {
+            continue;
+        }
+        let Some((date, form)) = bench_v3_run_key(record) else {
+            continue;
+        };
+        grouped.entry((date, form)).or_default().push(record.clone());
+    }
+    let mut runs = grouped
+        .into_iter()
+        .filter_map(|((date, _), records)| {
+            let summary = compute_bench_v3_group_metrics(&records, group, pause_ms)?;
+            if summary.partial {
+                return None;
+            }
+            let order = records.iter().filter_map(bench_v3_record_order).max()?;
+            Some(GradeV3Run {
+                date,
+                metrics: summary.metrics,
+                records,
+                order,
+            })
+        })
+        .collect::<Vec<_>>();
+    runs.sort_by_key(|run| run.order);
+    runs
+}
+
+#[allow(clippy::too_many_arguments)]
+fn v3_bench_grade(
+    language: &str,
+    records: &[SessionRecord],
+    layout: &KeyboardLayout,
+    geometry: &KeyboardGeometry,
+    options: GradeOptions,
+    as_of: DateTime<Utc>,
+    english_corpus: &[String],
+    japanese_corpus: &[JapaneseText],
+) -> Option<LanguageGrade> {
+    let runs = v3_grade_runs(records, language, options.model.pause_ms);
+    let selected_runs = runs.iter().rev().take(3).collect::<Vec<_>>();
+    if selected_runs.is_empty() {
+        return None;
+    }
+    let selected_records = selected_runs.iter().flat_map(|run| run.records.iter().cloned()).collect::<Vec<_>>();
+    let mut values = component_values(
+        &selected_records,
+        layout,
+        geometry,
+        options,
+        as_of,
+        english_corpus,
+        japanese_corpus,
+        language,
+    );
+    values.retain(|row| !matches!(row.component, Component::Speed | Component::Accuracy));
+    if let Some(speed) = median(selected_runs.iter().filter_map(|run| run.metrics.effective_wpm)) {
+        values.push(ComponentValue::new(Component::Speed, speed));
+    }
+    if let Some(accuracy) = median(selected_runs.iter().map(|run| run.metrics.accuracy * 100.0)) {
+        values.push(ComponentValue::new(Component::Accuracy, accuracy));
+    }
+    evaluate_language_with_version(
+        language,
+        &values,
+        GradeSource::Bench,
+        if selected_runs.len() >= 3 {
+            GradeStatus::Official
+        } else {
+            GradeStatus::Interim
+        },
+        selected_runs.len(),
+        GRADE_VERSION_V2,
+    )
+    .ok()
 }
 
 fn benchmark_records<'a>(records: &'a [SessionRecord], language: &str, at: Option<DateTime<Utc>>) -> Vec<&'a SessionRecord> {
@@ -634,6 +829,7 @@ fn provisional_grade(
     as_of: DateTime<Utc>,
     english_corpus: &[String],
     japanese_corpus: &[JapaneseText],
+    version: &str,
 ) -> Option<LanguageGrade> {
     let mut language_forms = forms
         .iter()
@@ -645,7 +841,7 @@ fn provisional_grade(
     let recent_forms = language_forms.iter().rev().take(3).copied().collect::<Vec<_>>();
     let mut practice = records
         .iter()
-        .filter(|record| record.header.metrics_version > 0 && record.header.bench_id.as_deref().and_then(parse_bench_id).is_none())
+        .filter(|record| record.header.metrics_version > 0 && record.header.bench_id.is_none())
         .filter(|record| session_language(record) == language)
         .filter(|record| parse_time(&record.header.started_at).is_some_and(|started| started <= as_of))
         .collect::<Vec<_>>();
@@ -660,12 +856,22 @@ fn provisional_grade(
         .collect::<Vec<_>>();
     let mut values = component_values(&week, layout, geometry, options, as_of, english_corpus, japanese_corpus, language);
     values.retain(|row| !matches!(row.component, Component::Speed | Component::Accuracy));
-    let corrected_speed = median(recent_forms.iter().map(|form| form.corrected_wpm));
-    let uncorrected_speed = median(recent_accuracy.iter().map(|record| record.header.net_wpm));
+    let accuracy = median(recent_accuracy.iter().map(|record| record.header.accuracy * 100.0));
+    let speed_factor = if version == GRADE_VERSION_V2 {
+        accuracy.map(|value| value / 100.0)
+    } else {
+        Some(1.0)
+    };
+    let corrected_speed = median(recent_forms.iter().map(|form| form.corrected_wpm))
+        .zip(speed_factor)
+        .map(|(speed, factor)| speed * factor);
+    let uncorrected_speed = median(recent_accuracy.iter().map(|record| record.header.net_wpm))
+        .zip(speed_factor)
+        .map(|(speed, factor)| speed * factor);
     if let Some(speed) = corrected_speed.or(uncorrected_speed) {
         values.push(ComponentValue::new(Component::Speed, speed));
     }
-    if let Some(accuracy) = median(recent_accuracy.iter().map(|record| record.header.accuracy * 100.0)) {
+    if let Some(accuracy) = accuracy {
         values.push(ComponentValue::new(Component::Accuracy, accuracy));
     }
     if values.is_empty() {
@@ -676,7 +882,7 @@ fn provisional_grade(
     } else {
         (GradeSource::Provisional, recent_forms.len())
     };
-    evaluate_language(language, &values, source, GradeStatus::Provisional, n).ok()
+    evaluate_language_with_version(language, &values, source, GradeStatus::Provisional, n, version).ok()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -863,26 +1069,22 @@ fn build_history(
             let Some(grade) = bench_grade(language, &available, layout, geometry, options, at, english_corpus, japanese_corpus) else {
                 continue;
             };
-            for component in &grade.components {
-                history.push(GradeHistoryPoint {
-                    date,
-                    language: language.to_owned(),
-                    component: component.component.as_str().to_owned(),
-                    grade: component.grade,
-                    score: component.score,
-                    version: GRADE_VERSION.to_owned(),
-                });
-            }
-            if let Some(overall) = grade.overall {
-                history.push(GradeHistoryPoint {
-                    date,
-                    language: language.to_owned(),
-                    component: "overall".to_owned(),
-                    grade: overall.grade,
-                    score: overall.score,
-                    version: GRADE_VERSION.to_owned(),
-                });
-            }
+            append_history_grade(&mut history, date, &grade);
+        }
+
+        let v3_records = v3_language_records(records, language, None);
+        let runs = v3_grade_runs(&v3_records, language, options.model.pause_ms);
+        for run in runs {
+            let at = run.order.0;
+            let available = v3_records
+                .iter()
+                .filter(|record| bench_v3_record_order(record).is_some_and(|order| order <= run.order))
+                .cloned()
+                .collect::<Vec<_>>();
+            let Some(grade) = v3_bench_grade(language, &available, layout, geometry, options, at, english_corpus, japanese_corpus) else {
+                continue;
+            };
+            append_history_grade(&mut history, run.date, &grade);
         }
     }
     history.sort_by(|left, right| {
@@ -892,6 +1094,29 @@ fn build_history(
             .then_with(|| left.component.cmp(&right.component))
     });
     history
+}
+
+fn append_history_grade(history: &mut Vec<GradeHistoryPoint>, date: NaiveDate, grade: &LanguageGrade) {
+    for component in &grade.components {
+        history.push(GradeHistoryPoint {
+            date,
+            language: grade.language.clone(),
+            component: component.component.as_str().to_owned(),
+            grade: component.grade,
+            score: component.score,
+            version: grade.version.clone(),
+        });
+    }
+    if let Some(overall) = &grade.overall {
+        history.push(GradeHistoryPoint {
+            date,
+            language: grade.language.clone(),
+            component: "overall".to_owned(),
+            grade: overall.grade,
+            score: overall.score,
+            version: grade.version.clone(),
+        });
+    }
 }
 
 pub fn detect_grade_changes(history: &[GradeHistoryPoint]) -> Vec<GradeChange> {
@@ -911,6 +1136,9 @@ pub fn detect_grade_changes(history: &[GradeHistoryPoint]) -> Vec<GradeChange> {
         }
         let previous = rows[rows.len() - 2];
         let current = rows[rows.len() - 1];
+        if current.version != previous.version {
+            continue;
+        }
         if current.grade == previous.grade {
             continue;
         }

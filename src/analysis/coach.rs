@@ -55,12 +55,6 @@ pub fn build(
     as_of: NaiveDate,
     lang: Lang,
 ) -> AppResult<CoachReport> {
-    let legacy_records = records
-        .iter()
-        .filter(|record| !record.header.bench_id.as_deref().is_some_and(crate::bench::is_v3_bench_id))
-        .cloned()
-        .collect::<Vec<_>>();
-    let legacy_records = legacy_records.as_slice();
     let layout = builtin_layout(&config.keyboard.layout).unwrap_or_else(|_| builtin_layout("qwerty").expect("bundled qwerty"));
     let keyboard_geometry = geometry(&config.keyboard.geometry).unwrap_or_else(|| geometry("ansi").expect("bundled ansi"));
     let catalog = DataCatalog::load(&DataConfig::default(), home)?;
@@ -83,7 +77,7 @@ pub fn build(
         &references,
     );
     let grades = analyze_grades(
-        legacy_records,
+        records,
         &progress.forms,
         &layout,
         &keyboard_geometry,
@@ -93,7 +87,7 @@ pub fn build(
         catalog.words_ja(),
     );
     let diagnosis = diagnose(
-        legacy_records,
+        records,
         &layout,
         &keyboard_geometry,
         DiagnosisOptions {
@@ -104,11 +98,11 @@ pub fn build(
         at,
         catalog.words_ja(),
     );
-    let habits = analyze_habits(legacy_records, &progress.forms);
-    let goals = goal_suggestions(legacy_records, &grades, &progress);
+    let habits = analyze_habits(records, &progress.forms);
+    let goals = goal_suggestions(records, &grades, &progress);
     let map = transition_map(&diagnosis.player_model);
     let lines = compose_lines(
-        legacy_records,
+        records,
         config,
         &grades,
         &progress,
@@ -363,27 +357,34 @@ fn grade_lines(grade: &LanguageGrade, lang: Lang) -> Vec<String> {
     let mut lines = vec![match &grade.overall {
         Some(overall) => match lang {
             Lang::En => format!(
-                "{}: {}  {:.2} ({source}, {} session{})",
+                "{}: {}  {:.2} ({}; {source}, {} session{})",
                 language_label(&grade.language, lang),
                 overall.grade.as_str(),
                 overall.score,
+                grade.version,
                 grade.n_sessions,
                 if grade.n_sessions == 1 { "" } else { "s" }
             ),
             Lang::Ja => format!(
-                "{}: {}  {:.2}（{source}・{} 回）",
+                "{}: {}  {:.2}（{}・{source}・{} 回）",
                 language_label(&grade.language, lang),
                 overall.grade.as_str(),
                 overall.score,
+                grade.version,
                 grade.n_sessions
             ),
         },
         None => match lang {
             Lang::En => format!(
-                "{}: speed or accuracy cannot be measured ({source})",
-                language_label(&grade.language, lang)
+                "{}: speed or accuracy cannot be measured ({}; {source})",
+                language_label(&grade.language, lang),
+                grade.version
             ),
-            Lang::Ja => format!("{}: 速さまたは正確さを測定できません（{source}）", language_label(&grade.language, lang)),
+            Lang::Ja => format!(
+                "{}: 速さまたは正確さを測定できません（{}・{source}）",
+                language_label(&grade.language, lang),
+                grade.version
+            ),
         },
     }];
     lines.extend(formatted_component_lines(grade, lang, false));

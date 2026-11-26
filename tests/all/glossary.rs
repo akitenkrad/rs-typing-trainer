@@ -49,6 +49,29 @@ fn bundled_glossary_loads_and_has_unique_valid_entries() {
 }
 
 #[test]
+fn benchmark_and_grade_terms_cover_v3_and_grades_v2() {
+    let catalog = glossary::bundled().expect("bundled glossary");
+
+    let series = catalog.term("bench-series").unwrap();
+    assert!(series.term.en.contains("bench-v1 / bench-v2 / bench-v3"));
+    assert!(series.term.ja.contains("bench-v1 / bench-v2 / bench-v3"));
+
+    let part = catalog.term("bench-part").unwrap();
+    for id in ["W", "EW", "ES", "JW", "JS", "PW"] {
+        assert!(part.short.en.contains(id), "English bench-part description is missing {id}");
+        assert!(part.short.ja.contains(id), "Japanese bench-part description is missing {id}");
+    }
+    assert!(part.short.en.contains("A–D"));
+    assert!(part.short.ja.contains("A〜D"));
+
+    let grade = catalog.term("grade").unwrap();
+    assert!(grade.aliases.iter().any(|alias| alias == "grades-v2"));
+    let detail = grade.detail.as_ref().unwrap();
+    assert!(detail.en.contains("grades-v2") && detail.en.contains("accuracy-adjusted speed"));
+    assert!(detail.ja.contains("grades-v2") && detail.ja.contains("正確さを含む速さ"));
+}
+
+#[test]
 fn glossary_screen_names_match_the_analysis_tab_labels() {
     assert_eq!(glossary::screen_name("analysis.fingers", Lang::En), Some("Analysis · Fingers and hands"));
     assert_eq!(glossary::screen_name("analysis.fingers", Lang::Ja), Some("分析・指・手"));

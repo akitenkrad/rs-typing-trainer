@@ -9,6 +9,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::app::App;
 use crate::build_info;
+use crate::config::BenchSeries;
 use crate::i18n::Lang;
 use crate::ui::{left_inset, theme::Theme, wrap_display, wrap_field};
 
@@ -51,8 +52,16 @@ impl AboutInfo {
             repository: env!("CARGO_PKG_REPOSITORY").to_owned(),
             menu_version,
             briefing_version,
-            grade_version: crate::analysis::grades::GRADE_VERSION.to_owned(),
-            bench_series: crate::bench::BENCH_SERIES.to_owned(),
+            grade_version: format!(
+                "{} / {}",
+                crate::analysis::grades::GRADE_VERSION,
+                crate::analysis::grades::GRADE_VERSION_V2
+            ),
+            bench_series: match app.config.bench.series {
+                BenchSeries::V2 => "bench-v2",
+                BenchSeries::V3 => "bench-v3",
+            }
+            .to_owned(),
             config_path: app.config_path.as_ref().map(|path| path.display().to_string()),
             database_path: app.db_path().display().to_string(),
             graphics: app.graphics.mode.as_str().to_owned(),

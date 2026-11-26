@@ -2,11 +2,12 @@
 
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, NaiveDate};
+use chrono::{DateTime, Local, NaiveDate};
 
+use crate::analysis::bench_v3::{BenchV3Group, bench_v3_record_order, bench_v3_run_key, compute_bench_v3_group_metrics};
 use crate::analysis::metrics::{AnalysisSettings, DetailedMetrics, analyze_records};
-use crate::bench::{BenchPart, is_preferred_bench_series, parse_bench_id, preferred_bench_series};
-use crate::config::Config;
+use crate::bench::{BenchPart, is_preferred_bench_series, parse_bench_id, parse_v3_bench_id, preferred_bench_series};
+use crate::config::{BenchSeries, Config};
 use crate::i18n::Lang;
 use crate::layout::geometry::geometry;
 use crate::layout::{KeyboardLayout, builtin_layout};
@@ -95,12 +96,6 @@ pub struct SkillAxisValue {
 }
 
 pub fn generate(records: &[SessionRecord], config: &Config, as_of: NaiveDate, lang: Lang) -> SummaryReport {
-    let filtered = records
-        .iter()
-        .filter(|record| !record.header.bench_id.as_deref().is_some_and(crate::bench::is_v3_bench_id))
-        .cloned()
-        .collect::<Vec<_>>();
-    let records = filtered.as_slice();
     if records.is_empty() {
         return SummaryReport {
             lines: vec![match lang {
@@ -123,19 +118,6 @@ pub fn generate_with_metrics(
     as_of: NaiveDate,
     lang: Lang,
 ) -> SummaryReport {
-    if records
-        .iter()
-        .any(|record| record.header.bench_id.as_deref().is_some_and(crate::bench::is_v3_bench_id))
-    {
-        let filtered = records
-            .iter()
-            .filter(|record| !record.header.bench_id.as_deref().is_some_and(crate::bench::is_v3_bench_id))
-            .cloned()
-            .collect::<Vec<_>>();
-        let geometry = geometry(&config.keyboard.geometry).unwrap_or_else(|| geometry("ansi").expect("bundled ansi"));
-        let filtered_details = analyze_records(&filtered, layout, &geometry, analysis_settings(config));
-        return generate_with_metrics(&filtered, config, layout, &filtered_details, as_of, lang);
-    }
     if records.is_empty() {
         return generate(records, config, as_of, lang);
     }
@@ -147,19 +129,25 @@ pub fn generate_with_metrics(
     let mut lines = Vec::new();
     current_ability(&mut lines, &recent, records, lang);
     lines.push(String::new());
-    trend(&mut lines, records, as_of, lang);
+    trend(&mut lines, records, config.analysis.pause_ms, as_of, lang);
     lines.push(String::new());
     strengths_and_weaknesses(&mut lines, &axes, lang);
     lines.push(String::new());
     weak_keys_and_transitions(&mut lines, details, config.analysis.min_transition_n, lang);
     lines.push(String::new());
-    recommendations(&mut lines, &recent, records, details, &axes, config.analysis.min_transition_n, lang);
+    recommendations(&mut lines, &recent, records, details, &axes, config, lang);
     lines.push(String::new());
     data_status(&mut lines, records, details, &axes, as_of, lang);
     SummaryReport { lines }
 }
 
 pub fn skill_axis_values(records: &[SessionRecord], layout: &KeyboardLayout, config: &Config) -> Vec<SkillAxisValue> {
+    if records
+        .iter()
+        .any(|record| record.header.bench_id.as_deref().and_then(parse_v3_bench_id).is_some())
+    {
+        return v3_skill_axis_values(records, layout, config);
+    }
     SkillAxis::ALL
         .into_iter()
         .map(|axis| {
@@ -185,6 +173,102 @@ pub fn skill_axis_values(records: &[SessionRecord], layout: &KeyboardLayout, con
         .collect()
 }
 
+fn v3_skill_axis_values(records: &[SessionRecord], layout: &KeyboardLayout, config: &Config) -> Vec<SkillAxisValue> {
+    SkillAxis::ALL
+        .into_iter()
+        .map(|axis| {
+            let group = match axis {
+                SkillAxis::Japanese => BenchV3Group::Japanese,
+                SkillAxis::Transitions => BenchV3Group::Transition,
+                _ => BenchV3Group::English,
+            };
+            let history = v3_group_record_runs(records, group)
+                .into_iter()
+                .filter_map(|run| v3_axis_value(axis, &run, layout, config))
+                .collect::<Vec<_>>();
+            let raw = history.last().copied();
+            let percentile = (history.len() >= 3).then(|| percentile_position(raw.unwrap_or_default(), &history, axis.higher_is_better()));
+            SkillAxisValue { axis, raw, percentile }
+        })
+        .collect()
+}
+
+/// Complete v3 runs for a group, keyed by machine-local date and parallel
+/// form, but ordered by the actual finish time. Form 08 followed by form 01
+/// on one day therefore stays in that order instead of being sorted by form.
+fn v3_group_record_runs(records: &[SessionRecord], group: BenchV3Group) -> Vec<Vec<SessionRecord>> {
+    let mut grouped = BTreeMap::<(NaiveDate, u8), Vec<SessionRecord>>::new();
+    for record in records {
+        let Some((part, _)) = record.header.bench_id.as_deref().and_then(parse_v3_bench_id) else {
+            continue;
+        };
+        if !group.parts().contains(&part) {
+            continue;
+        }
+        let Some((date, form)) = bench_v3_run_key(record) else {
+            continue;
+        };
+        grouped.entry((date, form)).or_default().push(record.clone());
+    }
+    let mut runs = grouped
+        .into_values()
+        .filter_map(|records| {
+            let present = records
+                .iter()
+                .filter_map(|record| record.header.bench_id.as_deref().and_then(parse_v3_bench_id).map(|(part, _)| part))
+                .collect::<Vec<_>>();
+            if !group.parts().iter().all(|part| present.contains(part)) {
+                return None;
+            }
+            let order = records.iter().filter_map(bench_v3_record_order).max()?;
+            Some((order, records))
+        })
+        .collect::<Vec<_>>();
+    runs.sort_by_key(|(order, _)| *order);
+    runs.into_iter().map(|(_, records)| records).collect()
+}
+
+fn v3_axis_value(axis: SkillAxis, records: &[SessionRecord], layout: &KeyboardLayout, config: &Config) -> Option<f64> {
+    let group = match axis {
+        SkillAxis::Japanese => BenchV3Group::Japanese,
+        SkillAxis::Transitions => BenchV3Group::Transition,
+        _ => BenchV3Group::English,
+    };
+    let summary = compute_bench_v3_group_metrics(records, group, config.analysis.pause_ms)?;
+    match axis {
+        SkillAxis::SustainedSpeed | SkillAxis::Japanese => summary.metrics.effective_wpm,
+        SkillAxis::Accuracy => Some(summary.metrics.accuracy * 100.0),
+        _ => axis_value_for_records(axis, records, layout, config),
+    }
+}
+
+fn axis_value_for_records(axis: SkillAxis, records: &[SessionRecord], layout: &KeyboardLayout, config: &Config) -> Option<f64> {
+    let keyboard_geometry = records
+        .first()
+        .and_then(|record| geometry(&record.header.geometry))
+        .or_else(|| geometry("ansi"))?;
+    let details = analyze_records(records, layout, &keyboard_geometry, analysis_settings(config));
+    match axis {
+        SkillAxis::Rhythm if records.iter().all(|record| record.header.metrics_version == 0) => None,
+        SkillAxis::Rhythm => Some(details.iki_cv),
+        SkillAxis::Reach => reach_ratio(&details),
+        SkillAxis::Transitions => {
+            let mut values = details
+                .bigrams
+                .iter()
+                .filter(|row| row.n >= config.analysis.min_transition_n)
+                .map(|row| row.estimated_iki_ms)
+                .collect::<Vec<_>>();
+            values.sort_by(|left, right| right.total_cmp(left));
+            let top = values.iter().take(20).copied().collect::<Vec<_>>();
+            (!top.is_empty()).then(|| top.iter().sum::<f64>() / top.len() as f64 - details.iki_median_ms)
+        }
+        SkillAxis::Reaction => (details.reaction_median_ms > 0.0).then_some(details.reaction_median_ms),
+        SkillAxis::Correction => (details.correction_median_ms > 0.0).then_some(details.correction_median_ms),
+        SkillAxis::SustainedSpeed | SkillAxis::Accuracy | SkillAxis::Japanese => None,
+    }
+}
+
 pub fn percentile_position(value: f64, history: &[f64], higher_is_better: bool) -> f64 {
     if history.is_empty() {
         return 0.0;
@@ -199,7 +283,7 @@ pub fn percentile_position(value: f64, history: &[f64], higher_is_better: bool) 
 fn current_ability(lines: &mut Vec<String>, recent: &[&SessionRecord], all: &[SessionRecord], lang: Lang) {
     lines.push(heading("Current ability", "今の実力", lang));
     let mut modes = BTreeMap::<&str, Vec<&SessionRecord>>::new();
-    for record in recent.iter().copied().filter(|record| bench_identity(record).is_none()) {
+    for record in recent.iter().copied().filter(|record| !is_benchmark(record)) {
         modes.entry(&record.header.mode).or_default().push(record);
     }
     let mut modes = modes.into_iter().collect::<Vec<_>>();
@@ -258,29 +342,47 @@ fn current_ability(lines: &mut Vec<String>, recent: &[&SessionRecord], all: &[Se
     }
 }
 
-fn trend(lines: &mut Vec<String>, records: &[SessionRecord], as_of: NaiveDate, lang: Lang) {
+fn trend(lines: &mut Vec<String>, records: &[SessionRecord], pause_ms: u64, as_of: NaiveDate, lang: Lang) {
     lines.push(heading("Trend", "推移", lang));
+    let v3 = [BenchV3Group::English, BenchV3Group::Japanese, BenchV3Group::Transition]
+        .into_iter()
+        .find_map(|group| {
+            let runs = crate::analysis::bench_v3::compute_bench_v3_group_runs(records, group, pause_ms);
+            (!runs.is_empty()).then_some((group, runs))
+        });
     let trend_bench_part = if records.iter().any(|record| bench_part(record) == Some("A")) {
         Some("A")
     } else {
         records.iter().rev().find_map(|record| bench_part(record))
     };
-    let uses_bench = trend_bench_part.is_some();
+    let uses_bench = v3.is_some() || trend_bench_part.is_some();
     let trend_part = trend_bench_part.and_then(bench_part_value);
     let trend_series =
         trend_part.and_then(|part| preferred_bench_series(records.iter().filter_map(|record| record.header.bench_id.as_deref()), part));
-    let samples = records
-        .iter()
-        .filter(|record| {
-            if let Some(part) = trend_part {
-                bench_identity(record).is_some_and(|(series, candidate)| candidate == part && is_preferred_bench_series(series, part, trend_series))
-            } else {
-                bench_identity(record).is_none()
-            }
-        })
-        .filter_map(|record| Some((record_date(record)?, record.header.net_wpm)))
-        .filter(|(date, _)| *date <= as_of && *date >= as_of - chrono::Duration::days(27))
-        .collect::<Vec<_>>();
+    let samples = if let Some((_, runs)) = &v3 {
+        let raw = runs.iter().filter_map(|run| run.metrics.effective_wpm).collect::<Vec<_>>();
+        let rolling = crate::analysis::bench_v3::rolling_median_3(&raw);
+        runs.iter()
+            .filter(|run| run.metrics.effective_wpm.is_some())
+            .zip(rolling)
+            .map(|(run, value)| (run.date, value))
+            .filter(|(date, _)| *date <= as_of && *date >= as_of - chrono::Duration::days(27))
+            .collect::<Vec<_>>()
+    } else {
+        records
+            .iter()
+            .filter(|record| {
+                if let Some(part) = trend_part {
+                    bench_identity(record)
+                        .is_some_and(|(series, candidate)| candidate == part && is_preferred_bench_series(series, part, trend_series))
+                } else {
+                    !is_benchmark(record)
+                }
+            })
+            .filter_map(|record| Some((record_date(record)?, record.header.net_wpm)))
+            .filter(|(date, _)| *date <= as_of && *date >= as_of - chrono::Duration::days(27))
+            .collect::<Vec<_>>()
+    };
     let mut weeks: [Vec<f64>; 4] = std::array::from_fn(|_| Vec::new());
     for (date, value) in samples {
         let age = (as_of - date).num_days() as usize;
@@ -307,7 +409,16 @@ fn trend(lines: &mut Vec<String>, records: &[SessionRecord], as_of: NaiveDate, l
             Lang::Ja if slope < -TREND_FLAT_WPM_PER_WEEK => "下向き",
             Lang::Ja => "横ばい",
         };
-        let source = if uses_bench {
+        let source = if let Some((group, _)) = &v3 {
+            match (group, lang) {
+                (BenchV3Group::English, Lang::En) => "bench-v3 English",
+                (BenchV3Group::Japanese, Lang::En) => "bench-v3 Japanese",
+                (BenchV3Group::Transition, Lang::En) => "bench-v3 transitions",
+                (BenchV3Group::English, Lang::Ja) => "bench-v3 英語",
+                (BenchV3Group::Japanese, Lang::Ja) => "bench-v3 日本語",
+                (BenchV3Group::Transition, Lang::Ja) => "bench-v3 移り変わり",
+            }
+        } else if uses_bench {
             bench_part_label(trend_bench_part.unwrap_or("?"), lang)
         } else {
             match lang {
@@ -429,7 +540,7 @@ fn recommendations(
     records: &[SessionRecord],
     details: &DetailedMetrics,
     axes: &[SkillAxisValue],
-    min_transition_n: u64,
+    config: &Config,
     lang: Lang,
 ) {
     lines.push(heading("Recommended practice", "おすすめの練習", lang));
@@ -444,7 +555,7 @@ fn recommendations(
     let slowest = details
         .bigrams
         .iter()
-        .filter(|row| row.n >= min_transition_n)
+        .filter(|row| row.n >= config.analysis.min_transition_n)
         .max_by(|left, right| left.estimated_iki_ms.total_cmp(&right.estimated_iki_ms));
     if let Some(row) = slowest
         && (weak_axis(axes, SkillAxis::Transitions) || (details.iki_median_ms > 0.0 && row.estimated_iki_ms >= details.iki_median_ms * 1.25))
@@ -503,9 +614,13 @@ fn recommendations(
         });
     }
     if items.is_empty() {
+        let series = match config.bench.series {
+            BenchSeries::V2 => "bench-v2",
+            BenchSeries::V3 => "bench-v3",
+        };
         items.push(match lang {
-            Lang::En => "Keep practice specific and use bench-v1 to measure change. Setting: choose one practice mode, then run B from the title screen after several sessions.".to_owned(),
-            Lang::Ja => "弱点を 1 つに絞って練習し，変化は `bench-v1` で測ります．設定: 練習モードを 1 つ選び，数回の練習後にタイトル画面の `B` からベンチを実施します．".to_owned(),
+            Lang::En => format!("Keep practice specific and use {series} to measure change. Setting: choose one practice mode, then run B from the title screen after several sessions."),
+            Lang::Ja => format!("弱点を 1 つに絞って練習し，変化は `{series}` で測ります．設定: 練習モードを 1 つ選び，数回の練習後にタイトル画面の `B` からベンチを実施します．"),
         });
     }
     for item in items.into_iter().take(3) {
@@ -520,7 +635,7 @@ fn data_status(lines: &mut Vec<String>, records: &[SessionRecord], details: &Det
         Lang::En => format!("- Sessions with keystroke logs: {logged}."),
         Lang::Ja => format!("- 打鍵ログのあるセッション数: {logged}．"),
     });
-    if let Some(last_bench) = records.iter().rev().find(|record| bench_identity(record).is_some()).and_then(record_date) {
+    if let Some(last_bench) = records.iter().rev().find(|record| is_benchmark(record)).and_then(record_date) {
         let days = (as_of - last_bench).num_days().max(0);
         let reminder = if days >= 7 {
             match lang {
@@ -584,6 +699,10 @@ pub fn session_axis_value(axis: SkillAxis, record: &SessionRecord, layout: &Keyb
 pub fn session_reach_ratio(record: &SessionRecord, layout: &KeyboardLayout, settings: AnalysisSettings) -> Option<f64> {
     let keyboard_geometry = geometry(&record.header.geometry).or_else(|| geometry("ansi"))?;
     let details = analyze_records(std::slice::from_ref(record), layout, &keyboard_geometry, settings);
+    reach_ratio(&details)
+}
+
+fn reach_ratio(details: &DetailedMetrics) -> Option<f64> {
     let home = details
         .rows
         .iter()
@@ -664,7 +783,11 @@ fn analysis_settings(config: &Config) -> AnalysisSettings {
 fn record_date(record: &SessionRecord) -> Option<NaiveDate> {
     DateTime::parse_from_rfc3339(&record.header.finished_at)
         .ok()
-        .map(|value| value.date_naive())
+        .map(|value| value.with_timezone(&Local).date_naive())
+}
+
+fn is_benchmark(record: &SessionRecord) -> bool {
+    bench_identity(record).is_some() || record.header.bench_id.as_deref().and_then(parse_v3_bench_id).is_some()
 }
 
 fn bench_part(record: &SessionRecord) -> Option<&str> {

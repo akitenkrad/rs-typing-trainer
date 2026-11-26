@@ -164,6 +164,51 @@ fn form_requires_three_hundred_prior_keys_and_half_transition_coverage() {
 }
 
 #[test]
+fn bench_v3_builds_the_same_difficulty_correction_form_as_v2() {
+    let start = Utc.with_ymd_and_hms(2026, 11, 20, 12, 0, 0).unwrap();
+    let layout = builtin_layout("qwerty").unwrap();
+    let keyboard = geometry("ansi").unwrap();
+    let options = ProgressOptions {
+        model: AnalysisSettings {
+            pause_ms: 2_000,
+            shrinkage_k: 10.0,
+            half_life_days: 14.0,
+        },
+        min_transition_n: 5,
+    };
+    let references = ReferencePrompts {
+        english: vec![ExpectedPrompt::english("zxy")],
+        japanese: Vec::new(),
+    };
+    let training = synthetic_record(1, start, &ascii_training(300), 1.0);
+    let mut v2 = synthetic_record(2, start + chrono::Duration::days(1), "abx", 1.0);
+    v2.header.mode = "bench".into();
+    v2.header.bench_id = Some("bench-v2/A/01".into());
+    let mut v3 = synthetic_record(3, start + chrono::Duration::days(2), "abx", 1.0);
+    v3.header.mode = "bench".into();
+    v3.header.bench_id = Some("bench-v3/EW/01".into());
+
+    let progress = analyze_progress(
+        &[training, v2, v3],
+        &layout,
+        &keyboard,
+        options,
+        start + chrono::Duration::days(3),
+        &references,
+    );
+
+    assert!(
+        progress.forms.iter().any(|form| form.session_id == Some(2)),
+        "v2 must keep producing a form"
+    );
+    assert!(
+        progress.forms.iter().any(|form| form.session_id == Some(3)),
+        "v3 must follow the same difficulty-correction rule as v2: {:?}",
+        progress.forms
+    );
+}
+
+#[test]
 fn transition_regression_requires_fifteen_percent_and_enough_data() {
     let best = transition("a", "b", 100.0, 10.0);
     let recent = transition("a", "b", 116.0, 10.0);
@@ -404,8 +449,14 @@ fn v3_record(id: i64, at: chrono::DateTime<Utc>, part: &str, form: u8, effective
 
 #[test]
 fn v3_daily_trend_has_language_priority_and_uses_same_day_run_median() {
-    let as_of = Utc.with_ymd_and_hms(2026, 11, 20, 12, 0, 0).unwrap();
-    let at = |day, hour| Utc.with_ymd_and_hms(2026, 11, day, hour, 0, 0).unwrap();
+    let at = |day, hour| {
+        chrono::Local
+            .with_ymd_and_hms(2026, 11, day, hour, 0, 0)
+            .single()
+            .unwrap()
+            .with_timezone(&Utc)
+    };
+    let as_of = at(20, 12);
     let mut old_en = synthetic_record(100, at(1, 12), "aaaa", 1.0);
     old_en.header.mode = "bench".into();
     old_en.header.bench_id = Some("bench-v2/A/01".into());

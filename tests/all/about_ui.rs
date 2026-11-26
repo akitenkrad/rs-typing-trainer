@@ -3,7 +3,7 @@ use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use rs_typing_trainer::app::Screen;
 use rs_typing_trainer::build_info;
-use rs_typing_trainer::config::Config;
+use rs_typing_trainer::config::{BenchSeries, Config};
 use rs_typing_trainer::i18n::Lang;
 use rs_typing_trainer::ui;
 
@@ -57,6 +57,8 @@ fn about_renders_version_catalogs_and_legal_metadata_at_both_sizes() {
                 env!("CARGO_PKG_REPOSITORY"),
                 "menu-v1",
                 "briefing-v1",
+                "grades-v1 / grades-v2",
+                "bench-v3",
             ] {
                 assert!(
                     output.contains(expected),
@@ -75,6 +77,17 @@ fn about_renders_version_catalogs_and_legal_metadata_at_both_sizes() {
             }
         }
     }
+}
+
+#[test]
+fn about_reports_the_configured_benchmark_series() {
+    let default_app = test_app(Config::default());
+    assert_eq!(ui::about::AboutInfo::from_app(&default_app).bench_series, "bench-v3");
+
+    let mut config = Config::default();
+    config.bench.series = BenchSeries::V2;
+    let v2_app = test_app(config);
+    assert_eq!(ui::about::AboutInfo::from_app(&v2_app).bench_series, "bench-v2");
 }
 
 #[test]

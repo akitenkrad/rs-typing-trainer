@@ -3,12 +3,23 @@ use std::time::{Duration, Instant};
 use chrono::NaiveDate;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use rs_typing_trainer::app::Screen;
-use rs_typing_trainer::config::{Config, DrillCell, DrillSkill, PromptUnit};
+use rs_typing_trainer::config::{BenchSeries, Config, DrillCell, DrillSkill, PromptUnit};
 
 use crate::common::{test_app, test_app_at};
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
+}
+
+#[test]
+fn benchmark_uses_v3_by_default_and_keeps_explicit_v2_available() {
+    let default = test_app(Config::default());
+    assert!(default.benchmark_series_v3());
+
+    let v2_config = Config::from_toml("[bench]\nseries = \"v2\"\n").unwrap();
+    assert_eq!(v2_config.bench.series, BenchSeries::V2);
+    let v2 = test_app(v2_config);
+    assert!(!v2.benchmark_series_v3());
 }
 
 #[test]

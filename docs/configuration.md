@@ -53,7 +53,7 @@ Every supported key is listed here. “Unset” means that the application deriv
 | `practice.core_ratio` | number | `0.65` | High-frequency share of a daily deck. |
 | `practice.weekly_theme` | boolean | `true` | Enable weekday themes. |
 | `practice.auto_difficulty` | boolean | `true` | Adjust the adaptive pacer and drill share from the median accuracy of the latest three adaptive sessions. |
-| `bench.series` | `v2` / `v3` | `"v2"` | Benchmark series started with `B`. `v3` enables the new six-part flow; the default remains `v2` until v3 analysis is available. |
+| `bench.series` | `v2` / `v3` | `"v3"` | Benchmark series started with `B`. The default `v3` uses the six-part flow; set `v2` explicitly to use the previous four-part flow. |
 | `analysis.pause_ms` | integer | `2000` | IKI gap treated as a pause. |
 | `analysis.shrinkage_k` | number | `10.0` | Transition/key shrinkage strength. |
 | `analysis.half_life_days` | number | `14.0` | Half-life for the recent transition model. |
@@ -108,4 +108,4 @@ languages = ["en", "ja"]
 
 `menu.minutes` is changed only in the file. Choosing a practice-menu language on the settings screen and saving writes `languages` to the `[menu]` section (choosing “Same as display” removes the key). The steps of a menu override other keys (mode, pacer, gate, preview and so on) for one session at a time and never write them back.
 
-The settings screen edits layout, input layout, geometry, keyboard visibility, keyboard appearance, prompt size, terminal graphics, language, practice-menu language, error mode, and result feedback while preserving comments and unrelated TOML keys. `bench.series` is changed only in the configuration file because it is a temporary migration choice while v3 analysis is being prepared. See [Training modes](modes.md), [Training tools](training.md), and [Keyboard layouts](keyboard.md) for behavior behind these values.
+The settings screen edits layout, input layout, geometry, keyboard visibility, keyboard appearance, prompt size, terminal graphics, language, practice-menu language, error mode, and result feedback while preserving comments and unrelated TOML keys. `bench.series` is changed only in the configuration file. See [Training modes](modes.md), [Training tools](training.md), and [Keyboard layouts](keyboard.md) for behavior behind these values.

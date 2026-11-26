@@ -120,13 +120,28 @@ fn render_v3_text(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             lang,
         )));
     }
-    lines.push(Line::from(Span::styled(
-        match lang {
-            Lang::En => "Grades will appear in the next update",
-            Lang::Ja => "段階は次の更新で表示",
-        },
-        Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
-    )));
+    for code in ["en", "ja"] {
+        let Some(grade) = app.bench_summary_grades.languages.iter().find(|grade| grade.language == code) else {
+            continue;
+        };
+        let language = match (code, lang) {
+            ("en", Lang::En) => "English",
+            ("en", Lang::Ja) => "英語",
+            ("ja", Lang::En) => "Japanese",
+            ("ja", Lang::Ja) => "日本語",
+            _ => unreachable!("fixed language code"),
+        };
+        let (value, style) = grade.overall.as_ref().map_or_else(
+            || ("—".to_owned(), Style::default().fg(theme.muted)),
+            |overall| {
+                (
+                    overall.grade.as_str().to_owned(),
+                    Style::default().fg(grade_color(overall.grade, theme)).add_modifier(Modifier::BOLD),
+                )
+            },
+        );
+        lines.push(Line::from(Span::styled(format!("{language} {value} ({})", grade.version), style)));
+    }
     frame.render_widget(Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: true }), left_inset(area));
 }
 

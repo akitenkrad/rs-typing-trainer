@@ -2330,10 +2330,7 @@ pub fn build_from_storage(
         .flat_map(|run| past_menus_from_run(&run))
         .collect::<Vec<_>>();
 
-    let records = db::load_records_filtered(path, None, None)?
-        .into_iter()
-        .filter(|record| !record.header.bench_id.as_deref().is_some_and(crate::bench::is_v3_bench_id))
-        .collect::<Vec<_>>();
+    let records = db::load_records_filtered(path, None, None)?;
     let layout = builtin_layout(&config.keyboard.layout).unwrap_or_else(|_| builtin_layout("qwerty").expect("bundled qwerty"));
     let keyboard_geometry = geometry(&config.keyboard.geometry).unwrap_or_else(|| geometry("ansi").expect("bundled ansi"));
     let corpus = DataCatalog::load(&crate::config::DataConfig::default(), home)?;
@@ -2468,12 +2465,22 @@ pub fn build_from_storage(
             let details = analyze_records(std::slice::from_ref(record), &layout, &keyboard_geometry, model);
             (details.reaction_median_ms > 0.0).then_some(details.reaction_median_ms)
         });
-        let last_bench_date = language_records
-            .iter()
-            .rev()
-            .find(|record| record.header.bench_id.is_some())
-            .and_then(|record| chrono::DateTime::parse_from_rfc3339(&record.header.started_at).ok())
-            .map(|time| time.date_naive());
+        let v3_group = match language {
+            "en" => crate::analysis::bench_v3::BenchV3Group::English,
+            "ja" => crate::analysis::bench_v3::BenchV3Group::Japanese,
+            _ => unreachable!("menu languages are validated"),
+        };
+        let last_bench_date = crate::analysis::bench_v3::compute_bench_v3_group_runs(&language_records, v3_group, config.analysis.pause_ms)
+            .last()
+            .map(|run| run.date)
+            .or_else(|| {
+                language_records
+                    .iter()
+                    .rev()
+                    .find(|record| record.header.bench_id.is_some() && !record.header.bench_id.as_deref().is_some_and(crate::bench::is_v3_bench_id))
+                    .and_then(|record| chrono::DateTime::parse_from_rfc3339(&record.header.started_at).ok())
+                    .map(|time| time.with_timezone(&chrono::Local).date_naive())
+            });
         inputs.push(MenuLanguageInput {
             input: MenuBuildInput {
                 as_of,
@@ -2625,7 +2632,7 @@ pub fn render_from_storage(
         output.push('\n');
         Ok(output)
     } else {
-        Ok(render_text(&menu, lang))
+        Ok(render_text(&menu, lang, config.bench.series))
     }
 }
 
@@ -2642,7 +2649,14 @@ pub fn minutes_label(menu: &DailyMenu, lang: Lang) -> String {
     }
 }
 
-fn render_text(menu: &DailyMenu, lang: Lang) -> String {
+pub fn benchmark_minutes(series: crate::config::BenchSeries) -> u8 {
+    match series {
+        crate::config::BenchSeries::V2 => 4,
+        crate::config::BenchSeries::V3 => 5,
+    }
+}
+
+fn render_text(menu: &DailyMenu, lang: Lang, series: crate::config::BenchSeries) -> String {
     use std::fmt::Write;
 
     let mut output = String::new();
@@ -2650,13 +2664,13 @@ fn render_text(menu: &DailyMenu, lang: Lang) -> String {
         Lang::En => {
             let _ = writeln!(output, "Today's practice menu — {}", minutes_label(menu, lang));
             if menu.bench_recommended {
-                let _ = writeln!(output, "Benchmark recommended first (about 4 minutes).");
+                let _ = writeln!(output, "Benchmark recommended first (about {} minutes).", benchmark_minutes(series));
             }
         }
         Lang::Ja => {
             let _ = writeln!(output, "今日の練習メニュー — {}", minutes_label(menu, lang));
             if menu.bench_recommended {
-                let _ = writeln!(output, "先にベンチ（約 4 分）を勧めます．");
+                let _ = writeln!(output, "先にベンチ（約 {} 分）を勧めます．", benchmark_minutes(series));
             }
         }
     }
@@ -2784,7 +2798,7 @@ mod tests {
             )],
         };
 
-        let output = render_text(&menu, Lang::En);
+        let output = render_text(&menu, Lang::En, crate::config::BenchSeries::V3);
         let headings = [
             "Drill:",
             "Purpose:",

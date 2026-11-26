@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, Local, NaiveDate, Utc};
 
 use crate::analysis::errors::post_error_detail;
 use crate::analysis::metrics::AnalysisSettings;
@@ -61,6 +61,24 @@ pub struct BenchV3GroupRun {
     pub date: NaiveDate,
     pub form: u8,
     pub metrics: BenchV3Metrics,
+}
+
+/// The identity of one bench-v3 run: the machine-local calendar day and the
+/// parallel form. Stored record timestamps are UTC, so grouping on their raw
+/// RFC3339 date would split runs around local midnight.
+pub fn bench_v3_run_key(record: &SessionRecord) -> Option<(NaiveDate, u8)> {
+    let (_, form) = record.header.bench_id.as_deref().and_then(parse_v3_bench_id)?;
+    let date = DateTime::parse_from_rfc3339(&record.header.finished_at)
+        .ok()?
+        .with_timezone(&Local)
+        .date_naive();
+    Some((date, form))
+}
+
+/// Stable chronological order for records and completed runs.
+pub fn bench_v3_record_order(record: &SessionRecord) -> Option<(DateTime<Utc>, i64)> {
+    let finished = DateTime::parse_from_rfc3339(&record.header.finished_at).ok()?.with_timezone(&Utc);
+    Some((finished, record.header.id.unwrap_or(i64::MIN)))
 }
 
 /// Measurement error estimated from split-half differences across runs.
@@ -155,31 +173,34 @@ pub fn compute_bench_v3_group_metrics(records: &[SessionRecord], group: BenchV3G
 pub fn compute_bench_v3_group_runs(records: &[SessionRecord], group: BenchV3Group, pause_ms: u64) -> Vec<BenchV3GroupRun> {
     let mut grouped = BTreeMap::<(NaiveDate, u8), Vec<SessionRecord>>::new();
     for record in records {
-        let Some((part, form)) = record.header.bench_id.as_deref().and_then(parse_v3_bench_id) else {
+        let Some((part, _)) = record.header.bench_id.as_deref().and_then(parse_v3_bench_id) else {
             continue;
         };
         if !group.parts().contains(&part) {
             continue;
         }
-        let Some(date) = DateTime::parse_from_rfc3339(&record.header.finished_at)
-            .ok()
-            .map(|time| time.date_naive())
-        else {
+        let Some((date, form)) = bench_v3_run_key(record) else {
             continue;
         };
         grouped.entry((date, form)).or_default().push(record.clone());
     }
-    grouped
+    let mut runs = grouped
         .into_iter()
         .filter_map(|((date, form), records)| {
             let summary = compute_bench_v3_group_metrics(&records, group, pause_ms)?;
-            (!summary.partial).then_some(BenchV3GroupRun {
-                date,
-                form,
-                metrics: summary.metrics,
-            })
+            let order = records.iter().filter_map(bench_v3_record_order).max()?;
+            (!summary.partial).then_some((
+                order,
+                BenchV3GroupRun {
+                    date,
+                    form,
+                    metrics: summary.metrics,
+                },
+            ))
         })
-        .collect()
+        .collect::<Vec<_>>();
+    runs.sort_by_key(|(order, _)| *order);
+    runs.into_iter().map(|(_, run)| run).collect()
 }
 
 /// Return the median at each run using that run and up to two preceding runs.
@@ -227,7 +248,7 @@ pub fn compute_bench_v3_part_reliability(records: &[SessionRecord], part: BenchV
         })
         .filter_map(|record| {
             let metrics = compute_bench_v3_metrics(std::slice::from_ref(record), pause_ms);
-            Some((record_order(record)?, metrics.half_a? - metrics.half_b?))
+            Some((bench_v3_record_order(record)?, metrics.half_a? - metrics.half_b?))
         })
         .collect::<Vec<_>>();
     rows.sort_by_key(|(order, _)| *order);
@@ -261,7 +282,7 @@ pub fn classify_bench_v3_change(delta_wpm: f64, mdc95_wpm: Option<f64>) -> Bench
 /// same bench-v3 part. Parallel-form numbers do not split the series.
 pub fn previous_effective_wpm_delta(records: &[SessionRecord], current: &SessionRecord, pause_ms: u64) -> Option<f64> {
     let (current_part, _) = current.header.bench_id.as_deref().and_then(parse_v3_bench_id)?;
-    let current_order = record_order(current)?;
+    let current_order = bench_v3_record_order(current)?;
     let previous = records
         .iter()
         .filter(|record| {
@@ -272,7 +293,7 @@ pub fn previous_effective_wpm_delta(records: &[SessionRecord], current: &Session
                 .and_then(parse_v3_bench_id)
                 .is_some_and(|(part, _)| part == current_part)
         })
-        .filter_map(|record| Some((record_order(record)?, record)))
+        .filter_map(|record| Some((bench_v3_record_order(record)?, record)))
         .filter(|(order, _)| *order < current_order)
         .max_by_key(|(order, _)| *order)
         .map(|(_, record)| record)?;
@@ -383,11 +404,6 @@ fn median(values: &[f64]) -> Option<f64> {
     } else {
         Some(values[middle])
     }
-}
-
-fn record_order(record: &SessionRecord) -> Option<(DateTime<Utc>, i64)> {
-    let finished = DateTime::parse_from_rfc3339(&record.header.finished_at).ok()?.with_timezone(&Utc);
-    Some((finished, record.header.id.unwrap_or(i64::MIN)))
 }
 
 #[cfg(test)]

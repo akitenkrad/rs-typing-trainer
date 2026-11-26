@@ -134,11 +134,11 @@ Number of samples behind a value: n= is counted, n≈ is an effective count.
 
 ### Grade (S–G)
 
-Aliases: S〜G, grades-v1
+Aliases: S〜G, grades-v1, grades-v2
 
 Absolute grade from G (lowest) to S (highest), per component and overall.
 
-Each grade also has a continuous score from 0 to 8. The thresholds are provisional and versioned (grades-v1).
+Each grade also has a continuous score from 0 to 8. The thresholds are provisional and versioned (grades-v1 and grades-v2); grades-v2 uses accuracy-adjusted speed for the speed component.
 
 ### Component
 
@@ -252,13 +252,13 @@ Aliases: ベンチマーク
 
 A fixed test taken under the same conditions each time, used as the yardstick for progress.
 
-### bench-v1 / bench-v2
+### bench-v1 / bench-v2 / bench-v3
 
-Versions of the benchmark. Results of different series are not compared directly.
+The three benchmark series. Results from bench-v1, bench-v2 and bench-v3 are not compared directly.
 
-### Parts A–D
+### Parts W / EW / ES / JW / JS / PW and A–D
 
-A: English words and phrases; B: pseudo-words; C: Japanese words and phrases; D: numbers and symbols (optional).
+bench-v3 uses W (warm-up), EW (English words), ES (English sentences), JW (Japanese words and phrases), JS (Japanese sentences) and PW (pseudo-words). bench-v1 and bench-v2 use parts A–D.
 
 ### Parallel form
 

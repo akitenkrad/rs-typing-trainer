@@ -61,12 +61,13 @@ pub fn render(frame: &mut Frame, app: &App) {
         (Lang::Ja, false) => format!("{minutes}・個別メニュー"),
     };
     let bench = if menu.bench_recommended {
+        let minutes = crate::practice::menu::benchmark_minutes(app.config.bench.series);
         match lang {
-            Lang::En => "Benchmark is recommended first (about 4 min).",
-            Lang::Ja => "先にベンチ（約 4 分）を勧めます．",
+            Lang::En => format!("Benchmark is recommended first (about {minutes} min)."),
+            Lang::Ja => format!("先にベンチ（約 {minutes} 分）を勧めます．"),
         }
     } else {
-        ""
+        String::new()
     };
     frame.render_widget(Paragraph::new(vec![Line::from(summary), Line::from(bench)]), left_inset(rows[0]));
 

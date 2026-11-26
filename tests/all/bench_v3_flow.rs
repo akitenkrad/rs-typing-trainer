@@ -228,7 +228,7 @@ fn v3_runs_warmup_then_five_scored_parts_with_fixed_conditions_and_restores_conf
     }
     let summary = render(&app);
     assert!(summary.contains("measurement error"), "{summary}");
-    assert!(summary.contains("Grades will appear in the next update"), "{summary}");
+    assert!(summary.contains("grades-v2"), "{summary}");
     assert!(!summary.contains("v3 analysis is coming soon"), "{summary}");
     for part in [
         "English words",
@@ -350,7 +350,7 @@ fn v3_records_keep_v2_as_a_previous_trend_series_and_remain_in_history() {
 }
 
 #[test]
-fn analysis_keeps_v3_records_available_without_feeding_the_legacy_summary() {
+fn incomplete_v3_run_stays_available_without_fabricating_complete_language_analysis() {
     let date = chrono::NaiveDate::from_ymd_opt(2026, 11, 26).unwrap();
     let mut app = test_app_at(v3_config(), date);
     db::save(&app.db_path(), &record(26, "bench-v3/EW/04", 55.0)).unwrap();
@@ -361,17 +361,17 @@ fn analysis_keeps_v3_records_available_without_feeding_the_legacy_summary() {
         app.analysis_records
             .iter()
             .any(|row| row.header.bench_id.as_deref() == Some("bench-v3/EW/04")),
-        "the analysis tabs need the v3 record for progress and benchmark views"
+        "the analysis tabs need the partial v3 record"
     );
     assert!(
         rs_typing_trainer::analysis::summary::skill_axis_values(&app.analysis_records, app.practice_layout(), &app.config)
             .iter()
             .all(|axis| axis.raw.is_none()),
-        "phase 4a must not feed v3 into the eight axes"
+        "a lone EW part is not a complete English v3 run"
     );
     assert!(
         app.analysis_coach.as_ref().is_some_and(|report| report.grades.languages.is_empty()),
-        "phase 4a must not feed v3 into grades"
+        "a lone EW part without practice data cannot produce a language grade"
     );
 }
 
@@ -475,6 +475,22 @@ fn v3_summary_shows_parts_language_rollups_and_error_guidance_at_reference_sizes
             part_started += Duration::from_secs(duration + 5);
         }
         assert_eq!(app.screen, Screen::BenchSummary);
+        for language in ["en", "ja"] {
+            let grade = app
+                .bench_summary_grades
+                .languages
+                .iter()
+                .find(|grade| grade.language == language)
+                .expect("a complete v3 language run has a grade");
+            assert_eq!(grade.version, "grades-v2");
+            assert!(grade.overall.is_some(), "{language}: {grade:?}");
+        }
+        let records = db::load_records_filtered(&app.db_path(), None, Some("bench")).unwrap();
+        let axes = rs_typing_trainer::analysis::summary::skill_axis_values(&records, app.practice_layout(), &app.config);
+        assert!(
+            axes.iter().any(|axis| axis.raw.is_some()),
+            "a complete v3 run feeds the eight axes: {axes:?}"
+        );
 
         let expected = match lang {
             rs_typing_trainer::i18n::Lang::En => [
@@ -487,7 +503,7 @@ fn v3_summary_shows_parts_language_rollups_and_error_guidance_at_reference_sizes
                 "Japanese total",
                 "Transitions",
                 "measurement error",
-                "Grades will appear in the next update",
+                "grades-v2",
             ],
             rs_typing_trainer::i18n::Lang::Ja => [
                 "英単語",
@@ -499,7 +515,7 @@ fn v3_summary_shows_parts_language_rollups_and_error_guidance_at_reference_sizes
                 "日本語",
                 "移り変わり",
                 "この物差しの誤差",
-                "段階は次の更新で表示",
+                "grades-v2",
             ],
         };
         for (width, height) in [(80, 24), (120, 40)] {
@@ -515,6 +531,7 @@ fn v3_summary_shows_parts_language_rollups_and_error_guidance_at_reference_sizes
             }
         }
         let output = render_size(&app, 80, 24);
+        assert!(!output.contains("next update") && !output.contains("次の更新"), "{output}");
 
         // The heading and the five part rows are right-aligned columns, so
         // they end in the same terminal cell. Full-width headings (主 WPM,

@@ -22,9 +22,10 @@ use rs_typing_trainer::ui;
 use rs_typing_trainer::ui::analysis_image::{
     AnalysisImageCache, ComparisonBarsSpec, FORECAST_EN_COLOR, FingerChartSpec, GradeBadgeSpec, GradeLadderSpec, MetricKind, PixelPoint, RadarAxis,
     RadarChartSpec, RadarRing, SERIES_COLORS, SkillChartSpec, SparklineSpec, TransitionArrowSpec, TransitionBar, TransitionBarsSpec,
-    TransitionKeyboardSpec, TrendChartSpec, TrendDateRange, TrendForecast, TrendPoint, TrendSeries, build_finger_bars, build_trend_data,
-    radar_label_layout, render_comparison_bars, render_finger_chart, render_grade_badge, render_grade_ladder, render_radar_chart, render_skill_chart,
-    render_sparkline, render_transition_arrow, render_transition_bars, render_trend_chart, render_trend_chart_with_range, shared_trend_date_range,
+    TransitionKeyboardSpec, TrendChartSpec, TrendDateRange, TrendForecast, TrendPoint, TrendSeries, TrialChartSpec, build_finger_bars,
+    build_trend_data, radar_label_layout, render_comparison_bars, render_finger_chart, render_grade_badge, render_grade_ladder, render_radar_chart,
+    render_skill_chart, render_sparkline, render_transition_arrow, render_transition_bars, render_trend_chart, render_trend_chart_with_range,
+    render_trial_chart, shared_trend_date_range,
 };
 use rs_typing_trainer::ui::bigtext_image::resolve_big_font;
 use rs_typing_trainer::ui::keyboard::{KeyboardState, KeyboardView, keycap_center_cells, keycap_tile_placements};
@@ -605,6 +606,33 @@ fn sparkline_emphasises_its_last_point() {
 }
 
 #[test]
+fn trial_chart_draws_faint_raw_attempts_and_a_separate_rolling_three_mainline() {
+    let spec = TrialChartSpec {
+        raw_values: vec![10.0, 90.0, 30.0, 70.0],
+        values: vec![10.0, 50.0, 30.0, 70.0],
+        color: Color::Cyan,
+        cells: Size::new(24, 3),
+    };
+
+    let image = render_trial_chart(CellPixels::new(10, 20), &spec).unwrap();
+    let color = rgba(spec.color);
+    let alpha_levels = image
+        .pixels()
+        .filter(|pixel| same_rgb_with_rounding(pixel.0, color))
+        .map(|pixel| pixel.0[3])
+        .collect::<std::collections::BTreeSet<_>>();
+
+    assert!(
+        alpha_levels.iter().any(|alpha| *alpha < 200),
+        "raw attempts are not faint: {alpha_levels:?}"
+    );
+    assert!(
+        alpha_levels.iter().any(|alpha| *alpha >= 240),
+        "rolling mainline is not prominent: {alpha_levels:?}"
+    );
+}
+
+#[test]
 fn radar_cache_reuses_equal_input_and_invalidates_one_changed_value() {
     let font = resolve_big_font("biz-ud-gothic", Path::new("/unused"));
     let mut cache = AnalysisImageCache::new();
@@ -808,6 +836,38 @@ fn v3_chart_record(day: u32, part: &str, form: u8, wpm: f64) -> SessionRecord {
     row.header.mode = "bench".into();
     row.header.bench_id = Some(format!("bench-v3/{part}/{form:02}"));
     row
+}
+
+#[test]
+fn image_bench_v3_draws_trial_order_charts_at_supported_terminal_sizes_in_both_languages() {
+    for lang in [Lang::En, Lang::Ja] {
+        let mut config = Config::default();
+        config.general.lang = lang;
+        let mut app = common::test_app(config);
+        app.handle_key(ratatui::crossterm::event::KeyEvent::new(
+            ratatui::crossterm::event::KeyCode::Char('a'),
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        ));
+        app.analysis_tab = rs_typing_trainer::app::ANALYSIS_BENCH_TAB;
+        app.analysis_records = (1..=3)
+            .flat_map(|day| ["EW", "ES", "JW", "JS", "PW"].map(|part| v3_chart_record(day, part, day as u8, 30.0 + f64::from(day) * 10.0)))
+            .collect();
+        app.set_graphics_detection(detection());
+
+        for (width, height) in [(80, 24), (120, 40)] {
+            let buffer = render_buffer_size(&app, width, height);
+            let text = buffer.content().iter().map(|cell| cell.symbol()).collect::<String>();
+            let images = buffer.content().iter().filter_map(|cell| kitty_rgba(cell.symbol())).collect::<Vec<_>>();
+            assert!(!images.is_empty(), "{width}x{height}, {lang:?}: no v3 charts\n{text}");
+            let expected = match lang {
+                Lang::En => "English words",
+                Lang::Ja => "英単語",
+            };
+            let compact = text.chars().filter(|character| !character.is_whitespace()).collect::<String>();
+            let expected = expected.chars().filter(|character| !character.is_whitespace()).collect::<String>();
+            assert!(compact.contains(&expected), "{width}x{height}, {lang:?}:\n{text}");
+        }
+    }
 }
 
 #[test]

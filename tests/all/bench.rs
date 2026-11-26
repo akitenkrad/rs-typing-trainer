@@ -15,7 +15,7 @@ use rs_typing_trainer::bench::{
     BENCH_SERIES_V2, BenchComparison, BenchPart, BenchResultSummary, BenchSettings, V2_SELECTION_RULE, generate_parallel_versions,
     generate_parallel_versions_for_series, next_parallel_index,
 };
-use rs_typing_trainer::config::{Config, DataConfig, ErrorMode, ModeKind};
+use rs_typing_trainer::config::{BenchSeries, Config, DataConfig, ErrorMode, ModeKind};
 use rs_typing_trainer::data::DataCatalog;
 use rs_typing_trainer::engine::item::Item;
 use rs_typing_trainer::engine::session::Session;
@@ -99,6 +99,12 @@ fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
 }
 
+fn v2_config() -> Config {
+    let mut config = Config::default();
+    config.bench.series = BenchSeries::V2;
+    config
+}
+
 fn render(app: &rs_typing_trainer::app::App) -> String {
     render_size(app, 100, 24)
 }
@@ -117,7 +123,7 @@ fn render_size(app: &rs_typing_trainer::app::App, width: u16, height: u16) -> St
 }
 
 fn summary_app(lang: Lang, graphics: GraphicsMode) -> common::TestApp {
-    let mut config = Config::default();
+    let mut config = v2_config();
     config.general.lang = lang;
     let mut app = test_app(config);
     app.screen = Screen::BenchSummary;
@@ -594,7 +600,7 @@ fn benchmark_result_names_part_version_comparisons_and_next_part() {
     let path = directory.path().join("sessions.db");
     save_bench_record(&path, "bench-v2/A/01", 40.0, 0.90, 1);
     save_bench_record(&path, "bench-v2/A/02", 50.0, 0.95, 2);
-    let mut config = Config::default();
+    let mut config = v2_config();
     config.general.lang = Lang::Ja;
     config.storage.db_path = Some(path.clone());
     let mut app = test_app(config.clone());
@@ -697,7 +703,7 @@ fn benchmark_summary_comparison_uses_v1_for_previous_b_but_not_a() {
 
 #[test]
 fn completing_last_required_part_opens_benchmark_summary() {
-    let mut config = Config::default();
+    let mut config = v2_config();
     config.general.lang = Lang::Ja;
     let mut app = test_app(config);
     let started = Instant::now();
@@ -926,7 +932,7 @@ fn rich_benchmark_summary_uses_vertical_space_for_trends_without_starving_analys
 
 #[test]
 fn escape_from_benchmark_result_returns_to_title_without_quitting_and_keeps_completed_part() {
-    let mut app = test_app(Config::default());
+    let mut app = test_app(v2_config());
     let started = Instant::now();
     app.handle_key_at(key(KeyCode::Char('b')), started);
     app.handle_key_at(key(KeyCode::Enter), started);
@@ -948,7 +954,7 @@ fn escape_from_benchmark_result_returns_to_title_without_quitting_and_keeps_comp
 
 #[test]
 fn benchmark_result_disables_history_and_quit_and_requires_confirmed_escape() {
-    let mut config = Config::default();
+    let mut config = v2_config();
     config.session.duration_seconds = 17;
     config.session.item_timeout_seconds = 4;
     config.session.error_mode = ErrorMode::Advance;
@@ -985,7 +991,7 @@ fn benchmark_result_disables_history_and_quit_and_requires_confirmed_escape() {
 
 #[test]
 fn benchmark_summary_ignores_enter_and_escape_during_result_delay() {
-    let mut config = Config::default();
+    let mut config = v2_config();
     config.session.duration_seconds = 17;
     config.mode.kind = ModeKind::Sentence;
     let mut app = test_app(config);
@@ -1017,7 +1023,7 @@ fn benchmark_selection_offers_resume_from_first_missing_part_of_latest_form_toda
     let directory = TempDir::new().unwrap();
     let path = directory.path().join("sessions.db");
     save_bench_record(&path, "bench-v2/A/03", 40.0, 0.90, 14);
-    let mut config = Config::default();
+    let mut config = v2_config();
     config.general.lang = Lang::Ja;
     config.storage.db_path = Some(path);
     let today = chrono::NaiveDate::from_ymd_opt(2026, 11, 14).unwrap();
@@ -1041,7 +1047,7 @@ fn benchmark_selection_does_not_offer_resume_for_complete_or_old_forms() {
     for part in ['A', 'B', 'C'] {
         save_bench_record(&complete_path, &format!("bench-v2/{part}/03"), 40.0, 0.90, 14);
     }
-    let mut complete_config = Config::default();
+    let mut complete_config = v2_config();
     complete_config.storage.db_path = Some(complete_path);
     let mut complete = test_app_at(complete_config, today);
     complete.handle_key(key(KeyCode::Char('b')));
@@ -1050,7 +1056,7 @@ fn benchmark_selection_does_not_offer_resume_for_complete_or_old_forms() {
     let old_directory = TempDir::new().unwrap();
     let old_path = old_directory.path().join("sessions.db");
     save_bench_record(&old_path, "bench-v1/A/03", 40.0, 0.90, 13);
-    let mut old_config = Config::default();
+    let mut old_config = v2_config();
     old_config.storage.db_path = Some(old_path);
     let mut old = test_app_at(old_config, today);
     old.handle_key(key(KeyCode::Char('b')));
@@ -1064,7 +1070,7 @@ fn resumed_benchmark_summary_includes_parts_completed_earlier_today() {
     // Parts B and C are saved with the wall clock, so part A must be on the same local day.
     let today = chrono::Local::now().date_naive();
     save_bench_record_on_local_date(&path, "bench-v2/A/03", 40.0, 0.90, today);
-    let mut config = Config::default();
+    let mut config = v2_config();
     config.storage.db_path = Some(path);
     let mut app = test_app_at(config, today);
     let started = Instant::now();
@@ -1128,7 +1134,7 @@ fn title_starts_a_fixed_benchmark_session() {
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use std::time::{Duration, Instant};
 
-    let mut config = Config::default();
+    let mut config = v2_config();
     config.session.duration_seconds = 12;
     config.session.item_timeout_seconds = 3;
     config.session.error_mode = ErrorMode::Advance;
@@ -1166,7 +1172,7 @@ fn title_starts_a_fixed_benchmark_session() {
 /// Japanese; the saved record says so.
 #[test]
 fn a_benchmark_part_records_its_own_language_not_the_practice_language() {
-    let mut config = Config::default();
+    let mut config = v2_config();
     config.mode.sentence.lang = "ja".to_owned();
     let date = chrono::NaiveDate::from_ymd_opt(2026, 11, 20).unwrap();
     let mut app = test_app_at(config, date);

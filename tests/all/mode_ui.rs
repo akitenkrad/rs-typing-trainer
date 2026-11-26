@@ -7,7 +7,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use rs_typing_trainer::app::{App, Screen};
-use rs_typing_trainer::config::{Config, ModeKind};
+use rs_typing_trainer::config::{BenchSeries, Config, ModeKind};
 use rs_typing_trainer::engine::session::SessionPhase;
 use rs_typing_trainer::i18n::Lang;
 use rs_typing_trainer::ui;
@@ -174,7 +174,9 @@ fn phrase_mode_is_shown_and_language_and_course_can_be_changed() {
 
 #[test]
 fn benchmark_selection_uses_arrows_and_enter_for_part_d() {
-    let mut app = test_app(Config::default());
+    let mut config = Config::default();
+    config.bench.series = BenchSeries::V2;
+    let mut app = test_app(config);
     app.handle_key(key(KeyCode::Char('b')));
     assert_eq!(app.screen, Screen::BenchSelect);
 

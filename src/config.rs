@@ -468,8 +468,8 @@ pub struct PracticeConfig {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BenchSeries {
-    #[default]
     V2,
+    #[default]
     V3,
 }
 
@@ -1506,6 +1506,11 @@ mod tests {
     fn default_config_validates() {
         let c = Config::default();
         c.validate().unwrap();
+    }
+
+    #[test]
+    fn benchmark_series_defaults_to_v3() {
+        assert_eq!(BenchConfig::default().series, BenchSeries::V3);
     }
 
     #[test]

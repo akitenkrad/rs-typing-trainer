@@ -5,7 +5,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use rs_typing_trainer::app::Screen;
-use rs_typing_trainer::config::{Config, ModeKind};
+use rs_typing_trainer::config::{BenchSeries, Config, ModeKind};
 use rs_typing_trainer::engine::item::Item;
 use rs_typing_trainer::engine::session::Session;
 use rs_typing_trainer::practice::menu::{AdvanceOutcome, bundled_catalog, evaluate_current_advance};
@@ -78,6 +78,25 @@ fn menu_screen_fits_at_80_by_24_and_shows_rows_and_selected_details() {
     }
     assert_eq!(rows.iter().filter(|row| row.contains('▶')).count(), 1, "{text}");
     assert_eq!(rows.iter().filter(|row| row.contains("[Enter] Start")).count(), 1, "{text}");
+}
+
+#[test]
+fn benchmark_recommendation_uses_the_configured_series_duration() {
+    let date = chrono::NaiveDate::from_ymd_opt(2026, 11, 18).unwrap();
+    let mut default_app = test_app_at(base_config(), date);
+    open_menu(&mut default_app, Instant::now());
+    let default_text = render(&default_app, 80, 24).join("\n");
+    assert!(
+        default_text.contains("about 5 min"),
+        "the default v3 flow is about five minutes:\n{default_text}"
+    );
+
+    let mut v2_config = base_config();
+    v2_config.bench.series = BenchSeries::V2;
+    let mut v2_app = test_app_at(v2_config, date);
+    open_menu(&mut v2_app, Instant::now());
+    let v2_text = render(&v2_app, 80, 24).join("\n");
+    assert!(v2_text.contains("about 4 min"), "an explicit v2 flow keeps its old duration:\n{v2_text}");
 }
 
 #[test]

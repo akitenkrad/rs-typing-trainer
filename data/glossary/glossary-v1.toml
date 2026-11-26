@@ -187,9 +187,9 @@ screens = ["analysis.coach", "analysis.transitions"]
 id = "grade"
 category = "analysis"
 term = { en = "Grade (S–G)", ja = "段階（S〜G）" }
-aliases = ["S〜G", "grades-v1"]
+aliases = ["S〜G", "grades-v1", "grades-v2"]
 short = { en = "Absolute grade from G (lowest) to S (highest), per component and overall.", ja = "G（いちばん下）から S（いちばん上）までの絶対的な段階．構成ごとと総合" }
-detail = { en = "Each grade also has a continuous score from 0 to 8. The thresholds are provisional and versioned (grades-v1).", ja = "各段階は 0〜8 の連続値も持ちます．基準値は暫定で，版（grades-v1）を付けて管理します．" }
+detail = { en = "Each grade also has a continuous score from 0 to 8. The thresholds are provisional and versioned (grades-v1 and grades-v2); grades-v2 uses accuracy-adjusted speed for the speed component.", ja = "各段階は 0〜8 の連続値も持ちます．基準値は暫定で，版（grades-v1 と grades-v2）を付けて管理します．grades-v2 は速さに正確さを含む速さを使います．" }
 screens = ["analysis.coach", "analysis.skills", "analysis.bench", "bench"]
 
 [[term]]
@@ -354,15 +354,15 @@ screens = ["bench", "analysis.bench", "analysis.growth", "analysis.coach", "hist
 [[term]]
 id = "bench-series"
 category = "bench"
-term = { en = "bench-v1 / bench-v2", ja = "bench-v1 / bench-v2" }
-short = { en = "Versions of the benchmark. Results of different series are not compared directly.", ja = "ベンチの版（系列）．違う系列の結果は直接比べない" }
+term = { en = "bench-v1 / bench-v2 / bench-v3", ja = "bench-v1 / bench-v2 / bench-v3" }
+short = { en = "The three benchmark series. Results from bench-v1, bench-v2 and bench-v3 are not compared directly.", ja = "ベンチの 3 つの版（系列）．bench-v1，bench-v2，bench-v3 の結果は直接比べない" }
 screens = ["analysis.bench", "history", "bench"]
 
 [[term]]
 id = "bench-part"
 category = "bench"
-term = { en = "Parts A–D", ja = "パート A〜D" }
-short = { en = "A: English words and phrases; B: pseudo-words; C: Japanese words and phrases; D: numbers and symbols (optional).", ja = "A は英単語と句，B は擬似語，C は日本語の単語と句，D は数字と記号（任意）" }
+term = { en = "Parts W / EW / ES / JW / JS / PW and A–D", ja = "パート W・EW・ES・JW・JS・PW と A〜D" }
+short = { en = "bench-v3 uses W (warm-up), EW (English words), ES (English sentences), JW (Japanese words and phrases), JS (Japanese sentences) and PW (pseudo-words). bench-v1 and bench-v2 use parts A–D.", ja = "bench-v3 は W（準備運動），EW（英単語），ES（英文），JW（日本語の単語と句），JS（日本語の短文），PW（擬似語）の 6 パート．bench-v1 と bench-v2 はパート A〜D を使う" }
 screens = ["bench", "analysis.bench", "analysis.growth", "history"]
 
 [[term]]

@@ -973,20 +973,65 @@ fn seed_practice(store: &Store, today: NaiveDate, languages: &[&str]) {
 }
 
 #[test]
-fn bench_v3_records_do_not_change_practice_menu_generation() {
+fn complete_v3_grade_selects_the_practice_menus_primary_prescription() {
     let today = day(10);
     let baseline = Store::new();
     let with_v3 = Store::new();
     seed_practice(&baseline, today, &["en"]);
     seed_practice(&with_v3, today, &["en"]);
-    let mut v3 = session(today - chrono::Duration::days(1), 18, "en", 200.0, 500);
-    v3.header.mode = "bench".into();
-    v3.header.bench_id = Some("bench-v3/EW/01".into());
-    saved(&with_v3.path, v3);
+    for (hour, part) in [(18, "EW"), (19, "ES")] {
+        let mut v3 = session(today - chrono::Duration::days(1), hour, "en", 50.0, 500);
+        v3.header.mode = "bench".into();
+        v3.header.bench_id = Some(format!("bench-v3/{part}/01"));
+        for key in v3.log.keystrokes.iter_mut().step_by(5) {
+            key.correct = false;
+            key.typed = Some("x".into());
+        }
+        v3.header.accuracy = 0.80;
+        v3.header.mistypes_total = 100;
+        saved(&with_v3.path, v3);
+    }
 
     let baseline_menu = build_from_storage(&baseline.path, baseline.directory.path(), &baseline.config, Lang::En, today).unwrap();
     let v3_menu = build_from_storage(&with_v3.path, with_v3.directory.path(), &with_v3.config, Lang::En, today).unwrap();
-    assert_eq!(serde_json::to_value(v3_menu).unwrap(), serde_json::to_value(baseline_menu).unwrap());
+    let primary_id = |menu: &DailyMenu| {
+        menu.steps
+            .iter()
+            .find(|step| step.role == MenuRole::PrimaryA)
+            .map(|step| step.prescription_id.clone())
+            .expect("primary A")
+    };
+    assert_ne!(
+        primary_id(&baseline_menu),
+        "accuracy.gate",
+        "the practice-only baseline should not force accuracy"
+    );
+    assert_eq!(
+        primary_id(&v3_menu),
+        "accuracy.gate",
+        "the v3 grades-v2 weakness must choose the primary prescription"
+    );
+    assert!(baseline_menu.bench_recommended, "practice-only history still needs a benchmark");
+    assert!(
+        !v3_menu.bench_recommended,
+        "a complete v3 language run satisfies the unchanged seven-day reminder"
+    );
+}
+
+#[test]
+fn v3_warmup_or_partial_language_run_does_not_satisfy_the_benchmark_reminder() {
+    let today = day(10);
+    let store = Store::new();
+    seed_practice(&store, today, &["en"]);
+    for (hour, part) in [(18, "W"), (19, "EW")] {
+        let mut record = session(today - chrono::Duration::days(1), hour, "en", 50.0, 200);
+        record.header.mode = "bench".into();
+        record.header.bench_id = Some(format!("bench-v3/{part}/01"));
+        saved(&store.path, record);
+    }
+
+    let menu = build_from_storage(&store.path, store.directory.path(), &store.config, Lang::En, today).unwrap();
+    assert!(menu.bench_recommended, "W and EW without ES are not a complete English measurement");
 }
 
 fn store_past_run(store: &Store, menu: &DailyMenu, date: NaiveDate, key: &str, edit: impl FnOnce(&mut DailyMenu)) {

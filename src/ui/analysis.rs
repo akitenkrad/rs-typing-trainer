@@ -11,7 +11,7 @@ use ratatui::widgets::{Axis, Block, Borders, Chart, Clear, Dataset, GraphType, P
 use ratatui_image::Image;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::analysis::bench_v3::BenchV3Group;
+use crate::analysis::bench_v3::{BenchV3Group, bench_v3_record_order, bench_v3_run_key};
 use crate::analysis::growth::BenchV3GrowthTarget;
 use crate::app::{AnalysisPeriod, App};
 use crate::bench::{BENCH_SERIES_V2, BenchPart, BenchV3Part, is_preferred_bench_series, parse_bench_id, preferred_bench_series};
@@ -21,8 +21,8 @@ use crate::layout::geometry::geometry;
 use crate::ui::analysis_image::{
     ComparisonBarsSpec, FORECAST_EN_COLOR, FORECAST_JA_COLOR, FingerChartSpec, GradeLadderSpec, MetricKind, PixelPoint, RadarAxis, RadarChartSpec,
     RadarRing, SERIES_COLORS, SparklineSpec, TREND_BREAK_WIDTH_DAYS, TREND_TICK_LABEL_WIDTH, TextTrendData, TransitionArrowSpec, TransitionBar,
-    TransitionBarsSpec, TransitionKeyboardSpec, TrendAxis, TrendChartSpec, TrendForecast, TrendPoint, build_finger_bars, build_text_trend_data,
-    build_trend_data, metric_value, mode_label, shared_trend_axis, trend_date_label, trend_tick_candidates,
+    TransitionBarsSpec, TransitionKeyboardSpec, TrendAxis, TrendChartSpec, TrendForecast, TrendPoint, TrialChartSpec, build_finger_bars,
+    build_text_trend_data, build_trend_data, metric_value, mode_label, shared_trend_axis, trend_date_label, trend_tick_candidates,
 };
 use crate::ui::keyboard::{
     KeyboardState, KeyboardStyle, KeyboardView, finger_color, heatmap_color, keycap_center_cells, keycap_image_area, keycap_tile_placements,
@@ -2313,7 +2313,9 @@ fn render_bench(frame: &mut Frame, app: &App, area: Rect) {
             Lang::En => "bench-v3 / accuracy-adjusted speed",
             Lang::Ja => "bench-v3／正確さを含む速さ",
         };
-        frame.render_widget(Paragraph::new(bench_v3_text_lines(app, lang)).block(Block::default().title(title)), area);
+        let (lines, charts) = bench_v3_content(app, lang);
+        frame.render_widget(Paragraph::new(lines).block(Block::default().title(title)), area);
+        render_bench_v3_images(frame, app, area, &charts);
         return;
     }
     let lines = bench_text_lines(app, lang);
@@ -2323,20 +2325,23 @@ fn render_bench(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Paragraph::new(lines).block(Block::default().title(Msg::BenchEightAxes.text(lang))), area);
 }
 
-fn bench_v3_text_lines(app: &App, lang: Lang) -> Vec<Line<'static>> {
+fn bench_v3_content(app: &App, lang: Lang) -> (Vec<Line<'static>>, Vec<(usize, Vec<f64>)>) {
     let mut lines = vec![Line::from(match lang {
         Lang::En => "Parts (effective WPM, attempts in order)",
         Lang::Ja => "各パート（正確さを含む WPM，試行順）",
     })];
+    let mut charts = Vec::new();
     for part in [BenchV3Part::EW, BenchV3Part::ES, BenchV3Part::JW, BenchV3Part::JS, BenchV3Part::PW] {
         let values = bench_v3_part_values(app, part);
         if values.is_empty() {
             continue;
         }
+        charts.push((lines.len(), values.clone()));
         lines.push(Line::from(format!(
-            "{}: {} WPM",
+            "{}: {} WPM  {}",
             crate::ui::bench_summary::v3_part_label(part, lang),
-            bench_v3_trajectory(&values)
+            bench_v3_first_latest(&values),
+            bench_v3_text_figure(&values)
         )));
     }
     lines.push(Line::from(""));
@@ -2354,19 +2359,19 @@ fn bench_v3_text_lines(app: &App, lang: Lang) -> Vec<Line<'static>> {
             .last()
             .map(|pair| bench_v3_change_label(pair[1] - pair[0], reliability.map(|value| value.mdc95_wpm), lang));
         let partial = values.last().is_some_and(|(_, partial)| *partial);
+        charts.push((lines.len(), speeds.clone()));
         lines.push(Line::from(format!(
-            "{label}: {} WPM{}{}",
+            "{label}: {} WPM{}{}  {}",
             bench_v3_first_latest(&speeds),
             match (partial, lang) {
                 (true, Lang::En) => " (partial parts)",
                 (true, Lang::Ja) => "（一部のパートのみ）",
                 (false, _) => "",
             },
-            change.map_or_else(String::new, |value| format!(" · {value}"))
+            change.map_or_else(String::new, |value| format!(" · {value}")),
+            bench_v3_text_figure(&speeds)
         )));
-        if group != BenchV3Group::Transition {
-            lines.push(Line::from(bench_v3_reliability_line(label, reliability, complete_runs, lang)));
-        }
+        lines.push(Line::from(bench_v3_reliability_line(label, reliability, complete_runs, lang)));
     }
 
     let previous = bench_v2_compact_lines(app);
@@ -2378,7 +2383,43 @@ fn bench_v3_text_lines(app: &App, lang: Lang) -> Vec<Line<'static>> {
         }));
         lines.extend(previous.into_iter().map(Line::from));
     }
-    lines
+    (lines, charts)
+}
+
+fn render_bench_v3_images(frame: &mut Frame, app: &App, area: Rect, charts: &[(usize, Vec<f64>)]) {
+    if app.graphics.mode == GraphicsMode::Off || app.graphics.cell_pixels.is_none() || area.width < 54 || charts.is_empty() {
+        return;
+    }
+    let chart_width = (area.width / 3).clamp(18, 34);
+    let specs = charts
+        .iter()
+        .enumerate()
+        .filter_map(|(index, (row, values))| {
+            let y = area.y.saturating_add(*row as u16);
+            (y < area.y.saturating_add(area.height)).then(|| {
+                let chart_area = Rect::new(area.x + area.width - chart_width, y, chart_width, 1);
+                (
+                    chart_area,
+                    TrialChartSpec {
+                        raw_values: values.clone(),
+                        values: crate::analysis::bench_v3::rolling_median_3(values),
+                        color: SERIES_COLORS[index % SERIES_COLORS.len()],
+                        cells: chart_area.as_size(),
+                    },
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    let mut images = app.analysis_images.borrow_mut();
+    if specs.iter().any(|(_, spec)| images.prepare_trial_chart(&app.graphics, spec).is_err()) {
+        return;
+    }
+    for (chart_area, spec) in &specs {
+        let Some(protocol) = images.trial_chart_protocol(&app.graphics, spec) else {
+            return;
+        };
+        frame.render_widget(Image::new(protocol), *chart_area);
+    }
 }
 
 fn bench_v3_part_values(app: &App, part: BenchV3Part) -> Vec<f64> {
@@ -2412,30 +2453,27 @@ fn bench_v3_part_values(app: &App, part: BenchV3Part) -> Vec<f64> {
 fn bench_v3_group_values(app: &App, group: BenchV3Group) -> Vec<(f64, bool)> {
     let mut runs = BTreeMap::<(NaiveDate, u8), Vec<crate::record::SessionRecord>>::new();
     for record in &app.analysis_records {
-        let Some((part, form)) = record.header.bench_id.as_deref().and_then(crate::bench::parse_v3_bench_id) else {
+        let Some((part, _)) = record.header.bench_id.as_deref().and_then(crate::bench::parse_v3_bench_id) else {
             continue;
         };
         if !group.parts().contains(&part) {
             continue;
         }
-        let Some(date) = chrono::DateTime::parse_from_rfc3339(&record.header.finished_at)
-            .ok()
-            .map(|finished| finished.date_naive())
-        else {
+        let Some((date, form)) = bench_v3_run_key(record) else {
             continue;
         };
         runs.entry((date, form)).or_default().push(record.clone());
     }
-    runs.into_values()
+    let mut values = runs
+        .into_values()
         .filter_map(|records| {
+            let order = records.iter().filter_map(bench_v3_record_order).max()?;
             let summary = crate::analysis::bench_v3::compute_bench_v3_group_metrics(&records, group, app.config.analysis.pause_ms)?;
-            Some((summary.metrics.effective_wpm?, summary.partial))
+            Some((order, summary.metrics.effective_wpm?, summary.partial))
         })
-        .collect()
-}
-
-fn bench_v3_trajectory(values: &[f64]) -> String {
-    values.iter().map(|value| format!("{value:.1}")).collect::<Vec<_>>().join(" → ")
+        .collect::<Vec<_>>();
+    values.sort_by_key(|(order, _, _)| *order);
+    values.into_iter().map(|(_, value, partial)| (value, partial)).collect()
 }
 
 fn bench_v3_first_latest(values: &[f64]) -> String {
@@ -2444,6 +2482,32 @@ fn bench_v3_first_latest(values: &[f64]) -> String {
         [value] => format!("{value:.1}"),
         [first, .., latest] => format!("{first:.1} → {latest:.1}"),
     }
+}
+
+fn bench_v3_text_figure(values: &[f64]) -> String {
+    const LEVELS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    let rolling = crate::analysis::bench_v3::rolling_median_3(values);
+    let finite = values
+        .iter()
+        .chain(&rolling)
+        .copied()
+        .filter(|value| value.is_finite())
+        .collect::<Vec<_>>();
+    if finite.is_empty() {
+        return String::new();
+    }
+    let min = finite.iter().copied().fold(f64::INFINITY, f64::min);
+    let max = finite.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let spark = |series: &[f64]| {
+        series
+            .iter()
+            .map(|value| {
+                let fraction = if max > min { (*value - min) / (max - min) } else { 0.5 };
+                LEVELS[(fraction.clamp(0.0, 1.0) * (LEVELS.len() - 1) as f64).round() as usize]
+            })
+            .collect::<String>()
+    };
+    format!("·{} ━{}", spark(values), spark(&rolling))
 }
 
 fn bench_v3_group_label(group: BenchV3Group, lang: Lang) -> &'static str {

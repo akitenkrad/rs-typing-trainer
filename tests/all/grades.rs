@@ -1,13 +1,14 @@
 use chrono::{TimeZone, Utc};
 use rs_typing_trainer::analysis::grades::{
     Component, ComponentValue, GradeChangeKind, GradeHistoryPoint, GradeOptions, GradeSource, GradeStatus, Level, analyze_grades, bundled_thresholds,
-    component_grades_for_session, detect_grade_changes, evaluate_language, grade_component,
+    bundled_thresholds_v2, component_grades_for_session, detect_grade_changes, evaluate_language, evaluate_language_with_version, grade_component,
+    grade_component_with_version, language_bench_records,
 };
 use rs_typing_trainer::analysis::metrics::AnalysisSettings;
 use rs_typing_trainer::analysis::progress::SessionForm;
 use rs_typing_trainer::config::ErrorMode;
 use rs_typing_trainer::data::JapaneseText;
-use rs_typing_trainer::engine::session::SessionLog;
+use rs_typing_trainer::engine::session::{ItemLog, ItemOutcome, KeystrokeKind, KeystrokeLog, SessionLog};
 use rs_typing_trainer::layout::builtin_layout;
 use rs_typing_trainer::layout::geometry::geometry;
 use rs_typing_trainer::record::{SessionHeader, SessionRecord};
@@ -366,15 +367,323 @@ fn bundled_thresholds_are_complete_monotone_and_versioned() {
     assert_eq!(japanese["speed"].score_eight, 115.0);
 }
 
+#[test]
+fn grades_v2_thresholds_match_the_accuracy_adjusted_speed_table_and_weights() {
+    let v1 = bundled_thresholds().unwrap();
+    let thresholds = bundled_thresholds_v2().unwrap();
+    assert_eq!(thresholds.version, "grades-v2");
+    thresholds.validate().unwrap();
+
+    let english = thresholds.language("en").unwrap();
+    assert_eq!(english["speed"].metric, "accuracy_adjusted_wpm");
+    assert_eq!(english["speed"].score_zero, 8.0);
+    assert_eq!(english["speed"].boundaries, [22.5, 33.5, 45.4, 57.6, 72.8, 88.2, 108.9]);
+    assert_eq!(english["speed"].score_eight, 129.7);
+    assert_eq!(english["speed"].weight, 2.0);
+    assert_eq!(english["accuracy"].weight, 1.0);
+
+    let japanese = thresholds.language("ja").unwrap();
+    assert_eq!(japanese["speed"].metric, "accuracy_adjusted_wpm");
+    assert_eq!(japanese["speed"].score_zero, 6.4);
+    assert_eq!(japanese["speed"].boundaries, [19.8, 29.8, 39.7, 50.9, 64.0, 78.4, 94.1]);
+    assert_eq!(japanese["speed"].score_eight, 114.8);
+    assert_eq!(japanese["accuracy"].weight, 1.0);
+
+    for language in [english, japanese] {
+        for component in ["rhythm", "transition", "preview", "recovery", "overlap"] {
+            assert_eq!(language[component].weight, 1.0);
+        }
+    }
+
+    for language in ["en", "ja"] {
+        let before = v1.language(language).unwrap();
+        let after = thresholds.language(language).unwrap();
+        for component in ["accuracy", "rhythm", "transition", "preview", "recovery", "overlap"] {
+            assert_eq!(after[component].metric, before[component].metric);
+            assert_eq!(after[component].direction, before[component].direction);
+            assert_eq!(after[component].unit, before[component].unit);
+            assert_eq!(after[component].score_zero, before[component].score_zero);
+            assert_eq!(after[component].boundaries, before[component].boundaries);
+            assert_eq!(after[component].score_eight, before[component].score_eight);
+        }
+    }
+}
+
+#[test]
+fn grades_v2_component_and_overall_use_the_requested_thresholds_and_weights() {
+    let speed = grade_component_with_version("en", Component::Speed, 72.8, "grades-v2").unwrap();
+    assert_eq!(speed.grade, Level::B);
+    assert!((speed.score - 5.0).abs() < 1e-12);
+
+    let result = evaluate_language_with_version(
+        "en",
+        &[
+            ComponentValue::new(Component::Speed, 88.2),
+            ComponentValue::new(Component::Accuracy, 98.0),
+            ComponentValue::new(Component::Rhythm, 0.55),
+        ],
+        GradeSource::Bench,
+        GradeStatus::Official,
+        3,
+        "grades-v2",
+    )
+    .unwrap();
+    assert_eq!(result.version, "grades-v2");
+    let expected = 4.0 / (2.0 / 7.0 + 1.0 / 7.0 + 1.0 / 4.0) - 1.0;
+    assert!((result.overall.unwrap().score - expected).abs() < 1e-12);
+}
+
+#[test]
+fn grade_changes_do_not_compare_across_threshold_versions() {
+    let start = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+    let rows = vec![
+        history_with_version(start, Level::C, 4.2, "grades-v1"),
+        history_with_version(start + chrono::Days::new(1), Level::B, 5.1, "grades-v2"),
+    ];
+    assert!(detect_grade_changes(&rows).is_empty());
+
+    let rows = vec![
+        history_with_version(start, Level::C, 4.2, "grades-v1"),
+        history_with_version(start + chrono::Days::new(1), Level::B, 5.1, "grades-v2"),
+        history_with_version(start + chrono::Days::new(2), Level::A, 6.1, "grades-v2"),
+    ];
+    let changes = detect_grade_changes(&rows);
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].from, Level::B);
+    assert_eq!(changes[0].to, Level::A);
+
+    let rows = vec![
+        history_with_version(start, Level::C, 4.2, "grades-v2"),
+        history_with_version(start + chrono::Days::new(1), Level::B, 5.1, "grades-v1"),
+        history_with_version(start + chrono::Days::new(2), Level::A, 6.1, "grades-v2"),
+    ];
+    assert!(detect_grade_changes(&rows).is_empty());
+}
+
+#[test]
+fn complete_v3_language_uses_grades_v2_latest_three_runs_without_changing_other_language() {
+    let start = Utc.with_ymd_and_hms(2026, 1, 1, 12, 0, 0).unwrap();
+    let mut records = Vec::new();
+    for (day, tempo) in [20.0, 30.0, 40.0, 50.0].into_iter().enumerate() {
+        let at = start + chrono::Duration::days(day as i64);
+        records.push(v3_record(at, "EW", 1, tempo, 10, 10));
+        records.push(v3_record(at, "ES", 1, tempo, 10, 10));
+    }
+    for day in 0..3 {
+        records.push(bench_record(start + chrono::Duration::days(day), "A", 120.0));
+        records.push(bench_record(start + chrono::Duration::days(day), "C", 80.0));
+    }
+
+    let grades = analyze_grades(
+        &records,
+        &[],
+        &builtin_layout("qwerty").unwrap(),
+        &geometry("ansi").unwrap(),
+        GradeOptions {
+            model: AnalysisSettings::default(),
+        },
+        start + chrono::Duration::days(5),
+        &["abcdef".to_owned()],
+        &[JapaneseText {
+            text: "あ".to_owned(),
+            reading: "abcdef".to_owned(),
+        }],
+    );
+
+    let english = grades.languages.iter().find(|grade| grade.language == "en").unwrap();
+    assert_eq!(english.version, "grades-v2");
+    assert_eq!(english.status, GradeStatus::Official);
+    assert_eq!(english.n_sessions, 3);
+    assert_eq!(component_value(english, Component::Speed), 40.0);
+    assert_eq!(component_value(english, Component::Accuracy), 100.0);
+
+    let japanese = grades.languages.iter().find(|grade| grade.language == "ja").unwrap();
+    assert_eq!(japanese.version, "grades-v1");
+    assert_eq!(japanese.n_sessions, 3);
+
+    assert!(grades.history.iter().any(|point| point.language == "en" && point.version == "grades-v2"));
+    assert!(grades.history.iter().any(|point| point.language == "en" && point.version == "grades-v1"));
+
+    let selected = language_bench_records(&records, "en");
+    assert_eq!(selected.len(), 8);
+    assert!(
+        selected
+            .iter()
+            .all(|record| record.header.bench_id.as_deref().is_some_and(|id| id.starts_with("bench-v3/")))
+    );
+}
+
+#[test]
+fn partial_v3_language_does_not_mix_old_bench_and_uses_accuracy_adjusted_provisional_speed() {
+    let start = Utc.with_ymd_and_hms(2026, 1, 1, 12, 0, 0).unwrap();
+    let mut records = vec![v3_record(start + chrono::Duration::days(3), "EW", 1, 90.0, 10, 10)];
+    for day in 0..3 {
+        records.push(bench_record(start + chrono::Duration::days(day), "A", 120.0));
+    }
+    let mut practice = practice_record(start + chrono::Duration::days(2), 0.90);
+    practice.header.net_wpm = 60.0;
+    records.push(practice);
+
+    let grades = analyze_grades(
+        &records,
+        &[form(start + chrono::Duration::days(2), 70.0)],
+        &builtin_layout("qwerty").unwrap(),
+        &geometry("ansi").unwrap(),
+        GradeOptions {
+            model: AnalysisSettings::default(),
+        },
+        start + chrono::Duration::days(4),
+        &["abcdef".to_owned()],
+        &[JapaneseText {
+            text: "あ".to_owned(),
+            reading: "abcdef".to_owned(),
+        }],
+    );
+    let english = grades.languages.iter().find(|grade| grade.language == "en").unwrap();
+    assert_eq!(english.version, "grades-v2");
+    assert_eq!(english.source, GradeSource::Provisional);
+    assert_eq!(english.status, GradeStatus::Provisional);
+    assert_eq!(english.n_sessions, 1);
+    assert_eq!(component_value(english, Component::Speed), 63.0);
+    assert_eq!(component_value(english, Component::Accuracy), 90.0);
+}
+
+#[test]
+fn v3_runs_use_local_dates_and_do_not_join_parts_across_local_midnight() {
+    let before_midnight = Utc.with_ymd_and_hms(2026, 1, 1, 14, 58, 0).unwrap();
+    let after_midnight = Utc.with_ymd_and_hms(2026, 1, 1, 15, 1, 0).unwrap();
+    let records = vec![
+        v3_record(before_midnight, "EW", 1, 40.0, 10, 10),
+        v3_record(after_midnight, "ES", 1, 80.0, 10, 10),
+    ];
+    let grades = analyze_grades(
+        &records,
+        &[],
+        &builtin_layout("qwerty").unwrap(),
+        &geometry("ansi").unwrap(),
+        GradeOptions {
+            model: AnalysisSettings::default(),
+        },
+        after_midnight + chrono::Duration::hours(1),
+        &["abcdef".to_owned()],
+        &[],
+    );
+    assert!(grades.languages.iter().all(|grade| grade.language != "en"));
+}
+
+#[test]
+fn v3_latest_three_follow_trial_time_when_form_numbers_wrap_on_the_same_day() {
+    let start = Utc.with_ymd_and_hms(2026, 1, 1, 1, 0, 0).unwrap();
+    let mut records = Vec::new();
+    for (hour, form, tempo) in [(0, 7, 10.0), (1, 8, 20.0), (2, 1, 100.0), (3, 2, 110.0)] {
+        let at = start + chrono::Duration::hours(hour);
+        records.push(v3_record(at, "EW", form, tempo, 10, 10));
+        records.push(v3_record(at, "ES", form, tempo, 10, 10));
+    }
+    let grades = analyze_grades(
+        &records,
+        &[],
+        &builtin_layout("qwerty").unwrap(),
+        &geometry("ansi").unwrap(),
+        GradeOptions {
+            model: AnalysisSettings::default(),
+        },
+        start + chrono::Duration::hours(5),
+        &["abcdef".to_owned()],
+        &[],
+    );
+    let english = grades.languages.iter().find(|grade| grade.language == "en").unwrap();
+    assert_eq!(english.n_sessions, 3);
+    assert_eq!(component_value(english, Component::Speed), 100.0);
+}
+
+#[test]
+fn v3_history_cuts_each_snapshot_at_the_run_finish_instead_of_utc_day_end() {
+    let first = Utc.with_ymd_and_hms(2026, 1, 1, 14, 0, 0).unwrap();
+    let second = Utc.with_ymd_and_hms(2026, 1, 1, 22, 0, 0).unwrap();
+    let records = vec![
+        v3_record(first, "EW", 1, 20.0, 10, 10),
+        v3_record(first, "ES", 1, 20.0, 10, 10),
+        v3_record(second, "EW", 2, 100.0, 10, 10),
+        v3_record(second, "ES", 2, 100.0, 10, 10),
+    ];
+    let grades = analyze_grades(
+        &records,
+        &[],
+        &builtin_layout("qwerty").unwrap(),
+        &geometry("ansi").unwrap(),
+        GradeOptions {
+            model: AnalysisSettings::default(),
+        },
+        second + chrono::Duration::hours(1),
+        &["abcdef".to_owned()],
+        &[],
+    );
+    let first_date = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+    let first_speed = grades
+        .history
+        .iter()
+        .find(|point| point.language == "en" && point.component == "speed" && point.date == first_date && point.version == "grades-v2")
+        .unwrap();
+    let expected = grade_component_with_version("en", Component::Speed, 20.0, "grades-v2").unwrap();
+    assert!((first_speed.score - expected.score).abs() < 1e-12, "{first_speed:?}");
+}
+
 fn history(date: chrono::NaiveDate, grade: Level, score: f64) -> GradeHistoryPoint {
+    history_with_version(date, grade, score, "grades-v1")
+}
+
+fn history_with_version(date: chrono::NaiveDate, grade: Level, score: f64, version: &str) -> GradeHistoryPoint {
     GradeHistoryPoint {
         date,
         language: "en".to_owned(),
         component: "overall".to_owned(),
         grade,
         score,
-        version: "grades-v1".to_owned(),
+        version: version.to_owned(),
     }
+}
+
+fn component_value(grade: &rs_typing_trainer::analysis::grades::LanguageGrade, component: Component) -> f64 {
+    grade.components.iter().find(|row| row.component == component).unwrap().value
+}
+
+fn v3_record(at: chrono::DateTime<Utc>, part: &str, form: u8, tempo_wpm: f64, correct: u32, total: u32) -> SessionRecord {
+    assert!(correct > 1 && correct <= total);
+    let interval_us = (60_000_000.0 / (tempo_wpm * 5.0)).round() as u64;
+    let keystrokes = (0..total)
+        .map(|index| KeystrokeLog {
+            seq: index,
+            t_us: (u64::from(index) + 1) * interval_us,
+            release_us: None,
+            item_idx: 0,
+            pos: index.min(correct - 1),
+            kind: KeystrokeKind::Char,
+            typed: Some(if index < correct { "a" } else { "x" }.to_owned()),
+            expected: Some("a".to_owned()),
+            correct: index < correct,
+            code: None,
+        })
+        .collect::<Vec<_>>();
+    let mut record = practice_record(at, correct as f64 / total as f64);
+    record.header.mode = "bench".to_owned();
+    record.header.bench_id = Some(format!("bench-v3/{part}/{form:02}"));
+    record.header.finished_at = (at + chrono::Duration::seconds(60)).to_rfc3339();
+    record.log = SessionLog {
+        duration_us: 60_000_000,
+        error_mode: ErrorMode::Stop,
+        items: vec![ItemLog {
+            idx: 0,
+            text: "a".repeat(correct as usize),
+            reading: None,
+            kind: None,
+            shown_us: 0,
+            done_us: Some(keystrokes.last().unwrap().t_us),
+            outcome: ItemOutcome::Completed,
+        }],
+        keystrokes,
+    };
+    record
 }
 
 fn bench_record(at: chrono::DateTime<Utc>, part: &str, wpm: f64) -> SessionRecord {

@@ -43,6 +43,10 @@ fn main() -> ExitCode {
         eprintln!("{}: invalid bundled grade thresholds: {error}", Msg::AppTitle.text(lang));
         return ExitCode::from(1);
     }
+    if let Err(error) = rs_typing_trainer::analysis::grades::bundled_thresholds_v2() {
+        eprintln!("{}: invalid bundled grade thresholds: {error}", Msg::AppTitle.text(lang));
+        return ExitCode::from(1);
+    }
     if let Err(error) = rs_typing_trainer::practice::menu::bundled_catalog() {
         eprintln!("{}: invalid bundled practice menu: {error}", Msg::AppTitle.text(lang));
         return ExitCode::from(1);

@@ -2,13 +2,14 @@ use std::time::Duration;
 
 use rs_typing_trainer::analysis::analyze_with_pause;
 use rs_typing_trainer::analysis::bench_v3::{
-    BenchV3Group, compute_bench_v3_group_metrics, compute_bench_v3_group_reliability, compute_bench_v3_metrics, compute_bench_v3_part_reliability,
-    previous_effective_wpm_delta,
+    BenchV3Group, bench_v3_run_key, compute_bench_v3_group_metrics, compute_bench_v3_group_reliability, compute_bench_v3_group_runs,
+    compute_bench_v3_metrics, compute_bench_v3_part_reliability, previous_effective_wpm_delta,
 };
 use rs_typing_trainer::bench::BenchV3Part;
-use rs_typing_trainer::config::ErrorMode;
+use rs_typing_trainer::config::{Config, ErrorMode};
 use rs_typing_trainer::engine::session::{ItemLog, ItemOutcome, KeystrokeKind, KeystrokeLog, SessionLog};
 use rs_typing_trainer::record::{SessionHeader, SessionRecord};
+use rs_typing_trainer::{analysis::summary::SkillAxis, layout::builtin_layout};
 
 fn key(seq: u32, item_idx: u32, t_ms: u64, correct: bool) -> KeystrokeLog {
     KeystrokeLog {
@@ -273,4 +274,93 @@ fn language_reliability_uses_pooled_complete_runs() {
 
     assert_eq!(reliability.sample_count, 2);
     assert!((reliability.sem_wpm - 2.0_f64.sqrt() * 20.0).abs() < 1e-12, "{reliability:?}");
+}
+
+#[test]
+fn group_runs_use_local_day_and_form_as_identity_but_keep_actual_trial_order() {
+    let records = [
+        split_record("bench-v3/EW/08", "2026-11-13T23:01:00Z", 40.0, 40.0),
+        split_record("bench-v3/ES/08", "2026-11-13T23:02:00Z", 40.0, 40.0),
+        split_record("bench-v3/EW/01", "2026-11-14T20:01:00+09:00", 120.0, 120.0),
+        split_record("bench-v3/ES/01", "2026-11-14T20:02:00+09:00", 120.0, 120.0),
+    ];
+
+    assert_eq!(
+        bench_v3_run_key(&records[0]),
+        Some((chrono::NaiveDate::from_ymd_opt(2026, 11, 14).unwrap(), 8))
+    );
+
+    let runs = compute_bench_v3_group_runs(&records, BenchV3Group::English, 2_000);
+
+    assert_eq!(runs.iter().map(|run| run.form).collect::<Vec<_>>(), [8, 1]);
+    assert_eq!(
+        runs.iter().map(|run| run.metrics.effective_wpm).collect::<Vec<_>>(),
+        [Some(40.0), Some(120.0)]
+    );
+    assert!(runs.iter().all(|run| run.date == chrono::NaiveDate::from_ymd_opt(2026, 11, 14).unwrap()));
+}
+
+#[test]
+fn eight_axes_prefer_v3_runs_and_only_add_percentiles_at_three_runs() {
+    let mut records = Vec::new();
+    for (day, form, english, japanese) in [(12, 8, 40.0, 30.0), (13, 1, 80.0, 60.0), (14, 2, 120.0, 90.0)] {
+        for part in ["EW", "ES"] {
+            records.push(split_record(
+                &format!("bench-v3/{part}/{form:02}"),
+                &format!("2026-11-{day:02}T08:00:00+09:00"),
+                english,
+                english,
+            ));
+        }
+        for part in ["JW", "JS"] {
+            records.push(split_record(
+                &format!("bench-v3/{part}/{form:02}"),
+                &format!("2026-11-{day:02}T08:10:00+09:00"),
+                japanese,
+                japanese,
+            ));
+        }
+        records.push(split_record(
+            &format!("bench-v3/PW/{form:02}"),
+            &format!("2026-11-{day:02}T08:20:00+09:00"),
+            english,
+            english,
+        ));
+    }
+    let mut legacy = split_record("bench-v2/A/01", "2026-11-15T08:00:00+09:00", 999.0, 999.0);
+    legacy.header.net_wpm = 999.0;
+    records.push(legacy);
+    records.reverse();
+    let mut config = Config::default();
+    config.analysis.min_transition_n = 1;
+    let layout = builtin_layout("qwerty").unwrap();
+
+    let axes = rs_typing_trainer::analysis::summary::skill_axis_values(&records, &layout, &config);
+    let axis = |target| axes.iter().find(|row| row.axis == target).unwrap();
+
+    assert_eq!(axis(SkillAxis::SustainedSpeed).raw, Some(120.0));
+    assert_eq!(axis(SkillAxis::SustainedSpeed).percentile, Some(100.0));
+    assert_eq!(axis(SkillAxis::Accuracy).raw, Some(100.0));
+    assert!((axis(SkillAxis::Japanese).raw.unwrap() - 90.0).abs() < 0.3);
+    assert_eq!(axis(SkillAxis::Japanese).percentile, Some(100.0));
+    assert!(axis(SkillAxis::Transitions).raw.is_some(), "PW must feed transitions: {axes:?}");
+
+    let two_runs = rs_typing_trainer::analysis::summary::skill_axis_values(&records[5..], &layout, &config);
+    assert!(
+        two_runs.iter().filter(|row| row.raw.is_some()).all(|row| row.percentile.is_none()),
+        "fewer than three v3 runs must show raw values only: {two_runs:?}"
+    );
+
+    let report = rs_typing_trainer::analysis::summary::generate(
+        &records,
+        &config,
+        chrono::NaiveDate::from_ymd_opt(2026, 11, 15).unwrap(),
+        rs_typing_trainer::i18n::Lang::En,
+    )
+    .to_text();
+    assert!(report.contains("Strongest:"), "v3 percentiles must feed the summary: {report}");
+    assert!(
+        report.contains("No practice records in the last 7 days"),
+        "v3 benchmark parts must not be reported as practice modes: {report}"
+    );
 }

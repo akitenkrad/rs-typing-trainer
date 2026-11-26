@@ -109,6 +109,16 @@ pub struct SparklineSpec {
     pub cells: Size,
 }
 
+/// A compact benchmark chart whose faint dots are individual attempts and
+/// whose main line is the rolling-three median, both in trial order.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TrialChartSpec {
+    pub raw_values: Vec<f64>,
+    pub values: Vec<f64>,
+    pub color: Color,
+    pub cells: Size,
+}
+
 /// One component chart of the «skills» tab (§8.4): each run as a point, the
 /// median of the latest runs as a thick line, bench sessions as diamonds, and
 /// the grade bands behind them, the current grade's band highlighted. The x
@@ -673,6 +683,12 @@ enum AnalysisImageKey {
         color: [u8; 3],
         cells: Size,
     },
+    TrialChart {
+        raw_values: Vec<u64>,
+        values: Vec<u64>,
+        color: [u8; 3],
+        cells: Size,
+    },
     SkillChart {
         cells: Size,
         x_axis: TrendAxis,
@@ -787,6 +803,12 @@ impl AnalysisImageCache {
         let key = sparkline_key(spec);
         self.cache
             .prepare(detection, key, spec.cells, |cell_pixels| render_sparkline(cell_pixels, spec))
+    }
+
+    pub fn prepare_trial_chart(&mut self, detection: &GraphicsDetection, spec: &TrialChartSpec) -> Result<(), String> {
+        let key = trial_chart_key(spec);
+        self.cache
+            .prepare(detection, key, spec.cells, |cell_pixels| render_trial_chart(cell_pixels, spec))
     }
 
     pub fn prepare_skill_chart(&mut self, detection: &GraphicsDetection, spec: &SkillChartSpec) -> Result<(), String> {
@@ -938,6 +960,10 @@ impl AnalysisImageCache {
         self.cache.protocol(detection, &sparkline_key(spec))
     }
 
+    pub(crate) fn trial_chart_protocol<'a>(&'a mut self, detection: &GraphicsDetection, spec: &TrialChartSpec) -> Option<&'a Protocol> {
+        self.cache.protocol(detection, &trial_chart_key(spec))
+    }
+
     pub(crate) fn transition_bars_protocol<'a>(&'a mut self, detection: &GraphicsDetection, spec: &TransitionBarsSpec) -> Option<&'a Protocol> {
         self.cache.protocol(detection, &transition_bars_key(spec))
     }
@@ -1072,6 +1098,15 @@ fn skill_chart_key(spec: &SkillChartSpec) -> AnalysisImageKey {
 
 fn sparkline_key(spec: &SparklineSpec) -> AnalysisImageKey {
     AnalysisImageKey::Sparkline {
+        values: spec.values.iter().map(|value| value.to_bits()).collect(),
+        color: color_rgb(spec.color, [255, 255, 255]),
+        cells: spec.cells,
+    }
+}
+
+fn trial_chart_key(spec: &TrialChartSpec) -> AnalysisImageKey {
+    AnalysisImageKey::TrialChart {
+        raw_values: spec.raw_values.iter().map(|value| value.to_bits()).collect(),
         values: spec.values.iter().map(|value| value.to_bits()).collect(),
         color: color_rgb(spec.color, [255, 255, 255]),
         cells: spec.cells,
@@ -1654,6 +1689,63 @@ pub fn render_sparkline(cell_pixels: CellPixels, spec: &SparklineSpec) -> Result
     for (index, vertex) in points.iter().enumerate() {
         let radius = if index + 1 == points.len() { 4.5 } else { 2.4 };
         if let Some(circle) = PathBuilder::from_circle(vertex.0, vertex.1, radius) {
+            fill_path(&mut pixmap, &circle, color, 255);
+        }
+    }
+    rgba_image(pixmap)
+}
+
+pub fn render_trial_chart(cell_pixels: CellPixels, spec: &TrialChartSpec) -> Result<RgbaImage, String> {
+    let width = u32::from(spec.cells.width) * u32::from(cell_pixels.width);
+    let height = u32::from(spec.cells.height) * u32::from(cell_pixels.height);
+    let mut pixmap = Pixmap::new(width.max(1), height.max(1)).ok_or_else(|| "trial chart dimensions are too large".to_owned())?;
+    let finite = spec
+        .raw_values
+        .iter()
+        .chain(&spec.values)
+        .copied()
+        .filter(|value| value.is_finite())
+        .collect::<Vec<_>>();
+    if finite.is_empty() {
+        return rgba_image(pixmap);
+    }
+    let min = finite.iter().copied().fold(f64::INFINITY, f64::min);
+    let max = finite.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let padding = ((max - min) * 0.1).max(1.0);
+    let min = min - padding;
+    let max = max + padding;
+    let left = 3.0;
+    let right = (width as f32 - 4.0).max(left);
+    let top = 3.0;
+    let bottom = (height as f32 - 4.0).max(top);
+    let x = |index: usize, len: usize| {
+        if len <= 1 {
+            right
+        } else {
+            left + (right - left) * index as f32 / (len - 1) as f32
+        }
+    };
+    let y = |value: f64| top + (bottom - top) * ((max - value) / (max - min)).clamp(0.0, 1.0) as f32;
+    let color = color_rgb(spec.color, [255, 255, 255]);
+
+    for (index, value) in spec.raw_values.iter().copied().enumerate().filter(|(_, value)| value.is_finite()) {
+        if let Some(circle) = PathBuilder::from_circle(x(index, spec.raw_values.len()), y(value), 2.2) {
+            fill_path(&mut pixmap, &circle, color, 105);
+        }
+    }
+    let points = spec
+        .values
+        .iter()
+        .copied()
+        .enumerate()
+        .filter(|(_, value)| value.is_finite())
+        .map(|(index, value)| (x(index, spec.values.len()), y(value)))
+        .collect::<Vec<_>>();
+    if let Some(path) = polygonal_line_path(points.iter().copied()) {
+        stroke_path(&mut pixmap, &path, color, 255, 2.8);
+    }
+    for point in points {
+        if let Some(circle) = PathBuilder::from_circle(point.0, point.1, 3.0) {
             fill_path(&mut pixmap, &circle, color, 255);
         }
     }
