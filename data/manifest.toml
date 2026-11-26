@@ -2492,7 +2492,7 @@ sha256 = "b9603d39b043166b6f37dc7d9a5973a65ffba3b32b32f7400efb55080001a682"
 [[outputs]]
 path = "ja_words.tsv.gz"
 count = 11995
-sha256 = "925abb06becf4dc354da096107f706475188367e504426b9794d8b554a768838"
+sha256 = "5385faf4d6130378a62820159a0cc351dd06a027e03c50224e2ce1ba137c83ad"
 
 [[outputs]]
 path = "en_phrases.tsv.gz"
