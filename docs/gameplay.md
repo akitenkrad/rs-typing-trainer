@@ -33,6 +33,7 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | Title | `?` | Open About |
 | Title | `Q` / `Esc` | Quit |
 | About | `↑` / `↓`, `PgUp` / `PgDn` | Scroll |
+| About | `G` | Open the glossary with all terms |
 | About | `Esc` / `Enter` / `Q` / `?` | Return to the title screen |
 | Individual training | `←` `↓` `↑` `→` (`h` `j` `k` `l`) | Move over the table: rows are skills, columns what you type (see [Individual training](modes.md#individual-training)) |
 | Individual training | `Enter` / `Space` | Open the cell's briefing (through the key picker for Letters, Combos and the Words cells of the first five rows); a `—` cell does not start |
@@ -52,6 +53,7 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | Key selection | `Tab` | Switch `include` / `only` |
 | Key selection | `Enter` | Save the selection and open the cell's briefing |
 | Briefing | `Enter` | Start the countdown |
+| Briefing | `?` | Open glossary terms used on the briefing |
 | Briefing | `Esc` | Return to the practice menu or Individual training; other keys do nothing |
 | Countdown | `Esc` twice within 2 seconds | Abort to the title screen; another key or the timeout cancels the first press |
 | Play | Printable keys | Type the word |
@@ -62,6 +64,7 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | Result | `D` | Open the review of the session just played (not available for benchmark results) |
 | Result | `H` | Open history |
 | Result | `Q` / `Esc` | Quit |
+| Review | `?` | Open glossary terms used on the review |
 | Benchmark part result | `Space` / `Enter` | Continue to the next part or summary after the input delay |
 | Benchmark part result | `Esc` twice within 2 seconds | End the benchmark after the input delay, retaining completed parts |
 | Benchmark part result | `H` / `Q` | No action |
@@ -75,6 +78,7 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | Goal candidates | `↑` / `↓`, `Enter` | Select and save a goal |
 | Analysis keyboard | `Enter` | Cycle error rate, median IKI, relative speed and confusion |
 | Analysis confusion | `←` / `→` | Select the expected key |
+| Analysis (all tabs) | `?` | Open glossary terms used on the current tab; `Tab` switches between this tab and all terms |
 | History | `↑` / `↓` (`k` / `j`) | Move the selection |
 | History | `PgUp` / `PgDn` / `Home` / `End` | Jump through the list |
 | History | `Tab` | Cycle All / Practice / Bench |
@@ -99,6 +103,7 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | Settings | `Esc` / `Q` | Cancel and return to the title |
 | Practice menu | `↑` / `↓` (`k` / `j`) | Select a step |
 | Practice menu | `Enter` / `Space` | Open the selected step's briefing |
+| Practice menu | `?` | Open glossary terms used on the menu |
 | Practice menu | `Esc` / `Q` | Return to the title screen |
 | Menu step countdown or play | `Esc` twice within 2 seconds | Abandon the step without saving it and leave the run; another key or the timeout cancels the first press |
 | Menu step result | `Space` / `Enter` | Continue with the next step (or the next `burst` sprint) |

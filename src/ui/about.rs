@@ -218,8 +218,8 @@ pub fn render(frame: &mut Frame, app: &App) {
     frame.render_widget(Paragraph::new(lines).scroll((app.about_scroll.min(max_scroll), 0)), areas[0]);
 
     let hint = match lang {
-        Lang::En => "[↑/↓] Scroll    [Esc] Back",
-        Lang::Ja => "[↑/↓] スクロール    [Esc] 戻る",
+        Lang::En => "[↑/↓] Scroll    [Esc] Back    [G] Glossary",
+        Lang::Ja => "[↑/↓] スクロール    [Esc] 戻る    [G] 用語集",
     };
     frame.render_widget(Paragraph::new(hint).style(Style::default().fg(theme.accent)), areas[1]);
 }

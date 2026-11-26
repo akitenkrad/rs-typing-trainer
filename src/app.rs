@@ -94,6 +94,7 @@ pub enum Screen {
     BenchSelect,
     BenchSummary,
     Analysis,
+    Glossary,
 }
 
 /// Source of the result being shown on the result screen.
@@ -246,6 +247,16 @@ pub struct App {
     review_scroll_max: Cell<u16>,
     pub about_scroll: u16,
     about_scroll_max: Cell<u16>,
+    /// Screen to restore when the glossary closes.
+    pub glossary_origin: Screen,
+    /// Screen identifier used to scope glossary entries, such as
+    /// `analysis.transitions`. `None` means the glossary was opened in its
+    /// all-terms mode.
+    pub glossary_context: Option<&'static str>,
+    pub glossary_show_all: bool,
+    pub glossary_selected: usize,
+    pub glossary_query: String,
+    pub glossary_searching: bool,
     pub mode_grade_line: Option<String>,
     pub history: Vec<HistoryEntry>,
     history_sessions: Vec<SessionSummary>,
@@ -492,6 +503,12 @@ impl App {
             review_scroll_max: Cell::new(0),
             about_scroll: 0,
             about_scroll_max: Cell::new(0),
+            glossary_origin: Screen::About,
+            glossary_context: None,
+            glossary_show_all: true,
+            glossary_selected: 0,
+            glossary_query: String::new(),
+            glossary_searching: false,
             mode_grade_line: None,
             history: Vec::new(),
             history_sessions: Vec::new(),
@@ -986,6 +1003,7 @@ impl App {
             Screen::BenchSelect => self.handle_bench_select_key(key, action),
             Screen::BenchSummary => self.handle_bench_summary_key(key, action),
             Screen::Analysis => self.handle_analysis_key(key, action),
+            Screen::Glossary => self.handle_glossary_key(key),
         }
     }
 
@@ -1059,6 +1077,7 @@ impl App {
     fn handle_about_key(&mut self, key: KeyEvent) {
         let max = self.about_scroll_max.get();
         match key.code {
+            KeyCode::Char('G') => self.open_glossary(None, true),
             KeyCode::Up => self.about_scroll = self.about_scroll.saturating_sub(1),
             KeyCode::Down => self.about_scroll = self.about_scroll.saturating_add(1).min(max),
             KeyCode::PageUp => self.about_scroll = self.about_scroll.saturating_sub(10),
@@ -1070,6 +1089,102 @@ impl App {
 
     pub(crate) fn set_about_scroll_max(&self, max: u16) {
         self.about_scroll_max.set(max);
+    }
+
+    fn open_glossary(&mut self, context: Option<&'static str>, show_all: bool) {
+        self.glossary_origin = self.screen;
+        self.glossary_context = context;
+        self.glossary_show_all = show_all;
+        self.glossary_selected = 0;
+        self.glossary_query.clear();
+        self.glossary_searching = false;
+        self.screen = Screen::Glossary;
+    }
+
+    fn analysis_glossary_context(&self) -> &'static str {
+        match self.analysis_tab {
+            ANALYSIS_TODAY_TAB => "analysis.today",
+            ANALYSIS_COACH_TAB => "analysis.coach",
+            ANALYSIS_TREND_TAB => "analysis.trends",
+            ANALYSIS_KEYBOARD_TAB => "analysis.keyboard",
+            ANALYSIS_TRANSITIONS_TAB => "analysis.transitions",
+            ANALYSIS_FINGERS_TAB => "analysis.fingers",
+            ANALYSIS_BENCH_TAB => "analysis.bench",
+            ANALYSIS_SKILLS_TAB => "analysis.skills",
+            ANALYSIS_GROWTH_TAB => "analysis.growth",
+            _ => "analysis.coach",
+        }
+    }
+
+    /// Terms visible under the glossary's current context and search query.
+    pub fn glossary_visible_terms(&self) -> Result<Vec<&'static crate::glossary::GlossaryTerm>, String> {
+        let query = self.glossary_query.to_lowercase();
+        let terms = crate::glossary::bundled()?
+            .terms()
+            .iter()
+            .filter(|term| {
+                (self.glossary_show_all
+                    || self
+                        .glossary_context
+                        .is_none_or(|context| term.screens.iter().any(|screen| screen == context)))
+                    && (query.is_empty()
+                        || term.term.text(self.config.general.lang).to_lowercase().contains(&query)
+                        || term.aliases.iter().any(|alias| alias.to_lowercase().contains(&query))
+                        || term.short.text(self.config.general.lang).to_lowercase().contains(&query))
+            })
+            .collect();
+        Ok(terms)
+    }
+
+    fn clamp_glossary_selection(&mut self) {
+        let last = self.glossary_visible_terms().map_or(0, |terms| terms.len().saturating_sub(1));
+        self.glossary_selected = self.glossary_selected.min(last);
+    }
+
+    fn handle_glossary_key(&mut self, key: KeyEvent) {
+        if self.glossary_searching {
+            match key.code {
+                KeyCode::Esc => {
+                    self.glossary_searching = false;
+                    self.glossary_query.clear();
+                    self.clamp_glossary_selection();
+                }
+                KeyCode::Enter => self.glossary_searching = false,
+                KeyCode::Backspace => {
+                    self.glossary_query.pop();
+                    self.clamp_glossary_selection();
+                }
+                KeyCode::Char(character) => {
+                    self.glossary_query.push(character);
+                    self.clamp_glossary_selection();
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        let count = self.glossary_visible_terms().map_or(0, |terms| terms.len());
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => self.screen = self.glossary_origin,
+            KeyCode::Char('/') => self.glossary_searching = true,
+            KeyCode::Tab if self.glossary_context.is_some() => {
+                self.glossary_show_all = !self.glossary_show_all;
+                self.clamp_glossary_selection();
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.glossary_selected = self.glossary_selected.saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.glossary_selected = (self.glossary_selected + 1).min(count.saturating_sub(1));
+            }
+            KeyCode::PageUp => self.glossary_selected = self.glossary_selected.saturating_sub(10),
+            KeyCode::PageDown => {
+                self.glossary_selected = (self.glossary_selected + 10).min(count.saturating_sub(1));
+            }
+            KeyCode::Home => self.glossary_selected = 0,
+            KeyCode::End => self.glossary_selected = count.saturating_sub(1),
+            _ => {}
+        }
     }
 
     fn open_mode_select(&mut self) {
@@ -1247,6 +1362,7 @@ impl App {
     fn handle_menu_key(&mut self, key: KeyEvent, action: InputAction) {
         let last = self.daily_menu.as_ref().map_or(0, |menu| menu.steps.len().saturating_sub(1));
         match key.code {
+            KeyCode::Char('?') => self.open_glossary(Some("menu"), false),
             KeyCode::Up | KeyCode::Char('k') => self.menu_selected = self.menu_selected.saturating_sub(1),
             KeyCode::Down | KeyCode::Char('j') => self.menu_selected = (self.menu_selected + 1).min(last),
             KeyCode::Enter | KeyCode::Char(' ') => self.begin_menu_step(self.menu_selected),
@@ -1268,6 +1384,7 @@ impl App {
 
     fn handle_briefing_key(&mut self, key: KeyEvent) {
         match key.code {
+            KeyCode::Char('?') => self.open_glossary(Some("briefing"), false),
             KeyCode::Enter => self.start_countdown(),
             KeyCode::Esc if self.menu_active_step.is_some() => self.abort_menu_step(),
             KeyCode::Esc => {
@@ -1540,6 +1657,7 @@ impl App {
 
     fn handle_analysis_key(&mut self, key: KeyEvent, action: InputAction) {
         match key.code {
+            KeyCode::Char('?') => self.open_glossary(Some(self.analysis_glossary_context()), false),
             KeyCode::Up | KeyCode::Char('k') if self.analysis_tab == ANALYSIS_COACH_TAB && self.analysis_goal_picker => {
                 self.analysis_goal_selected = self.analysis_goal_selected.saturating_sub(1);
             }
@@ -2327,6 +2445,7 @@ impl App {
     fn handle_review_key(&mut self, key: KeyEvent, action: InputAction, now: Instant) {
         let max = self.review_scroll_max.get();
         match key.code {
+            KeyCode::Char('?') => self.open_glossary(Some("review"), false),
             KeyCode::Up => self.review_scroll = self.review_scroll.saturating_sub(1),
             KeyCode::Down => self.review_scroll = self.review_scroll.saturating_add(1).min(max),
             KeyCode::PageUp => self.review_scroll = self.review_scroll.saturating_sub(10),

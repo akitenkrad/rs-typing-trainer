@@ -1,0 +1,381 @@
+# Glossary of the abbreviations and terms the game shows.
+#
+# Each [[term]] has:
+#   id        stable identifier (ASCII)
+#   category  one of: speed, keystroke, analysis, menu, drill, bench, record
+#   term      the word as it appears on screen { en, ja }
+#   aliases   other spellings shown on screen (optional), searched too
+#   short     one line { en, ja }
+#   detail    a few sentences { en, ja } (optional)
+#   screens   where the term appears; the analysis tabs are
+#             analysis.today, analysis.coach, analysis.trends,
+#             analysis.keyboard, analysis.transitions, analysis.fingers,
+#             analysis.bench, analysis.skills, analysis.growth; other screens
+#             are result, review, menu, briefing, bench, history, playing
+
+version = "glossary-v1"
+
+# --- Speed and accuracy ---------------------------------------------------
+
+[[term]]
+id = "wpm"
+category = "speed"
+term = { en = "WPM", ja = "WPM" }
+short = { en = "Words per minute: typed characters ÷ 5 per minute.", ja = "1 分あたりの語数．打った文字数を 5 で割って 1 分あたりに直した速さ" }
+detail = { en = "A «word» is counted as five characters, whatever the real words are, so speeds of different texts can be compared. For Japanese the characters are the romaji keystrokes.", ja = "実際の単語の長さに関係なく «5 文字で 1 語» と数えるので，違う文章の速さを比べられます．日本語はローマ字で打った文字数で数えます．" }
+screens = ["result", "review", "playing", "analysis.trends", "analysis.bench", "analysis.growth", "analysis.today"]
+
+[[term]]
+id = "net-wpm"
+category = "speed"
+term = { en = "net WPM", ja = "net WPM" }
+short = { en = "WPM counting only the characters left correct.", ja = "正しく残った文字だけで数えた WPM" }
+detail = { en = "Characters that were wrong and not corrected are not counted. When a typo stops you until you type the right key (the benchmark and the accuracy drill), every character ends correct, so net WPM reflects errors only through the time they cost.", ja = "間違えたまま直さなかった文字は数えません．誤打で止まる設定（ベンチや正確さの訓練）では最後に全部の文字が正しく残るので，誤打は打ち直しにかかった時間の分しか点に響きません．" }
+screens = ["result", "review", "analysis.trends", "analysis.bench", "analysis.coach"]
+
+[[term]]
+id = "raw-wpm"
+category = "speed"
+term = { en = "raw WPM", ja = "raw WPM" }
+short = { en = "WPM counting every character keystroke, right or wrong.", ja = "正誤を問わず，打った文字をすべて数えた WPM" }
+screens = ["result"]
+
+[[term]]
+id = "cps"
+category = "speed"
+term = { en = "CPS", ja = "CPS" }
+short = { en = "Characters per second.", ja = "1 秒あたりの文字数" }
+screens = ["result", "review"]
+
+[[term]]
+id = "accuracy"
+category = "speed"
+term = { en = "Accuracy", ja = "正確さ" }
+aliases = ["正打率"]
+short = { en = "Share of character keystrokes that were correct.", ja = "打った文字のうち，正しかった割合（正打率）" }
+detail = { en = "When a typo stops you, it is correct keystrokes ÷ all character keystrokes. When you type on past a typo, it is the share of positions left correct after editing.", ja = "誤打で止まる設定では «正しい打鍵 ÷ すべての文字の打鍵»，誤打しても先へ進む設定では «直した後に正しく残った位置の割合» です．" }
+screens = ["result", "review", "playing", "analysis.trends", "analysis.bench", "analysis.coach", "analysis.growth"]
+
+[[term]]
+id = "pt"
+category = "speed"
+term = { en = "pt", ja = "pt" }
+aliases = ["ポイント"]
+short = { en = "Percentage points: the difference between two percentages.", ja = "パーセントポイント．2 つの百分率の差（94% → 97% なら +3pt）" }
+screens = ["review", "analysis.growth", "playing"]
+
+[[term]]
+id = "corrected-wpm"
+category = "speed"
+term = { en = "Difficulty-adjusted WPM", ja = "補正 WPM" }
+aliases = ["難しさを補正した WPM"]
+short = { en = "Practice speed adjusted for how hard the prompts were.", ja = "出題の難しさの違いをならした練習の速さ" }
+detail = { en = "Each session's net WPM is divided by the speed your own model expects for its prompts (your form), then scaled to a fixed reference benchmark. Used for daily speed when a language has no benchmark.", ja = "各回の net WPM を，本人の打ち方の模型がその出題に期待する速さで割り（これが «調子»），基準のベンチの期待の速さを掛けた値です．その言語のベンチが無いときの日ごとの速さに使います．" }
+screens = ["analysis.coach", "analysis.growth", "analysis.trends"]
+
+[[term]]
+id = "form"
+category = "speed"
+term = { en = "Form", ja = "調子" }
+short = { en = "Measured speed ÷ the speed your model expects for the same prompts.", ja = "実際の速さ ÷ 同じ出題で本人の模型が期待する速さ" }
+detail = { en = "Above 1.0 means faster than usual for those prompts.", ja = "1.0 より大きければ，その出題にしてはいつもより速かったことを表します．" }
+screens = ["analysis.coach"]
+
+[[term]]
+id = "daily-speed"
+category = "speed"
+term = { en = "Daily speed", ja = "日ごとの速さ" }
+short = { en = "The day's benchmark speed, or the adjusted practice speed when there is no benchmark.", ja = "その日のベンチの速さ．その言語のベンチが無いときは補正 WPM" }
+detail = { en = "Used for the four-week slope, the Growth tab and the trend charts. Once a language has a benchmark, practice sessions no longer feed it.", ja = "4 週の傾き，成長のタブ，推移の図に使います．その言語のベンチが 1 回でもあれば，練習の記録は使いません．" }
+screens = ["analysis.growth", "analysis.coach", "analysis.trends"]
+
+# --- Keystroke metrics ----------------------------------------------------
+
+[[term]]
+id = "iki"
+category = "keystroke"
+term = { en = "IKI", ja = "IKI" }
+aliases = ["打鍵間隔"]
+short = { en = "Inter-key interval: the time between two keystrokes in a row.", ja = "打鍵の間隔．続けて打った 2 つのキーの押した時刻の差" }
+detail = { en = "Measured within one prompt; the first keystroke of a prompt counts as reaction time instead, and pauses longer than the pause threshold (2 s by default) are left out. Smaller is faster.", ja = "同じ問題の中で測ります．問題の最初の打鍵は反応時間に回し，休止のしきい値（既定 2 秒）より長い間隔は除きます．小さいほど速いことを表します．" }
+screens = ["analysis.trends", "analysis.keyboard", "analysis.transitions", "analysis.fingers", "review", "briefing", "playing"]
+
+[[term]]
+id = "cv"
+category = "keystroke"
+term = { en = "CV", ja = "CV" }
+aliases = ["IKI CV", "変動係数"]
+short = { en = "Coefficient of variation: standard deviation ÷ mean of the intervals.", ja = "変動係数．打鍵間隔の標準偏差 ÷ 平均" }
+detail = { en = "How uneven your rhythm is. Smaller means more even intervals. The rhythm drill aims to lower the CV within words.", ja = "リズムのばらつきを表します．小さいほど間隔がそろっています．リズムの訓練は語中の CV を下げることを目標にします．" }
+screens = ["briefing", "menu", "playing", "review", "analysis.coach", "analysis.skills", "analysis.bench"]
+
+[[term]]
+id = "ms"
+category = "keystroke"
+term = { en = "ms", ja = "ms" }
+short = { en = "Milliseconds (1/1000 of a second).", ja = "ミリ秒（1000 分の 1 秒）" }
+screens = ["analysis.trends", "analysis.keyboard", "analysis.transitions", "analysis.fingers", "review", "playing"]
+
+[[term]]
+id = "transition"
+category = "keystroke"
+term = { en = "Transition", ja = "遷移" }
+aliases = ["2-gram", "bigram"]
+short = { en = "Moving from one key to the next, such as «t → h».", ja = "あるキーから次のキーへの移り変わり（«t → h» など）" }
+detail = { en = "Each pair of keys is measured for its interval and error rate. Rare pairs are estimated with help from similar pairs (shrinkage).", ja = "2 つのキーの組ごとに，間隔と誤打率を測ります．件数の少ない組は，似た組の値を借りて推定します（縮小推定）．" }
+screens = ["analysis.transitions", "analysis.coach", "menu", "briefing", "review"]
+
+[[term]]
+id = "ngram"
+category = "keystroke"
+term = { en = "n-gram", ja = "n-gram" }
+aliases = ["ngram"]
+short = { en = "A run of n characters, such as «th» (2-gram) or «the» (3-gram).", ja = "n 文字の並び（«th» は 2-gram，«the» は 3-gram）" }
+detail = { en = "The n-gram drill repeats short runs cut out of words to practise a transition on its own.", ja = "n-gram の練習は，単語から切り出した短い並びを繰り返し打ち，遷移だけを練習します．" }
+screens = ["menu", "briefing", "analysis.transitions"]
+
+[[term]]
+id = "word-onset"
+category = "keystroke"
+term = { en = "Word onset delay", ja = "語頭の遅れ" }
+short = { en = "Interval at the start of a word ÷ interval inside words.", ja = "単語の頭の打鍵間隔 ÷ 単語の中の打鍵間隔" }
+detail = { en = "Close to 1.0 means you do not stop at the start of words, i.e. you read ahead. The look-ahead drill aims to lower it.", ja = "1.0 に近いほど単語の頭で止まらず，先を読めていることを表します．先読みの訓練はこれを下げることを目標にします．" }
+screens = ["briefing", "menu", "playing", "review", "analysis.coach"]
+
+[[term]]
+id = "rollover"
+category = "keystroke"
+term = { en = "Rollover rate", ja = "ロールオーバー率" }
+aliases = ["重なり"]
+short = { en = "Share of key pairs where the next key went down before the previous one came up.", ja = "前のキーを離す前に次のキーを押した組の割合" }
+detail = { en = "Measured only in terminals that report key releases. Fast typists tend to overlap keys more.", ja = "キーを離した時刻が取れる端末でだけ測ります．速い人ほど重なりが多い傾向があります．" }
+screens = ["briefing", "menu", "playing", "review", "analysis.coach"]
+
+[[term]]
+id = "reaction"
+category = "keystroke"
+term = { en = "Reaction time", ja = "反応時間" }
+short = { en = "Time from a prompt appearing to its first keystroke.", ja = "問題が表示されてから最初の文字を打つまでの時間" }
+screens = ["result", "analysis.bench", "analysis.skills"]
+
+[[term]]
+id = "post-error-excess"
+category = "keystroke"
+term = { en = "Excess after errors", ja = "誤打後の余分な時間" }
+short = { en = "Extra time the keystrokes after a typo took compared with your usual pace.", ja = "誤打の直後の打鍵が，いつもの速さより余分にかかった時間" }
+detail = { en = "The recovery drill aims to keep it at or below your own median.", ja = "立ち直りの訓練は，これを自分の中央値以下に抑えることを目標にします．" }
+screens = ["briefing", "menu", "playing", "review", "analysis.coach"]
+
+[[term]]
+id = "key-release"
+category = "keystroke"
+term = { en = "Key-release timing", ja = "キーを離した時刻" }
+short = { en = "Whether the terminal reports when a key is let go.", ja = "キーを離した瞬間を端末が伝えられるかどうか" }
+detail = { en = "Needed for rollover and key hold times. Shown on the About screen.", ja = "重なり（ロールオーバー率）と押下時間を測るのに要ります．«このアプリについて» に表示します．" }
+screens = ["playing", "review"]
+
+[[term]]
+id = "n-count"
+category = "keystroke"
+term = { en = "n= / n≈", ja = "n= / n≈" }
+short = { en = "Number of samples behind a value: n= is counted, n≈ is an effective count.", ja = "値の元になった件数．n= は数えた件数，n≈ は推定に効いた実効件数（整数に丸めた値）" }
+screens = ["analysis.coach", "analysis.transitions"]
+
+# --- Analysis --------------------------------------------------------------
+
+[[term]]
+id = "grade"
+category = "analysis"
+term = { en = "Grade (S–G)", ja = "段階（S〜G）" }
+aliases = ["S〜G", "grades-v1"]
+short = { en = "Absolute grade from G (lowest) to S (highest), per component and overall.", ja = "G（いちばん下）から S（いちばん上）までの絶対的な段階．構成ごとと総合" }
+detail = { en = "Each grade also has a continuous score from 0 to 8. The thresholds are provisional and versioned (grades-v1).", ja = "各段階は 0〜8 の連続値も持ちます．基準値は暫定で，版（grades-v1）を付けて管理します．" }
+screens = ["analysis.coach", "analysis.skills", "analysis.bench", "bench"]
+
+[[term]]
+id = "component"
+category = "analysis"
+term = { en = "Component", ja = "構成" }
+short = { en = "One of the skills graded on its own: speed, accuracy, rhythm, transitions, look-ahead, recovery, rollover.", ja = "個別に段階を付ける技能．速さ・正確さ・リズム・遷移・先読み・立ち直り・重なり" }
+detail = { en = "The overall grade is a weighted harmonic mean of the component scores, so a weak component pulls it down.", ja = "総合は構成の連続値の重み付き調和平均なので，弱い構成があると総合が下がります．" }
+screens = ["analysis.coach", "analysis.skills"]
+
+[[term]]
+id = "eight-axes"
+category = "analysis"
+term = { en = "Eight axes", ja = "8 軸" }
+short = { en = "Benchmark radar: sustained speed, accuracy, rhythm, transitions, reach, reaction, correction, Japanese.", ja = "ベンチのレーダー図．持続速度・正確さ・リズム・遷移・到達・反応・修正・日本語" }
+detail = { en = "Each axis places your latest value within your own past benchmarks (percentile). With fewer than three benchmarks only raw values are shown.", ja = "各軸は，最新の値が本人の過去のベンチの中でどの位置か（百分位）を表します．ベンチが 3 回未満のときは生の値だけを出します．" }
+screens = ["analysis.bench"]
+
+[[term]]
+id = "four-week-slope"
+category = "analysis"
+term = { en = "Four-week slope", ja = "4 週の傾き" }
+short = { en = "Change in daily speed per week over the last 28 days.", ja = "直近 28 日の日ごとの速さの，1 週あたりの変化" }
+detail = { en = "Above +0.5 WPM/week is shown as rising, below −0.5 as falling, otherwise flat.", ja = "+0.5 WPM／週を超えれば上向き，−0.5 未満なら下向き，その間は横ばいです．" }
+screens = ["analysis.coach"]
+
+[[term]]
+id = "r3"
+category = "analysis"
+term = { en = "R3", ja = "R3" }
+aliases = ["処方の効果判定"]
+short = { en = "The check of whether a transition prescription worked, against control transitions.", ja = "遷移の処方が効いたかを，対照の遷移と比べて判定する仕組み" }
+detail = { en = "Controls are similar transitions kept out of the drill. After three sessions with enough samples, the target must improve clearly more than the controls to be judged effective.", ja = "対照は，練習から外しておいた似た遷移です．十分な件数で 3 回以上たった後，対象の遷移が対照よりはっきり速くなっていれば «効いた» と判定します．" }
+screens = ["analysis.coach", "menu", "briefing", "review"]
+
+[[term]]
+id = "habits"
+category = "analysis"
+term = { en = "H1–H5", ja = "H1〜H5" }
+aliases = ["習慣"]
+short = { en = "Practice-habit findings: H1 warm-up, H2 fatigue within a sitting, H3 daily volume and retention, H4 time of day, H5 training aids.", ja = "練習の習慣の診断．H1 準備運動，H2 続けて練習したときの崩れ，H3 1 日の練習量と翌日の保持，H4 時刻帯，H5 補助の有無" }
+detail = { en = "H4 is exploratory. H5 marks an aid (such as the on-screen keyboard) as removable when you type as well without it.", ja = "H4 は探索的な参考です．H5 は，補助（画面のキーボードなど）が無くても同じくらい打てていれば «外してよい» 印を付けます．" }
+screens = ["analysis.coach", "menu"]
+
+[[term]]
+id = "evidence"
+category = "analysis"
+term = { en = "Evidence strength", ja = "根拠の強さ" }
+aliases = ["phenomenon", "medium", "correlational", "weak", "hypothesis"]
+short = { en = "How well a prescription is supported: medium, phenomenon, correlational, weak, hypothesis.", ja = "処方の裏付けの強さ．中・現象・相関・弱・仮説" }
+detail = { en = "medium: a general skill-learning principle you can check in this app. phenomenon: seen in experts, but training it is unverified. correlational: only correlated with speed. weak: practical know-how. hypothesis: tried first in this app.", ja = "中: 一般的な技能学習の原則があり，本アプリで本人の中で確かめられる．現象: 熟練者の現象としては確かだが，それを増やす訓練が効くかは未検証．相関: 速い人との相関だけがある．弱: 実践知・既存製品の慣行．仮説: 本アプリで初めて試す．" }
+screens = ["menu"]
+
+# --- Practice menu ---------------------------------------------------------
+
+[[term]]
+id = "prescription"
+category = "menu"
+term = { en = "Prescription", ja = "処方" }
+short = { en = "A drill the menu picks for your weakest point, with levels and a graduation condition.", ja = "いちばんの弱点に合わせてメニューが選ぶ訓練．レベルと卒業の条件を持つ" }
+screens = ["menu", "briefing", "review", "analysis.coach", "analysis.today"]
+
+[[term]]
+id = "primary"
+category = "menu"
+term = { en = "Primary A / B", ja = "主処方 A / B" }
+short = { en = "The two main drills of today's menu, chosen from your weakest components.", ja = "今日のメニューの中心になる 2 つの訓練．弱い構成から選ぶ" }
+screens = ["menu", "briefing", "review", "analysis.today"]
+
+[[term]]
+id = "check-step"
+category = "menu"
+term = { en = "Check step", ja = "確認段" }
+aliases = ["補助なしの確認"]
+short = { en = "The menu step typed without training aids; several graduation conditions are judged here.", ja = "補助なしで打つメニューの段．いくつかの処方の卒業はこの段の値で判定する" }
+screens = ["menu", "briefing", "review", "analysis.skills", "analysis.today"]
+
+[[term]]
+id = "graduation"
+category = "menu"
+term = { en = "Graduation", ja = "卒業" }
+short = { en = "Meeting a prescription's condition the required number of times; the level then goes up.", ja = "処方の条件を決まった回数続けて満たすこと．満たすとレベルが上がる" }
+screens = ["menu", "briefing", "review", "analysis.today", "analysis.growth"]
+
+[[term]]
+id = "own-median"
+category = "menu"
+term = { en = "Your own median", ja = "自分の中央値" }
+short = { en = "The middle value of your recent sessions of the same kind; many goals use it as their line.", ja = "同じ種類の最近の回の真ん中の値．多くの目標がこれを線にする" }
+screens = ["briefing", "playing", "review", "menu"]
+
+[[term]]
+id = "cell"
+category = "menu"
+term = { en = "Cell", ja = "升目" }
+short = { en = "One box of the individual-training table: a skill × what you type (letters, words, sentences…).", ja = "個別訓練の表の 1 つの枠．鍛える技能 × 打つもの（文字・単語・短文など）" }
+screens = ["menu", "briefing", "review"]
+
+# --- Drills ---------------------------------------------------------------
+
+[[term]]
+id = "pacer"
+category = "drill"
+term = { en = "Pacer", ja = "ペーサー" }
+short = { en = "A marker that moves at a set speed for you to follow.", ja = "決まった速さで進む目印．それに付いていくように打つ" }
+screens = ["briefing", "playing", "menu"]
+
+[[term]]
+id = "ghost"
+category = "drill"
+term = { en = "Ghost", ja = "ゴースト" }
+short = { en = "A replay of one of your past sessions shown as a pace to race.", ja = "過去の自分の回を再生した目印．競う相手として表示する" }
+detail = { en = "Sentences use your best past session with the same sentence; a benchmark uses your previous result of the same part and version.", ja = "短文では同じ文を含む過去最高の回を，ベンチでは同じパート・同じ版の前回の記録を使います．" }
+screens = ["playing", "bench"]
+
+[[term]]
+id = "gate"
+category = "drill"
+term = { en = "Gate", ja = "関門" }
+short = { en = "The accuracy a session must reach to count as passed or toward your bests.", ja = "その回が通過扱い・自己ベストの対象になるために必要な正確さ" }
+screens = ["briefing", "playing", "result", "menu"]
+
+[[term]]
+id = "anticipation"
+category = "drill"
+term = { en = "Anticipation error", ja = "先走り" }
+short = { en = "Pressing the key after next before the current one.", ja = "今打つ文字を飛ばし，次の文字のキーを先に押す誤り" }
+screens = ["briefing", "playing", "review", "menu", "analysis.coach"]
+
+[[term]]
+id = "repeated-previous"
+category = "drill"
+term = { en = "Repeated previous", ja = "重ね打ち" }
+short = { en = "Pressing the key you just typed again instead of the next one.", ja = "次の文字の代わりに，直前に打ったキーをもう一度押す誤り" }
+screens = ["review", "analysis.coach"]
+
+[[term]]
+id = "burst"
+category = "drill"
+term = { en = "Burst", ja = "バースト" }
+aliases = ["短距離"]
+short = { en = "Short all-out sprints; the fastest one counts.", ja = "短い区間を全力で打つこと．最も速い 1 本を記録する" }
+screens = ["briefing", "playing", "review", "menu"]
+
+[[term]]
+id = "endurance"
+category = "drill"
+term = { en = "Endurance", ja = "持久" }
+short = { en = "Typing for several minutes; the second half is compared with the first.", ja = "数分間打ち続け，後半を前半と比べる訓練" }
+screens = ["briefing", "playing", "review", "menu"]
+
+# --- Benchmark --------------------------------------------------------------
+
+[[term]]
+id = "bench"
+category = "bench"
+term = { en = "Benchmark", ja = "ベンチ" }
+aliases = ["ベンチマーク"]
+short = { en = "A fixed test taken under the same conditions each time, used as the yardstick for progress.", ja = "毎回同じ条件で測る固定のテスト．上達を測る物差しにする" }
+screens = ["bench", "analysis.bench", "analysis.growth", "analysis.coach", "history", "menu"]
+
+[[term]]
+id = "bench-series"
+category = "bench"
+term = { en = "bench-v1 / bench-v2", ja = "bench-v1 / bench-v2" }
+short = { en = "Versions of the benchmark. Results of different series are not compared directly.", ja = "ベンチの版（系列）．違う系列の結果は直接比べない" }
+screens = ["analysis.bench", "history", "bench"]
+
+[[term]]
+id = "bench-part"
+category = "bench"
+term = { en = "Parts A–D", ja = "パート A〜D" }
+short = { en = "A: English words and phrases; B: pseudo-words; C: Japanese words and phrases; D: numbers and symbols (optional).", ja = "A は英単語と句，B は擬似語，C は日本語の単語と句，D は数字と記号（任意）" }
+screens = ["bench", "analysis.bench", "analysis.growth", "history"]
+
+[[term]]
+id = "parallel-form"
+category = "bench"
+term = { en = "Parallel form", ja = "平行版" }
+aliases = ["版"]
+short = { en = "One of eight versions of each benchmark part, used in turn so you do not memorise the prompts.", ja = "ベンチの各パートの 8 つの版．出題を覚えてしまわないよう順に使う" }
+screens = ["bench", "history", "analysis.bench"]
+
+[[term]]
+id = "pseudo-word"
+category = "bench"
+term = { en = "Pseudo-word", ja = "擬似語" }
+short = { en = "A made-up word with English-like letter patterns, to measure finger transitions without word familiarity.", ja = "英語らしい文字の並びで作った実在しない語．単語の慣れに頼らない指の移り変わりを測る" }
+screens = ["bench", "analysis.bench"]

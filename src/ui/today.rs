@@ -1047,11 +1047,11 @@ fn render_images(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, full: 
 pub fn hint(lang: Lang) -> [&'static str; 2] {
     match lang {
         Lang::En => [
-            "[Tab/←→] tab   [↑/↓] scroll   [S] Summary   [Esc] back",
+            "[Tab/←→] tab   [↑/↓] scroll   [S] Summary   [?] Terms   [Esc] back",
             "Today only: the period [P] and mode [M] filters do not apply",
         ],
         Lang::Ja => [
-            "[Tab/←→] タブ   [↑/↓] スクロール   [S] Summary   [Esc] 戻る",
+            "[Tab/←→] タブ   [↑/↓] スクロール   [S] Summary   [?] 用語   [Esc] 戻る",
             "今日の記録だけ: 期間 [P]・モード [M] の絞り込みは効きません",
         ],
     }

@@ -23,11 +23,20 @@ pub fn render(frame: &mut Frame, app: &App) {
     frame.render_widget(block, area);
 
     let Some(menu) = app.daily_menu.as_ref() else {
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0), Constraint::Length(1)])
+            .split(left_inset(inner));
         let message = app.menu_error.as_deref().unwrap_or(match lang {
             Lang::En => "Menu is unavailable.",
             Lang::Ja => "メニューを表示できません．",
         });
-        frame.render_widget(Paragraph::new(message), left_inset(inner));
+        frame.render_widget(Paragraph::new(message), rows[0]);
+        let hint = match lang {
+            Lang::En => "[?] Terms    [Esc] Title",
+            Lang::Ja => "[?] 用語    [Esc] タイトル",
+        };
+        frame.render_widget(Paragraph::new(hint).style(Style::default().fg(theme.accent)), rows[1]);
         return;
     };
 
@@ -98,8 +107,8 @@ pub fn render(frame: &mut Frame, app: &App) {
         );
     }
     let hint = match lang {
-        Lang::En => "[↑/↓] Select    [Enter] Start    [Esc] Title",
-        Lang::Ja => "[↑/↓] 選ぶ    [Enter] 開始    [Esc] タイトル",
+        Lang::En => "[↑/↓] Select    [Enter] Start    [?] Terms    [Esc] Title",
+        Lang::Ja => "[↑/↓] 選ぶ    [Enter] 開始    [?] 用語    [Esc] タイトル",
     };
     frame.render_widget(Paragraph::new(hint).style(Style::default().fg(theme.accent)), left_inset(rows[4]));
 }

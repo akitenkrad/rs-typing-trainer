@@ -72,8 +72,8 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
     if app.analysis_tab == crate::app::ANALYSIS_GROWTH_TAB {
         let hint = match lang {
-            Lang::En => "[↑/↓ PgUp/PgDn] Scroll   Compares all time   [Esc] Back",
-            Lang::Ja => "[↑/↓ PgUp/PgDn] スクロール   全期間で比べます   [Esc] 戻る",
+            Lang::En => "[↑/↓ PgUp/PgDn] Scroll   [?] Terms   Compares all time   [Esc] Back",
+            Lang::Ja => "[↑/↓ PgUp/PgDn] スクロール   [?] 用語   全期間で比べます   [Esc] 戻る",
         };
         frame.render_widget(Paragraph::new(hint).alignment(Alignment::Center), chunks[2]);
         return;
@@ -88,8 +88,9 @@ pub fn render(frame: &mut Frame, app: &App) {
         .as_deref()
         .map_or_else(|| Msg::ModeAll.text(lang).to_owned(), |mode| mode_label(mode, lang));
     let hint = format!(
-        "{}   {}: {period}   {}: {mode}   {}",
+        "{}   {}   {}: {period}   {}: {mode}   {}",
         Msg::AnalysisHintTab.text(lang),
+        if lang == Lang::En { "[?] Terms" } else { "[?] 用語" },
         Msg::AnalysisHintPeriod.text(lang),
         Msg::AnalysisHintMode.text(lang),
         Msg::AnalysisHintBack.text(lang)

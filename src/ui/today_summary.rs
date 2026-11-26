@@ -256,8 +256,8 @@ pub(crate) fn render_footer(frame: &mut Frame, lang: Lang, theme: &Theme, area: 
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             match lang {
-                Lang::Ja => "Summary   [S] 詳細   [Esc] 戻る",
-                Lang::En => "Summary   [S] details   [Esc] back",
+                Lang::Ja => "Summary   [S] 詳細   [Esc] 戻る   [?] 用語",
+                Lang::En => "Summary   [S] details   [Esc] back   [?] Terms",
             },
             Style::default().fg(theme.muted),
         )))

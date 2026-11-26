@@ -95,8 +95,8 @@ pub fn render(frame: &mut Frame, app: &App) {
         frame.render_widget(Paragraph::new(lines), rows[0]);
     }
     let hint = match lang {
-        Lang::En => "[Enter] Start    [Esc] Back",
-        Lang::Ja => "[Enter] 開始    [Esc] 戻る",
+        Lang::En => "[Enter] Start    [?] Terms    [Esc] Back",
+        Lang::Ja => "[Enter] 開始    [?] 用語    [Esc] 戻る",
     };
     frame.render_widget(Paragraph::new(hint).style(Style::default().fg(theme.accent)), rows[1]);
 }

@@ -38,6 +38,7 @@ mod error_diagnosis;
 mod error_mode;
 mod gate;
 mod ghost;
+mod glossary;
 mod grades;
 mod graphics_detect;
 mod growth;

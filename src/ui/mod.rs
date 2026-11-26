@@ -12,6 +12,7 @@ pub mod bigtext;
 pub mod bigtext_image;
 pub mod briefing;
 pub mod countdown;
+pub mod glossary;
 pub mod history;
 mod image_cache;
 pub mod key_picker;
@@ -47,6 +48,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         Screen::About => about::render(frame, app),
         Screen::Menu => menu::render(frame, app),
         Screen::Briefing => briefing::render(frame, app),
+        Screen::Glossary => glossary::render(frame, app),
         Screen::MenuSummary => menu_summary::render(frame, app),
         Screen::ModeSelect => mode_select::render(frame, app),
         Screen::KeyPicker => key_picker::render(frame, app),
