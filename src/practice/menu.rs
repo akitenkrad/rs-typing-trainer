@@ -2330,7 +2330,10 @@ pub fn build_from_storage(
         .flat_map(|run| past_menus_from_run(&run))
         .collect::<Vec<_>>();
 
-    let records = db::load_records_filtered(path, None, None)?;
+    let records = db::load_records_filtered(path, None, None)?
+        .into_iter()
+        .filter(|record| !record.header.bench_id.as_deref().is_some_and(crate::bench::is_v3_bench_id))
+        .collect::<Vec<_>>();
     let layout = builtin_layout(&config.keyboard.layout).unwrap_or_else(|_| builtin_layout("qwerty").expect("bundled qwerty"));
     let keyboard_geometry = geometry(&config.keyboard.geometry).unwrap_or_else(|| geometry("ansi").expect("bundled ansi"));
     let corpus = DataCatalog::load(&crate::config::DataConfig::default(), home)?;

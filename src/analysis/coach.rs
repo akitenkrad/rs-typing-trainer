@@ -55,6 +55,12 @@ pub fn build(
     as_of: NaiveDate,
     lang: Lang,
 ) -> AppResult<CoachReport> {
+    let filtered = records
+        .iter()
+        .filter(|record| !record.header.bench_id.as_deref().is_some_and(crate::bench::is_v3_bench_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let records = filtered.as_slice();
     let layout = builtin_layout(&config.keyboard.layout).unwrap_or_else(|_| builtin_layout("qwerty").expect("bundled qwerty"));
     let keyboard_geometry = geometry(&config.keyboard.geometry).unwrap_or_else(|| geometry("ansi").expect("bundled ansi"));
     let catalog = DataCatalog::load(&DataConfig::default(), home)?;

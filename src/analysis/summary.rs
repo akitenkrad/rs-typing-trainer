@@ -95,6 +95,12 @@ pub struct SkillAxisValue {
 }
 
 pub fn generate(records: &[SessionRecord], config: &Config, as_of: NaiveDate, lang: Lang) -> SummaryReport {
+    let filtered = records
+        .iter()
+        .filter(|record| !record.header.bench_id.as_deref().is_some_and(crate::bench::is_v3_bench_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let records = filtered.as_slice();
     if records.is_empty() {
         return SummaryReport {
             lines: vec![match lang {
@@ -117,6 +123,19 @@ pub fn generate_with_metrics(
     as_of: NaiveDate,
     lang: Lang,
 ) -> SummaryReport {
+    if records
+        .iter()
+        .any(|record| record.header.bench_id.as_deref().is_some_and(crate::bench::is_v3_bench_id))
+    {
+        let filtered = records
+            .iter()
+            .filter(|record| !record.header.bench_id.as_deref().is_some_and(crate::bench::is_v3_bench_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        let geometry = geometry(&config.keyboard.geometry).unwrap_or_else(|| geometry("ansi").expect("bundled ansi"));
+        let filtered_details = analyze_records(&filtered, layout, &geometry, analysis_settings(config));
+        return generate_with_metrics(&filtered, config, layout, &filtered_details, as_of, lang);
+    }
     if records.is_empty() {
         return generate(records, config, as_of, lang);
     }

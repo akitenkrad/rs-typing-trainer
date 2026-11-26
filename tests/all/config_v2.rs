@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use rs_typing_trainer::config::{Config, ErrorMode, KeyFilter, ModeKind, save_mode_controls};
+use rs_typing_trainer::config::{BenchSeries, Config, ErrorMode, KeyFilter, ModeKind, save_mode_controls};
 use rs_typing_trainer::graphics::GraphicsPreference;
 use rs_typing_trainer::i18n::Lang;
 use tempfile::TempDir;
@@ -122,6 +122,14 @@ db_path = "/tmp/test-sessions.db"
 #[test]
 fn auto_difficulty_defaults_to_enabled() {
     assert!(Config::default().practice.auto_difficulty);
+}
+
+#[test]
+fn benchmark_series_defaults_to_v2_and_accepts_only_v2_or_v3() {
+    assert_eq!(Config::default().bench.series, BenchSeries::V2);
+    assert_eq!(Config::from_toml("[bench]\nseries = \"v2\"\n").unwrap().bench.series, BenchSeries::V2);
+    assert_eq!(Config::from_toml("[bench]\nseries = \"v3\"\n").unwrap().bench.series, BenchSeries::V3);
+    assert!(Config::from_toml("[bench]\nseries = \"v4\"\n").is_err());
 }
 
 #[test]

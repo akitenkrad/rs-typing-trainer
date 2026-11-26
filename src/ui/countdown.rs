@@ -57,6 +57,19 @@ pub fn render(frame: &mut Frame, app: &App, remaining: f32) {
     let para = Paragraph::new(big_lines).alignment(Alignment::Center);
     frame.render_widget(para, chunks[1]);
 
+    if app.active_bench_v3_part() == Some(crate::bench::BenchV3Part::W) {
+        let label = match lang {
+            crate::i18n::Lang::En => "Warm-up (not scored)",
+            crate::i18n::Lang::Ja => "準備運動（採点しません）",
+        };
+        frame.render_widget(
+            Paragraph::new(label)
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(theme.warning).add_modifier(Modifier::BOLD)),
+            chunks[2],
+        );
+    }
+
     let (hint_text, hint_color) = if app.abort_confirmation_active() {
         (Msg::AbortConfirmHint.text(lang), theme.warning)
     } else {

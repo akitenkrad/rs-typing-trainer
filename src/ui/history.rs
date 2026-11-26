@@ -241,31 +241,52 @@ fn kind_for_entry(entry: &HistoryEntry, lang: Lang) -> String {
 fn content_for_entry(entry: &HistoryEntry, lang: Lang) -> String {
     match entry {
         HistoryEntry::Session(summary) => mode_label(&summary.mode, lang).to_owned(),
-        HistoryEntry::BenchRun { form, parts, .. } if parts.len() == 1 => {
+        HistoryEntry::BenchRun { series, form, parts, .. } if parts.len() == 1 => {
             let part = bench_part(&parts[0]).unwrap_or_else(|| "—".to_owned());
             match lang {
-                Lang::En => format!("{part} · form {form}"),
-                Lang::Ja => format!("{part}・版 {form}"),
+                Lang::En => format!("{series} · {} · form {form}", bench_part_label(&part, lang)),
+                Lang::Ja => format!("{series}・{}・版 {form}", bench_part_label(&part, lang)),
             }
         }
-        HistoryEntry::BenchRun { form, parts, .. } => {
+        HistoryEntry::BenchRun { series, form, parts, .. } => {
             let scores = parts
                 .iter()
-                .map(|part| format!("{} {:.1}", bench_part(part).unwrap_or_else(|| "—".to_owned()), part.wpm))
+                .map(|part| {
+                    let id = bench_part(part).unwrap_or_else(|| "—".to_owned());
+                    format!("{} {:.1}", bench_part_label(&id, lang), part.wpm)
+                })
                 .collect::<Vec<_>>()
                 .join(" / ");
             match lang {
-                Lang::En => format!("form {form} · {scores}"),
-                Lang::Ja => format!("版 {form}  {scores}"),
+                Lang::En => format!("{series} · form {form} · {scores}"),
+                Lang::Ja => format!("{series}・版 {form}  {scores}"),
             }
         }
-        HistoryEntry::BenchPart { form, summary, .. } => {
+        HistoryEntry::BenchPart { series, form, summary, .. } => {
             let part = bench_part(summary).unwrap_or_else(|| "—".to_owned());
             match lang {
-                Lang::En => format!("  ↳ {part} · form {form}"),
-                Lang::Ja => format!("  ↳ {part}・版 {form}"),
+                Lang::En => format!("  ↳ {series} · {} · form {form}", bench_part_label(&part, lang)),
+                Lang::Ja => format!("  ↳ {series}・{}・版 {form}", bench_part_label(&part, lang)),
             }
         }
+    }
+}
+
+fn bench_part_label(part: &str, lang: Lang) -> String {
+    match (part, lang) {
+        ("W", Lang::En) => "W Warm-up".to_owned(),
+        ("W", Lang::Ja) => "W 準備運動".to_owned(),
+        ("EW", Lang::En) => "EW English words".to_owned(),
+        ("EW", Lang::Ja) => "EW 英単語".to_owned(),
+        ("ES", Lang::En) => "ES English sentences".to_owned(),
+        ("ES", Lang::Ja) => "ES 英文".to_owned(),
+        ("JW", Lang::En) => "JW Japanese words and phrases".to_owned(),
+        ("JW", Lang::Ja) => "JW 日本語の単語と句".to_owned(),
+        ("JS", Lang::En) => "JS Japanese sentences".to_owned(),
+        ("JS", Lang::Ja) => "JS 日本語の短文".to_owned(),
+        ("PW", Lang::En) => "PW Pseudo-words".to_owned(),
+        ("PW", Lang::Ja) => "PW 擬似語".to_owned(),
+        _ => part.to_owned(),
     }
 }
 

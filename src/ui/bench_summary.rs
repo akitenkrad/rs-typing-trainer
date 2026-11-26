@@ -34,6 +34,12 @@ pub fn render(frame: &mut Frame, app: &App) {
         .constraints([Constraint::Min(1), Constraint::Length(2)])
         .split(inner);
 
+    if app.benchmark_series_v3() {
+        render_v3_text(frame, app, &theme, rows[0]);
+        render_hint(frame, app, &theme, rows[1]);
+        return;
+    }
+
     let graphics = app.graphics.mode != GraphicsMode::Off && app.graphics.cell_pixels.is_some();
     let cards = graphics && rows[0].width >= 90 && rows[0].height >= 25;
     let badge = cards && rows[0].width >= 100 && rows[0].height >= 27;
@@ -45,6 +51,38 @@ pub fn render(frame: &mut Frame, app: &App) {
         render_text(frame, app, &theme, rows[0]);
     }
     render_hint(frame, app, &theme, rows[1]);
+}
+
+fn render_v3_text(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    let lang = app.config.general.lang;
+    let mut lines = app
+        .bench_v3_results
+        .iter()
+        .map(|result| {
+            let previous = delta_pair(
+                lang,
+                result.comparison.previous_wpm_delta,
+                result.comparison.previous_accuracy_delta,
+                MetricDeltaKind::Previous,
+            );
+            Line::from(format!(
+                "{}  {:.1} WPM  {:.1}%  {previous}  {}",
+                v3_part_label(result.part, lang),
+                result.wpm,
+                result.accuracy * 100.0,
+                short_version(&result.id)
+            ))
+        })
+        .collect::<Vec<_>>();
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        match lang {
+            Lang::En => "v3 analysis is coming soon",
+            Lang::Ja => "v3 の分析は準備中",
+        },
+        Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+    )));
+    frame.render_widget(Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: true }), left_inset(area));
 }
 
 fn render_rich(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, badge: bool, keyboard: bool, trends: bool) {
@@ -763,5 +801,22 @@ pub(crate) fn part_label(part: BenchPart, lang: Lang) -> &'static str {
         BenchPart::B => Msg::BenchPartB.text(lang),
         BenchPart::C => Msg::BenchPartC.text(lang),
         BenchPart::D => Msg::BenchPartD.text(lang),
+    }
+}
+
+pub(crate) fn v3_part_label(part: crate::bench::BenchV3Part, lang: Lang) -> &'static str {
+    match (part, lang) {
+        (crate::bench::BenchV3Part::W, Lang::En) => "Warm-up",
+        (crate::bench::BenchV3Part::W, Lang::Ja) => "準備運動",
+        (crate::bench::BenchV3Part::EW, Lang::En) => "English words",
+        (crate::bench::BenchV3Part::EW, Lang::Ja) => "英単語",
+        (crate::bench::BenchV3Part::ES, Lang::En) => "English sentences",
+        (crate::bench::BenchV3Part::ES, Lang::Ja) => "英文",
+        (crate::bench::BenchV3Part::JW, Lang::En) => "Japanese words and phrases",
+        (crate::bench::BenchV3Part::JW, Lang::Ja) => "日本語の単語と句",
+        (crate::bench::BenchV3Part::JS, Lang::En) => "Japanese sentences",
+        (crate::bench::BenchV3Part::JS, Lang::Ja) => "日本語の短文",
+        (crate::bench::BenchV3Part::PW, Lang::En) => "Pseudo-words",
+        (crate::bench::BenchV3Part::PW, Lang::Ja) => "擬似語",
     }
 }

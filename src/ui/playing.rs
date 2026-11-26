@@ -69,7 +69,13 @@ pub fn render_with_footer(frame: &mut Frame, app: &App, footer: Option<Line<'sta
     let area = frame.area();
 
     let flashing = app.active_bench_id.is_none() && !app.config.session.blind && mistype_flash_active(app);
-    let (border_style, title) = if flashing {
+    let (border_style, title) = if app.active_bench_v3_part() == Some(crate::bench::BenchV3Part::W) {
+        let label = match lang {
+            crate::i18n::Lang::En => "Warm-up (not scored)",
+            crate::i18n::Lang::Ja => "準備運動（採点しません）",
+        };
+        (Style::default().fg(theme.warning), format!(" {label} "))
+    } else if flashing {
         (
             Style::default().fg(theme.mistype).add_modifier(Modifier::BOLD),
             format!(" {}  ✗ {} ", Msg::AppTitle.text(lang), Msg::MistypeTitle.text(lang)),
@@ -211,7 +217,7 @@ pub fn resolve_playing_layout(app: &App, inner: Rect) -> PlayingLayout {
     let show_rhythm = app.config.mode.kind == crate::config::ModeKind::Rhythm;
     let show_goal = crate::ui::live_goal::playing_goal(app).is_some();
     let base_rows = 3 + u16::from(show_focus) + u16::from(show_rhythm) + u16::from(show_goal);
-    let keyboard_requested = app.active_bench_id.is_some() || app.config.keyboard.show != "hidden";
+    let keyboard_requested = (app.active_bench_id.is_some() && app.active_bench_v3_part().is_none()) || app.config.keyboard.show != "hidden";
     let requested_style = KeyboardStyle::parse(&app.config.keyboard.style);
     let unlock_rows = u16::from(app.config.mode.kind == crate::config::ModeKind::Unlock) * 2;
     let keyboard_height = |style: Option<KeyboardStyle>| style.map_or(0, |style| style.height(app.config.keyboard.finger_guide) + unlock_rows);

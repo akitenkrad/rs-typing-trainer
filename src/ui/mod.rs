@@ -8,6 +8,7 @@ pub mod animation;
 pub mod bench_select;
 pub mod bench_summary;
 pub mod bench_tab_summary;
+pub mod bench_warmup;
 pub mod bigtext;
 pub mod bigtext_image;
 pub mod briefing;
@@ -65,6 +66,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         Screen::ReadingReports => reading_reports::render(frame, app),
         Screen::Settings => settings::render(frame, app),
         Screen::BenchSelect => bench_select::render(frame, app),
+        Screen::BenchWarmupComplete => bench_warmup::render(frame, app),
         Screen::BenchSummary => bench_summary::render(frame, app),
         Screen::Analysis => analysis::render(frame, app),
     }

@@ -866,9 +866,118 @@ pub fn latest_bench_parallel(path: &Path, series: &str) -> AppResult<Option<u8>>
     let ids = statement
         .query_map(params![pattern], |row| row.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(ids
+    Ok(ids.into_iter().find_map(|id| {
+        if series == crate::bench::BENCH_V3_SERIES {
+            crate::bench::parse_v3_bench_id(&id).map(|(_, index)| index)
+        } else {
+            crate::bench::parse_bench_id(&id).and_then(|(candidate_series, _, index)| (candidate_series == series).then_some(index))
+        }
+    }))
+}
+
+pub fn incomplete_v3_benchmark(path: &Path, today: chrono::NaiveDate) -> AppResult<Option<crate::bench::BenchV3Resume>> {
+    let records = load_records_filtered(path, None, Some("bench"))?;
+    let today_records = records
+        .iter()
+        .enumerate()
+        .filter_map(|(position, record)| {
+            let finished = DateTime::parse_from_rfc3339(&record.header.finished_at).ok()?;
+            if finished.with_timezone(&Local).date_naive() != today {
+                return None;
+            }
+            let (part, parallel_index) = crate::bench::parse_v3_bench_id(record.header.bench_id.as_deref()?)?;
+            (part != crate::bench::BenchV3Part::W).then_some((position, record, part, parallel_index))
+        })
+        .collect::<Vec<_>>();
+    let Some(parallel_index) = today_records.last().map(|row| row.3) else {
+        return Ok(None);
+    };
+    let completed = v3_bench_results_for_records(&records, &today_records, parallel_index);
+    let part = [
+        crate::bench::BenchV3Part::EW,
+        crate::bench::BenchV3Part::ES,
+        crate::bench::BenchV3Part::JW,
+        crate::bench::BenchV3Part::JS,
+        crate::bench::BenchV3Part::PW,
+    ]
+    .into_iter()
+    .find(|part| !completed.iter().any(|result| result.part == *part));
+    Ok(part.map(|part| crate::bench::BenchV3Resume {
+        part,
+        parallel_index,
+        completed,
+    }))
+}
+
+pub fn v3_bench_results_for_day_form(
+    path: &Path,
+    today: chrono::NaiveDate,
+    parallel_index: u8,
+) -> AppResult<Vec<crate::bench::BenchV3ResultSummary>> {
+    let records = load_records_filtered(path, None, Some("bench"))?;
+    let today_records = records
+        .iter()
+        .enumerate()
+        .filter_map(|(position, record)| {
+            let finished = DateTime::parse_from_rfc3339(&record.header.finished_at).ok()?;
+            if finished.with_timezone(&Local).date_naive() != today {
+                return None;
+            }
+            let (part, index) = crate::bench::parse_v3_bench_id(record.header.bench_id.as_deref()?)?;
+            (part != crate::bench::BenchV3Part::W).then_some((position, record, part, index))
+        })
+        .collect::<Vec<_>>();
+    Ok(v3_bench_results_for_records(&records, &today_records, parallel_index))
+}
+
+fn v3_bench_results_for_records(
+    records: &[SessionRecord],
+    today_records: &[(usize, &SessionRecord, crate::bench::BenchV3Part, u8)],
+    parallel_index: u8,
+) -> Vec<crate::bench::BenchV3ResultSummary> {
+    let mut selected = std::collections::BTreeMap::new();
+    for (position, record, part, index) in today_records {
+        if *index == parallel_index {
+            selected.insert(*part, (*position, *record));
+        }
+    }
+    selected
         .into_iter()
-        .find_map(|id| crate::bench::parse_bench_id(&id).and_then(|(candidate_series, _, index)| (candidate_series == series).then_some(index))))
+        .map(|(part, (position, record))| {
+            let prior = records[..position]
+                .iter()
+                .filter(|candidate| {
+                    candidate
+                        .header
+                        .bench_id
+                        .as_deref()
+                        .and_then(crate::bench::parse_v3_bench_id)
+                        .is_some_and(|(candidate_part, _)| candidate_part == part)
+                })
+                .map(|candidate| (candidate.header.net_wpm, candidate.header.accuracy))
+                .collect::<Vec<_>>();
+            let previous = prior.last().copied();
+            let best_wpm = prior.iter().map(|row| row.0).max_by(f64::total_cmp);
+            let best_accuracy = prior.iter().map(|row| row.1).max_by(f64::total_cmp);
+            let recent = prior.iter().rev().take(3).copied().collect::<Vec<_>>();
+            let recent_wpm = (!recent.is_empty()).then(|| median_f64(recent.iter().map(|row| row.0).collect()));
+            let recent_accuracy = (!recent.is_empty()).then(|| median_f64(recent.iter().map(|row| row.1).collect()));
+            crate::bench::BenchV3ResultSummary {
+                id: record.header.bench_id.clone().unwrap_or_default(),
+                part,
+                wpm: record.header.net_wpm,
+                accuracy: record.header.accuracy,
+                comparison: crate::bench::BenchComparison {
+                    previous_wpm_delta: previous.map(|row| record.header.net_wpm - row.0),
+                    previous_accuracy_delta: previous.map(|row| record.header.accuracy - row.1),
+                    best_wpm_delta: best_wpm.map(|value| record.header.net_wpm - value),
+                    best_accuracy_delta: best_accuracy.map(|value| record.header.accuracy - value),
+                    recent_three_wpm_delta: recent_wpm.map(|value| record.header.net_wpm - value),
+                    recent_three_accuracy_delta: recent_accuracy.map(|value| record.header.accuracy - value),
+                },
+            }
+        })
+        .collect()
 }
 
 pub fn incomplete_benchmark(path: &Path, series: &str, today: chrono::NaiveDate) -> AppResult<Option<crate::bench::BenchResume>> {
@@ -994,17 +1103,22 @@ fn parse_bench_id(id: &str, series: &str) -> Option<(crate::bench::BenchPart, u8
 }
 
 pub fn bench_comparison(path: &Path, bench_id: &str, current_wpm: f64, current_accuracy: f64) -> AppResult<crate::bench::BenchComparison> {
-    let Some((series, part, _)) = crate::bench::parse_bench_id(bench_id) else {
-        return Ok(crate::bench::BenchComparison::default());
+    let v2 = crate::bench::parse_bench_id(bench_id);
+    let v3 = crate::bench::parse_v3_bench_id(bench_id);
+    let (series, part_name) = match (v2, v3) {
+        (Some((series, part, _)), _) => (series, part.as_str()),
+        (_, Some((part, _))) => (crate::bench::BENCH_V3_SERIES, part.as_str()),
+        _ => return Ok(crate::bench::BenchComparison::default()),
     };
     let conn = open(path)?;
-    let patterns = if matches!(part, crate::bench::BenchPart::B | crate::bench::BenchPart::D) {
+    let combines_legacy = v2.is_some_and(|(_, part, _)| matches!(part, crate::bench::BenchPart::B | crate::bench::BenchPart::D));
+    let patterns = if combines_legacy {
         (
-            format!("{}/{}/%", crate::bench::BENCH_SERIES_V1, part.as_str()),
-            format!("{}/{}/%", crate::bench::BENCH_SERIES_V2, part.as_str()),
+            format!("{}/{part_name}/%", crate::bench::BENCH_SERIES_V1),
+            format!("{}/{part_name}/%", crate::bench::BENCH_SERIES_V2),
         )
     } else {
-        let pattern = format!("{series}/{}/%", part.as_str());
+        let pattern = format!("{series}/{part_name}/%");
         (pattern.clone(), pattern)
     };
     let rows = {
@@ -1019,9 +1133,8 @@ pub fn bench_comparison(path: &Path, bench_id: &str, current_wpm: f64, current_a
             })?
             .filter_map(|row| match row {
                 Ok((id, wpm, accuracy))
-                    if crate::bench::parse_bench_id(&id).is_some_and(|(candidate_series, candidate_part, _)| {
-                        candidate_part == part
-                            && (matches!(part, crate::bench::BenchPart::B | crate::bench::BenchPart::D) || candidate_series == series)
+                    if bench_comparison_identity(&id).is_some_and(|(candidate_series, candidate_part)| {
+                        candidate_part == part_name && (combines_legacy || candidate_series == series)
                     }) =>
                 {
                     Some(Ok((wpm, accuracy)))
@@ -1045,6 +1158,14 @@ pub fn bench_comparison(path: &Path, bench_id: &str, current_wpm: f64, current_a
         recent_three_wpm_delta: recent_wpm.map(|value| current_wpm - value),
         recent_three_accuracy_delta: recent_accuracy.map(|value| current_accuracy - value),
     })
+}
+
+fn bench_comparison_identity(id: &str) -> Option<(&str, &str)> {
+    if let Some((series, part, _)) = crate::bench::parse_bench_id(id) {
+        return Some((series, part.as_str()));
+    }
+    let (part, _) = crate::bench::parse_v3_bench_id(id)?;
+    Some((crate::bench::BENCH_V3_SERIES, part.as_str()))
 }
 
 fn median_f64(mut values: Vec<f64>) -> f64 {
@@ -1071,7 +1192,11 @@ pub fn load_records_filtered(path: &Path, since: Option<chrono::NaiveDate>, mode
                 .map(|value| value.date_naive() >= minimum)
                 .unwrap_or(false)
         });
-        let is_bench = record.header.bench_id.as_deref().and_then(crate::bench::parse_bench_id).is_some();
+        let is_bench = record
+            .header
+            .bench_id
+            .as_deref()
+            .is_some_and(|id| crate::bench::parse_bench_id(id).is_some() || crate::bench::parse_v3_bench_id(id).is_some());
         let mode_matches = mode.is_none_or(|expected| {
             if expected == "bench" {
                 is_bench
@@ -1461,6 +1586,7 @@ pub fn update_transition_model_cache(
         } else {
             let records = load_records_filtered(path, None, None)?
                 .into_iter()
+                .filter(|candidate| !candidate.header.bench_id.as_deref().is_some_and(crate::bench::is_v3_bench_id))
                 .filter(|candidate| candidate.header.layout == layout.name() && session_language(candidate) == language)
                 .collect::<Vec<_>>();
             let rebuild_as_of = records

@@ -23,6 +23,12 @@ Each part is stored as a separate session with `mode = bench` and its full form 
 
 An interrupted run is reconstructed only from the database. Among current-series benchmark records saved on the current local date, the application takes the form number from the latest record, collects parts saved today with that series and form, and offers the first missing required part in A → B → C order. Part D is optional, so A through C count as complete. A resumed run keeps the series and form number fixed, and its summary combines the earlier completed parts with the newly completed parts. History likewise groups parts only when both series and form match. Ignoring the resume entry and starting a new run continues to use the normal next-form rule.
 
+## `bench-v3` when `[bench] series = "v3"`
+
+With `[bench] series = "v3"`, `B` opens the same benchmark selection screen and then runs Warm-up (`W`, 15 s, not scored or stored) → English words (`EW`, 60 s) → English sentences (`ES`, 60 s) → Japanese words and phrases (`JW`, 60 s) → Japanese sentences (`JS`, 60 s) → Pseudo-words (`PW`, 30 s) → the run summary. The warm-up is followed by a short notice and the `EW` countdown instead of a part-result screen. A resumed run repeats `W`, then continues from the first missing scored part.
+
+The series has eight forms, used in order and wrapping after 08. Scored parts are stored as `bench-v3/<part>/<form>`. v3 fixes stop-on-error, no item timeout, one preview item, no pacer, ghost, blind mode, keyboard display, daily deck, reading correction or key filtering; only the user's keyboard layout remains. Until v3 analysis is added, these records appear in history but are excluded from the v2 benchmark, grade, eight-axis, daily-speed and growth analyses. The v3 summary therefore shows per-part net WPM, accuracy and previous-run deltas, followed by a note that v3 analysis is being prepared.
+
 ## Metrics
 
 - Net WPM: correctly retained characters divided by five, per minute. In advance mode, unresolved incorrect characters do not count.

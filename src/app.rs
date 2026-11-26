@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use chrono::TimeZone;
 use rand::rngs::ThreadRng;
 use rand::{Rng, thread_rng};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -16,9 +17,10 @@ use crate::analysis::prescription::{
     evaluate_stored_prescription, prescription_trends, real_word_records_since, record_prescription_session, select_controls,
 };
 use crate::bench::{
-    BenchPart, BenchResultSummary, BenchResume, BenchSettings, generate_parallel_versions_for_series, next_parallel_index, parse_bench_id,
+    BENCH_V3_SERIES, BenchPart, BenchResultSummary, BenchResume, BenchSettings, BenchV3Part, BenchV3ResultSummary, BenchV3Resume,
+    generate_parallel_versions_for_series, generate_v3_parallel_versions, is_v3_bench_id, next_parallel_index, parse_bench_id, parse_v3_bench_id,
 };
-use crate::config::{Config, DrillCell, KeyFilter, KeyboardConfig, ModeConfig, ModeKind, PromptUnit, SessionConfig};
+use crate::config::{BenchSeries, Config, DrillCell, KeyFilter, KeyboardConfig, ModeConfig, ModeKind, PromptUnit, SessionConfig};
 use crate::data::{DataCatalog, DataKind, TrainingDataSource};
 use crate::engine::modes::{GeneratedPrompt, ModeGenerator};
 use crate::engine::romaji::RomajiJudge;
@@ -92,6 +94,7 @@ pub enum Screen {
     Replay,
     Settings,
     BenchSelect,
+    BenchWarmupComplete,
     BenchSummary,
     Analysis,
     Glossary,
@@ -323,11 +326,13 @@ pub struct App {
     pub active_bench_id: Option<String>,
     pub bench_comparison: Option<crate::bench::BenchComparison>,
     pub bench_results: Vec<BenchResultSummary>,
+    pub bench_v3_results: Vec<BenchV3ResultSummary>,
     pub bench_summary_records: Vec<SessionRecord>,
     pub bench_summary_current: Vec<SessionRecord>,
     pub bench_summary_analysis: crate::analysis::bench_summary::BenchmarkRunAnalysis,
     pub bench_summary_grades: crate::analysis::grades::GradesAnalysis,
     pub bench_resume: Option<BenchResume>,
+    pub bench_v3_resume: Option<BenchV3Resume>,
     pub analysis_tab: usize,
     pub analysis_period: AnalysisPeriod,
     pub analysis_mode_filter: Option<String>,
@@ -466,12 +471,20 @@ pub struct AdaptiveResultRow {
     pub prior_estimated_iki_ms: f64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BenchRunPart {
+    V2(BenchPart),
+    V3(BenchV3Part),
+}
+
 struct BenchRun {
     include_d: bool,
     parallel_index: u8,
-    part: BenchPart,
+    part: BenchRunPart,
+    resume_v3_part: Option<BenchV3Part>,
     original_session: SessionConfig,
     original_mode: ModeConfig,
+    original_v3_config: Option<Box<Config>>,
 }
 
 impl App {
@@ -571,11 +584,13 @@ impl App {
             active_bench_id: None,
             bench_comparison: None,
             bench_results: Vec::new(),
+            bench_v3_results: Vec::new(),
             bench_summary_records: Vec::new(),
             bench_summary_current: Vec::new(),
             bench_summary_analysis: crate::analysis::bench_summary::BenchmarkRunAnalysis::default(),
             bench_summary_grades: crate::analysis::grades::GradesAnalysis::default(),
             bench_resume: None,
+            bench_v3_resume: None,
             analysis_tab: ANALYSIS_COACH_TAB,
             analysis_period: AnalysisPeriod::Days30,
             analysis_mode_filter: None,
@@ -1015,6 +1030,7 @@ impl App {
             Screen::Replay => self.handle_history_replay_key(key, action, now),
             Screen::Settings => self.handle_settings_key(key, action),
             Screen::BenchSelect => self.handle_bench_select_key(key, action),
+            Screen::BenchWarmupComplete => self.handle_bench_warmup_complete_key(key, action, now),
             Screen::BenchSummary => self.handle_bench_summary_key(key, action),
             Screen::Analysis => self.handle_analysis_key(key, action),
             Screen::Glossary => self.handle_glossary_key(key),
@@ -1055,9 +1071,15 @@ impl App {
             KeyCode::Char('b') | KeyCode::Char('B') => {
                 self.bench_include_d = false;
                 self.bench_selected = 0;
-                self.bench_resume = db::incomplete_benchmark(&self.db_path(), crate::bench::BENCH_SERIES, self.analysis_as_of)
-                    .ok()
-                    .flatten();
+                if self.config.bench.series == BenchSeries::V3 {
+                    self.bench_resume = None;
+                    self.bench_v3_resume = db::incomplete_v3_benchmark(&self.db_path(), self.analysis_as_of).ok().flatten();
+                } else {
+                    self.bench_resume = db::incomplete_benchmark(&self.db_path(), crate::bench::BENCH_SERIES, self.analysis_as_of)
+                        .ok()
+                        .flatten();
+                    self.bench_v3_resume = None;
+                }
                 self.screen = Screen::BenchSelect;
             }
             KeyCode::Char('a') | KeyCode::Char('A') => self.open_analysis(),
@@ -1650,22 +1672,37 @@ impl App {
     }
 
     fn handle_bench_select_key(&mut self, key: KeyEvent, action: InputAction) {
-        let has_resume = self.bench_resume.is_some();
+        let v3 = self.config.bench.series == BenchSeries::V3;
+        let has_resume = if v3 {
+            self.bench_v3_resume.is_some()
+        } else {
+            self.bench_resume.is_some()
+        };
         let start_index = usize::from(has_resume);
-        let optional_index = start_index + 1;
+        let last_index = start_index + usize::from(!v3);
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => self.bench_selected = self.bench_selected.saturating_sub(1),
-            KeyCode::Down | KeyCode::Char('j') => self.bench_selected = (self.bench_selected + 1).min(optional_index),
-            KeyCode::Char('d') | KeyCode::Char('D') => self.bench_include_d = !self.bench_include_d,
+            KeyCode::Down | KeyCode::Char('j') => self.bench_selected = (self.bench_selected + 1).min(last_index),
+            KeyCode::Char('d') | KeyCode::Char('D') if !v3 => self.bench_include_d = !self.bench_include_d,
             KeyCode::Enter if has_resume && self.bench_selected == 0 => self.resume_benchmark(),
             KeyCode::Enter if self.bench_selected == start_index => self.start_benchmark(),
-            KeyCode::Enter => self.bench_include_d = !self.bench_include_d,
+            KeyCode::Enter if !v3 => self.bench_include_d = !self.bench_include_d,
             KeyCode::Char(' ') => self.start_benchmark(),
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => self.screen = Screen::Title,
             _ => {}
         }
         if matches!(action, InputAction::Abort) {
             self.screen = Screen::Title;
+        }
+    }
+
+    fn handle_bench_warmup_complete_key(&mut self, key: KeyEvent, action: InputAction, now: Instant) {
+        match key.code {
+            KeyCode::Enter | KeyCode::Char(' ') => self.continue_v3_after_warmup(),
+            _ => {}
+        }
+        if matches!(action, InputAction::Abort) && self.confirm_abort(now) {
+            self.abort_benchmark();
         }
     }
 
@@ -1844,7 +1881,11 @@ impl App {
     }
 
     fn reload_growth(&mut self) {
-        let records = db::load_records_filtered(&self.db_path(), None, None).unwrap_or_default();
+        let records = db::load_records_filtered(&self.db_path(), None, None)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|record| !record.header.bench_id.as_deref().is_some_and(is_v3_bench_id))
+            .collect::<Vec<_>>();
         let prescriptions = db::load_prescriptions(&self.db_path()).unwrap_or_default();
         let selected_goal = db::load_selected_goal(&self.db_path()).unwrap_or_default();
         let progress = crate::analysis::coach::build(
@@ -1881,7 +1922,11 @@ impl App {
     fn reload_analysis(&mut self) {
         let today = self.analysis_as_of;
         let since = self.analysis_period.start_date(today);
-        self.analysis_records = db::load_records_filtered(&self.db_path(), since, self.analysis_mode_filter.as_deref()).unwrap_or_default();
+        self.analysis_records = db::load_records_filtered(&self.db_path(), since, self.analysis_mode_filter.as_deref())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|record| !record.header.bench_id.as_deref().is_some_and(is_v3_bench_id))
+            .collect();
         let geometry = crate::layout::geometry::geometry(&self.config.keyboard.geometry)
             .or_else(|| crate::layout::geometry::geometry("ansi"))
             .expect("bundled ansi geometry");
@@ -1906,7 +1951,11 @@ impl App {
         let bench_records = if matches!(self.analysis_mode_filter.as_deref(), None | Some("bench")) {
             self.analysis_records.clone()
         } else {
-            db::load_records_filtered(&self.db_path(), since, Some("bench")).unwrap_or_default()
+            db::load_records_filtered(&self.db_path(), since, Some("bench"))
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|record| !record.header.bench_id.as_deref().is_some_and(is_v3_bench_id))
+                .collect()
         };
         self.analysis_skills =
             crate::practice::menu::skills::load_skills_tab(&self.db_path(), &self.config.keyboard.layout, &bench_records).unwrap_or_default();
@@ -1958,15 +2007,24 @@ impl App {
     }
 
     fn start_benchmark(&mut self) {
-        let previous = db::latest_bench_parallel(&self.db_path(), crate::bench::BENCH_SERIES).ok().flatten();
+        let v3 = self.config.bench.series == BenchSeries::V3;
+        let series = if v3 { BENCH_V3_SERIES } else { crate::bench::BENCH_SERIES };
+        let previous = db::latest_bench_parallel(&self.db_path(), series).ok().flatten();
         let run = BenchRun {
             include_d: self.bench_include_d,
             parallel_index: next_parallel_index(previous),
-            part: BenchPart::A,
+            part: if v3 {
+                BenchRunPart::V3(BenchV3Part::W)
+            } else {
+                BenchRunPart::V2(BenchPart::A)
+            },
+            resume_v3_part: None,
             original_session: self.config.session.clone(),
             original_mode: self.config.mode.clone(),
+            original_v3_config: v3.then(|| Box::new(self.config.clone())),
         };
         self.bench_results.clear();
+        self.bench_v3_results.clear();
         self.bench_summary_records.clear();
         self.bench_summary_current.clear();
         self.bench_summary_analysis = crate::analysis::bench_summary::BenchmarkRunAnalysis::default();
@@ -1977,53 +2035,115 @@ impl App {
     }
 
     fn resume_benchmark(&mut self) {
-        let Some(resume) = self.bench_resume.take() else { return };
-        let run = BenchRun {
-            include_d: self.bench_include_d,
-            parallel_index: resume.parallel_index,
-            part: resume.part,
-            original_session: self.config.session.clone(),
-            original_mode: self.config.mode.clone(),
+        let v3 = self.config.bench.series == BenchSeries::V3;
+        let run = if v3 {
+            let Some(resume) = self.bench_v3_resume.take() else { return };
+            self.bench_v3_results = resume.completed;
+            BenchRun {
+                include_d: false,
+                parallel_index: resume.parallel_index,
+                part: BenchRunPart::V3(BenchV3Part::W),
+                resume_v3_part: Some(resume.part),
+                original_session: self.config.session.clone(),
+                original_mode: self.config.mode.clone(),
+                original_v3_config: Some(Box::new(self.config.clone())),
+            }
+        } else {
+            let Some(resume) = self.bench_resume.take() else { return };
+            self.bench_results = resume.completed;
+            BenchRun {
+                include_d: self.bench_include_d,
+                parallel_index: resume.parallel_index,
+                part: BenchRunPart::V2(resume.part),
+                resume_v3_part: None,
+                original_session: self.config.session.clone(),
+                original_mode: self.config.mode.clone(),
+                original_v3_config: None,
+            }
         };
-        self.bench_results = resume.completed;
         self.bench_run = Some(run);
         self.configure_bench_part();
     }
 
     fn configure_bench_part(&mut self) {
         let Some(run) = self.bench_run.as_ref() else { return };
-        let settings = BenchSettings::fixed(run.part, &self.config);
-        self.config.session.duration_seconds = settings.duration_seconds;
-        self.config.session.item_timeout_seconds = settings.item_timeout_seconds;
-        self.config.session.error_mode = settings.error_mode;
-        self.config.session.preview_items = settings.preview_items;
-        self.config.mode.kind = match run.part {
-            BenchPart::A => ModeKind::Words,
-            BenchPart::B => ModeKind::Ngram,
-            BenchPart::C => ModeKind::Romaji,
-            BenchPart::D => ModeKind::Random,
-        };
-        self.active_bench_id = Some(format!("{}/{}/{:02}", crate::bench::BENCH_SERIES, run.part.as_str(), run.parallel_index));
+        match run.part {
+            BenchRunPart::V2(part) => {
+                let settings = BenchSettings::fixed(part, &self.config);
+                self.config.session.duration_seconds = settings.duration_seconds;
+                self.config.session.item_timeout_seconds = settings.item_timeout_seconds;
+                self.config.session.error_mode = settings.error_mode;
+                self.config.session.preview_items = settings.preview_items;
+                self.config.mode.kind = match part {
+                    BenchPart::A => ModeKind::Words,
+                    BenchPart::B => ModeKind::Ngram,
+                    BenchPart::C => ModeKind::Romaji,
+                    BenchPart::D => ModeKind::Random,
+                };
+                self.active_bench_id = Some(format!("{}/{}/{:02}", crate::bench::BENCH_SERIES, part.as_str(), run.parallel_index));
+            }
+            BenchRunPart::V3(part) => {
+                self.config.session.duration_seconds = part.duration_seconds();
+                self.config.session.item_timeout_seconds = 0;
+                self.config.session.error_mode = crate::config::ErrorMode::Stop;
+                self.config.session.preview_items = 1;
+                self.config.session.blind = false;
+                self.config.keyboard.show = "hidden".to_owned();
+                self.config.pacer.enabled = false;
+                self.config.pacer.target_wpm = None;
+                self.config.mode.keys.clear();
+                self.config.mode.key_filter = KeyFilter::Include;
+                self.config.mode.drill = None;
+                self.config.mode.kind = match part {
+                    BenchV3Part::W | BenchV3Part::EW => ModeKind::Words,
+                    BenchV3Part::ES => ModeKind::Sentence,
+                    BenchV3Part::JW => ModeKind::Romaji,
+                    BenchV3Part::JS => ModeKind::Sentence,
+                    BenchV3Part::PW => ModeKind::Ngram,
+                };
+                self.config.mode.sentence.lang = part.language().to_owned();
+                self.config.mode.phrase.lang = part.language().to_owned();
+                self.active_bench_id = Some(format!("{BENCH_V3_SERIES}/{}/{:02}", part.as_str(), run.parallel_index));
+            }
+        }
         self.start_countdown();
     }
 
     fn continue_benchmark(&mut self, now: Instant) {
-        let next = self.bench_run.as_ref().and_then(|run| run.part.next(run.include_d));
+        let next = self.bench_run.as_ref().and_then(|run| match run.part {
+            BenchRunPart::V2(part) => part.next(run.include_d).map(BenchRunPart::V2),
+            BenchRunPart::V3(part) => part.next().map(BenchRunPart::V3),
+        });
         if let Some(next) = next {
             if let Some(run) = self.bench_run.as_mut() {
                 run.part = next;
             }
             self.configure_bench_part();
         } else if let Some(parallel_index) = self.bench_run.as_ref().map(|run| run.parallel_index) {
-            if let Ok(results) = db::bench_results_for_day_form(&self.db_path(), crate::bench::BENCH_SERIES, self.analysis_as_of, parallel_index)
-                && !results.is_empty()
-            {
-                self.bench_results = results;
+            if self.benchmark_series_v3() {
+                if let Ok(results) = db::v3_bench_results_for_day_form(&self.db_path(), self.analysis_as_of, parallel_index)
+                    && !results.is_empty()
+                {
+                    self.bench_v3_results = results;
+                }
+            } else {
+                if let Ok(results) = db::bench_results_for_day_form(&self.db_path(), crate::bench::BENCH_SERIES, self.analysis_as_of, parallel_index)
+                    && !results.is_empty()
+                {
+                    self.bench_results = results;
+                }
+                self.refresh_bench_summary(parallel_index);
             }
-            self.refresh_bench_summary(parallel_index);
             self.leave_benchmark(Screen::BenchSummary);
             self.begin_result_input_delay(now);
         }
+    }
+
+    fn continue_v3_after_warmup(&mut self) {
+        let Some(run) = self.bench_run.as_mut() else { return };
+        let next = run.resume_v3_part.take().unwrap_or(BenchV3Part::EW);
+        run.part = BenchRunPart::V3(next);
+        self.configure_bench_part();
     }
 
     fn refresh_bench_summary(&mut self, parallel_index: u8) {
@@ -2080,11 +2200,16 @@ impl App {
     fn leave_benchmark(&mut self, destination: Screen) {
         self.game = None;
         if let Some(run) = self.bench_run.take() {
-            self.config.session = run.original_session;
-            self.config.mode = run.original_mode;
+            if let Some(original) = run.original_v3_config {
+                self.config = *original;
+            } else {
+                self.config.session = run.original_session;
+                self.config.mode = run.original_mode;
+            }
         }
         self.active_bench_id = None;
         self.bench_resume = None;
+        self.bench_v3_resume = None;
         self.abort_confirm_until = None;
         self.input_blocked_until = None;
         self.screen = destination;
@@ -2134,11 +2259,35 @@ impl App {
     }
 
     pub fn active_bench_part(&self) -> Option<BenchPart> {
-        self.bench_run.as_ref().map(|run| run.part)
+        self.bench_run.as_ref().and_then(|run| match run.part {
+            BenchRunPart::V2(part) => Some(part),
+            BenchRunPart::V3(_) => None,
+        })
     }
 
     pub fn next_bench_part(&self) -> Option<BenchPart> {
-        self.bench_run.as_ref().and_then(|run| run.part.next(run.include_d))
+        self.bench_run.as_ref().and_then(|run| match run.part {
+            BenchRunPart::V2(part) => part.next(run.include_d),
+            BenchRunPart::V3(_) => None,
+        })
+    }
+
+    pub fn active_bench_v3_part(&self) -> Option<BenchV3Part> {
+        self.bench_run.as_ref().and_then(|run| match run.part {
+            BenchRunPart::V3(part) => Some(part),
+            BenchRunPart::V2(_) => None,
+        })
+    }
+
+    pub fn next_bench_v3_part(&self) -> Option<BenchV3Part> {
+        self.bench_run.as_ref().and_then(|run| match run.part {
+            BenchRunPart::V3(part) => part.next(),
+            BenchRunPart::V2(_) => None,
+        })
+    }
+
+    pub fn benchmark_series_v3(&self) -> bool {
+        self.config.bench.series == BenchSeries::V3
     }
 
     fn handle_key_picker_key(&mut self, key: KeyEvent, action: InputAction) {
@@ -3438,13 +3587,24 @@ impl App {
             None
         };
         let bench_prompts = self.bench_run.as_ref().map(|run| {
-            generate_parallel_versions_for_series(crate::bench::BENCH_SERIES, run.part, &catalog, &practice_layout, &physical)
-                [usize::from(run.parallel_index.clamp(1, crate::bench::PARALLEL_VERSION_COUNT) - 1)]
-            .clone()
-            .prompts
-            .into_iter()
-            .map(|prompt| GeneratedPrompt::fixed(prompt.text, prompt.reading, prompt.target))
-            .collect::<Vec<_>>()
+            let prompts = match run.part {
+                BenchRunPart::V2(part) => {
+                    generate_parallel_versions_for_series(crate::bench::BENCH_SERIES, part, &catalog, &practice_layout, &physical)
+                        [usize::from(run.parallel_index.clamp(1, crate::bench::PARALLEL_VERSION_COUNT) - 1)]
+                    .clone()
+                    .prompts
+                }
+                BenchRunPart::V3(part) => {
+                    generate_v3_parallel_versions(part, &catalog, &practice_layout, &physical)
+                        [usize::from(run.parallel_index.clamp(1, crate::bench::PARALLEL_VERSION_COUNT) - 1)]
+                    .clone()
+                    .prompts
+                }
+            };
+            prompts
+                .into_iter()
+                .map(|prompt| GeneratedPrompt::fixed(prompt.text, prompt.reading, prompt.target))
+                .collect::<Vec<_>>()
         });
         let mut mode_generator = if let Some(plan) = adaptive_plan.as_ref() {
             let unit = self.config.mode.prompt_unit();
@@ -3489,7 +3649,9 @@ impl App {
             (first, preview, 0)
         };
         let next_prompt = preview_prompts[0].clone();
-        let ghost = if let Some(bench_id) = self.active_bench_id.as_ref() {
+        let ghost = if self.active_bench_id.as_deref().is_some_and(is_v3_bench_id) {
+            None
+        } else if let Some(bench_id) = self.active_bench_id.as_ref() {
             select_ghost(&records, &GhostCondition::Bench { bench_id: bench_id.clone() })
         } else if self.config.mode.kind == ModeKind::Sentence {
             select_ghost(
@@ -3523,6 +3685,12 @@ impl App {
             self.config.session.duration()
         };
         let session = Session::with_error_mode(session_duration, item_timeout, first_prompt.clone().into_item(), effective_error_mode);
+        let local_now = chrono::Local::now();
+        let started_wall = chrono::Local
+            .from_local_datetime(&date.and_time(local_now.time()))
+            .earliest()
+            .unwrap_or(local_now)
+            .with_timezone(&chrono::Utc);
         self.game = Some(GameState {
             session,
             current_word: WordSlot::new_entering(first),
@@ -3534,7 +3702,7 @@ impl App {
             typed_index: 0,
             mistypes_in_word: 0,
             started_at: now,
-            started_wall: chrono::Utc::now(),
+            started_wall,
             word_started_at: now,
             metrics: LiveMetrics::default(),
             combo: 0,
@@ -4014,6 +4182,17 @@ impl App {
         let started_wall = game.started_wall;
         let ghost_opponent = game.ghost.as_ref().map(|ghost| ghost.opponent().to_owned());
         let log = game.session.into_log();
+        if self.active_bench_v3_part() == Some(BenchV3Part::W) {
+            self.active_bench_id = None;
+            self.last_result = None;
+            self.result_record = None;
+            self.bench_comparison = None;
+            self.screen = Screen::BenchWarmupComplete;
+            self.abort_confirm_until = None;
+            self.input_blocked_until = None;
+            self.ui_now = now;
+            return;
+        }
         let db_path = self.db_path();
         if self.active_bench_id.is_none()
             && let Some(kind) = daily_data_kind(&self.config)
@@ -4143,11 +4322,13 @@ impl App {
             record.header.mode = "bench".to_owned();
             // The configuration's sentence language is the practice language,
             // not the part's (MYTASK-3665): record the language the part types.
-            if let Some((_, part, _)) = crate::bench::parse_bench_id(&bench_id)
+            let language = parse_v3_bench_id(&bench_id)
+                .map(|(part, _)| part.language())
+                .or_else(|| crate::bench::parse_bench_id(&bench_id).map(|(_, part, _)| if part == BenchPart::C { "ja" } else { "en" }));
+            if let Some(lang) = language
                 && let Ok(mut params) = serde_json::from_str::<serde_json::Value>(&record.header.mode_params)
                 && let Some(object) = params.as_object_mut()
             {
-                let lang = if part == BenchPart::C { "ja" } else { "en" };
                 object.insert("lang".to_owned(), serde_json::Value::from(lang));
                 record.header.mode_params = params.to_string();
             }
@@ -4156,6 +4337,14 @@ impl App {
             record.header.error_mode = "stop".to_owned();
             if let (Some(part), Some(comparison)) = (self.active_bench_part(), self.bench_comparison) {
                 self.bench_results.push(BenchResultSummary {
+                    id: record.header.bench_id.clone().unwrap_or_default(),
+                    part,
+                    wpm: record.header.net_wpm,
+                    accuracy: record.header.accuracy,
+                    comparison,
+                });
+            } else if let (Some(part), Some(comparison)) = (self.active_bench_v3_part(), self.bench_comparison) {
+                self.bench_v3_results.push(BenchV3ResultSummary {
                     id: record.header.bench_id.clone().unwrap_or_default(),
                     part,
                     wpm: record.header.net_wpm,
@@ -4175,7 +4364,9 @@ impl App {
                 record.header.id = Some(id);
                 self.last_save_id = Some(id);
                 self.last_save_error = None;
-                if let Some(geometry) = crate::layout::geometry::geometry(&record.header.geometry) {
+                if !record.header.bench_id.as_deref().is_some_and(is_v3_bench_id)
+                    && let Some(geometry) = crate::layout::geometry::geometry(&record.header.geometry)
+                {
                     let layout = self.practice_layout().clone();
                     let _ = db::update_transition_model_cache(
                         &db_path,
@@ -4639,7 +4830,10 @@ impl HistoryEntry {
     pub fn primary_summary(&self) -> &SessionSummary {
         match self {
             Self::Session(summary) | Self::BenchPart { summary, .. } => summary,
-            Self::BenchRun { parts, .. } => parts.iter().find(|part| bench_part(part).as_deref() == Some("A")).unwrap_or(&parts[0]),
+            Self::BenchRun { parts, .. } => parts
+                .iter()
+                .find(|part| matches!(bench_part(part).as_deref(), Some("A" | "EW")))
+                .unwrap_or(&parts[0]),
         }
     }
 
@@ -4676,9 +4870,10 @@ impl HistoryEntry {
 fn history_effective_mode(summary: &SessionSummary) -> String {
     if let Some(part) = bench_part(summary) {
         return match part.as_str() {
-            "A" => "words",
-            "B" => "ngram",
-            "C" => "romaji",
+            "A" | "EW" => "words",
+            "B" | "PW" => "ngram",
+            "C" | "JW" => "romaji",
+            "ES" | "JS" => "sentence",
             "D" => "random",
             _ => summary.mode.as_str(),
         }
@@ -4690,8 +4885,8 @@ fn history_effective_mode(summary: &SessionSummary) -> String {
 pub fn history_language(summary: &SessionSummary) -> Option<&'static str> {
     if let Some(part) = bench_part(summary) {
         return match part.as_str() {
-            "A" | "B" | "D" => Some("en"),
-            "C" => Some("ja"),
+            "A" | "B" | "D" | "EW" | "ES" | "PW" => Some("en"),
+            "C" | "JW" | "JS" => Some("ja"),
             _ => None,
         };
     }
@@ -4710,10 +4905,15 @@ pub fn history_language(summary: &SessionSummary) -> Option<&'static str> {
 }
 
 fn bench_identity(summary: &SessionSummary) -> Option<(String, String, String)> {
-    let (series, part, form) = parse_bench_id(summary.bench_id.as_deref()?)?;
-    let form_label = summary.bench_id.as_deref()?.rsplit('/').next()?.to_owned();
+    let id = summary.bench_id.as_deref()?;
+    let form_label = id.rsplit('/').next()?.to_owned();
+    if let Some((series, part, form)) = parse_bench_id(id) {
+        debug_assert_eq!(form_label.parse::<u8>().ok(), Some(form));
+        return Some((series.to_owned(), form_label, part.as_str().to_owned()));
+    }
+    let (part, form) = parse_v3_bench_id(id)?;
     debug_assert_eq!(form_label.parse::<u8>().ok(), Some(form));
-    Some((series.to_owned(), form_label, part.as_str().to_owned()))
+    Some((BENCH_V3_SERIES.to_owned(), form_label, part.as_str().to_owned()))
 }
 
 pub fn build_result_comparison(records: &[SessionRecord], current: &SessionRecord) -> ResultComparison {
@@ -4772,8 +4972,12 @@ fn same_record_condition(left: &SessionRecord, right: &SessionRecord) -> bool {
 }
 
 fn bench_record_identity(record: &SessionRecord) -> Option<(&str, &str)> {
-    let (series, part, _) = parse_bench_id(record.header.bench_id.as_deref()?)?;
-    Some((series, part.as_str()))
+    let id = record.header.bench_id.as_deref()?;
+    if let Some((series, part, _)) = parse_bench_id(id) {
+        return Some((series, part.as_str()));
+    }
+    let (part, _) = parse_v3_bench_id(id)?;
+    Some((BENCH_V3_SERIES, part.as_str()))
 }
 
 fn same_record_identity(left: &SessionRecord, right: &SessionRecord) -> bool {
@@ -4875,7 +5079,11 @@ fn build_history_rows(
 fn push_bench_run(rows: &mut Vec<HistoryEntry>, series: &str, form: &str, parts: Vec<SessionSummary>, filter: HistoryFilter<'_>) {
     let id = parts.first().map(|part| part.id);
     let mut parts = parts.into_iter().filter(|summary| summary_matches(summary, filter)).collect::<Vec<_>>();
-    parts.sort_by(|left, right| bench_part(left).cmp(&bench_part(right)).then(left.finished_at.cmp(&right.finished_at)));
+    parts.sort_by(|left, right| {
+        bench_part_order(bench_part(left).as_deref())
+            .cmp(&bench_part_order(bench_part(right).as_deref()))
+            .then(left.finished_at.cmp(&right.finished_at))
+    });
     if let (Some(id), false) = (id, parts.is_empty()) {
         rows.push(HistoryEntry::BenchRun {
             id,
@@ -4883,6 +5091,17 @@ fn push_bench_run(rows: &mut Vec<HistoryEntry>, series: &str, form: &str, parts:
             form: form.to_owned(),
             parts,
         });
+    }
+}
+
+fn bench_part_order(part: Option<&str>) -> u8 {
+    match part {
+        Some("A" | "EW") => 0,
+        Some("B" | "ES") => 1,
+        Some("C" | "JW") => 2,
+        Some("D" | "JS") => 3,
+        Some("PW") => 4,
+        _ => u8::MAX,
     }
 }
 

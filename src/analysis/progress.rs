@@ -180,6 +180,12 @@ pub fn analyze_progress(
     as_of: DateTime<Utc>,
     references: &ReferencePrompts,
 ) -> Progress {
+    let filtered = records
+        .iter()
+        .filter(|record| !record.header.bench_id.as_deref().is_some_and(crate::bench::is_v3_bench_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let records = filtered.as_slice();
     let mut ordered = records
         .iter()
         .filter(|record| record.header.metrics_version > 0)

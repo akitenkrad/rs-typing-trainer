@@ -1099,6 +1099,9 @@ pub fn session_language(record: &SessionRecord) -> &'static str {
     if let Some((_, part, _)) = record.header.bench_id.as_deref().and_then(crate::bench::parse_bench_id) {
         return if part == crate::bench::BenchPart::C { "ja" } else { "en" };
     }
+    if let Some((part, _)) = record.header.bench_id.as_deref().and_then(crate::bench::parse_v3_bench_id) {
+        return part.language();
+    }
     if record.header.mode == "romaji"
         || serde_json::from_str::<serde_json::Value>(&record.header.mode_params)
             .ok()

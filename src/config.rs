@@ -38,6 +38,8 @@ pub struct Config {
     #[serde(default)]
     pub practice: PracticeConfig,
     #[serde(default)]
+    pub bench: BenchConfig,
+    #[serde(default)]
     pub analysis: AnalysisConfig,
     #[serde(default)]
     pub adaptive: AdaptiveConfig,
@@ -461,6 +463,20 @@ pub struct PracticeConfig {
     pub weekly_theme: bool,
     #[serde(default = "default_true")]
     pub auto_difficulty: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BenchSeries {
+    #[default]
+    V2,
+    V3,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BenchConfig {
+    #[serde(default)]
+    pub series: BenchSeries,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -989,6 +1005,7 @@ impl Default for Config {
             mode: ModeConfig::default(),
             data: DataConfig::default(),
             practice: PracticeConfig::default(),
+            bench: BenchConfig::default(),
             analysis: AnalysisConfig::default(),
             adaptive: AdaptiveConfig::default(),
             pacer: PacerConfig::default(),

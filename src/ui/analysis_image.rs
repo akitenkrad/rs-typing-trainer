@@ -1981,6 +1981,7 @@ fn aggregate_trend(records: &[SessionRecord], kind: MetricKind, lang: Lang) -> B
     for record in records
         .iter()
         .filter(|record| kind != MetricKind::Iki || record.header.metrics_version != 0)
+        .filter(|record| !record.header.bench_id.as_deref().is_some_and(crate::bench::is_v3_bench_id))
     {
         let date = DateTime::parse_from_rfc3339(&record.header.finished_at)
             .map(|value| AggregatedDate::Known(value.date_naive()))

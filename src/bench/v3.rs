@@ -44,6 +44,24 @@ impl BenchV3Part {
         }
     }
 
+    pub const fn next(self) -> Option<Self> {
+        match self {
+            Self::W => Some(Self::EW),
+            Self::EW => Some(Self::ES),
+            Self::ES => Some(Self::JW),
+            Self::JW => Some(Self::JS),
+            Self::JS => Some(Self::PW),
+            Self::PW => None,
+        }
+    }
+
+    pub const fn language(self) -> &'static str {
+        match self {
+            Self::JW | Self::JS => "ja",
+            Self::W | Self::EW | Self::ES | Self::PW => "en",
+        }
+    }
+
     pub const fn duration_seconds(self) -> u64 {
         match self {
             Self::W => 15,
@@ -70,6 +88,48 @@ impl BenchV3Part {
             Self::PW => 5,
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BenchV3ResultSummary {
+    pub id: String,
+    pub part: BenchV3Part,
+    pub wpm: f64,
+    pub accuracy: f64,
+    pub comparison: super::BenchComparison,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BenchV3Resume {
+    pub part: BenchV3Part,
+    pub parallel_index: u8,
+    pub completed: Vec<BenchV3ResultSummary>,
+}
+
+pub fn parse_v3_bench_id(id: &str) -> Option<(BenchV3Part, u8)> {
+    let mut fields = id.split('/');
+    if fields.next()? != BENCH_V3_SERIES {
+        return None;
+    }
+    let part = match fields.next()? {
+        "W" => BenchV3Part::W,
+        "EW" => BenchV3Part::EW,
+        "ES" => BenchV3Part::ES,
+        "JW" => BenchV3Part::JW,
+        "JS" => BenchV3Part::JS,
+        "PW" => BenchV3Part::PW,
+        _ => return None,
+    };
+    let parallel_field = fields.next()?;
+    if parallel_field.len() != 2 || !parallel_field.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let parallel_index = parallel_field.parse().ok()?;
+    (fields.next().is_none() && (1..=PARALLEL_VERSION_COUNT).contains(&parallel_index)).then_some((part, parallel_index))
+}
+
+pub fn is_v3_bench_id(id: &str) -> bool {
+    parse_v3_bench_id(id).is_some()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]

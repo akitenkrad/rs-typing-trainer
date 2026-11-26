@@ -1334,7 +1334,13 @@ fn render_benchmark_result(frame: &mut Frame, app: &App, theme: &Theme, area: Re
         return;
     };
     let part = app.active_bench_part().or_else(|| app.active_bench_id.as_deref().and_then(part_from_id));
-    let part_name = part.map_or("", |part| crate::ui::bench_summary::part_label(part, lang));
+    let v3_part = app
+        .active_bench_v3_part()
+        .or_else(|| app.active_bench_id.as_deref().and_then(crate::bench::parse_v3_bench_id).map(|row| row.0));
+    let part_name = v3_part.map_or_else(
+        || part.map_or("", |part| crate::ui::bench_summary::part_label(part, lang)),
+        |part| crate::ui::bench_summary::v3_part_label(part, lang),
+    );
     let bench_id = app.active_bench_id.as_deref().unwrap_or_default();
     let comparison = app.bench_comparison.unwrap_or_default();
     let previous = comparison
@@ -1344,9 +1350,15 @@ fn render_benchmark_result(frame: &mut Frame, app: &App, theme: &Theme, area: Re
         .recent_three_wpm_delta
         .map_or_else(|| Msg::InitialResult.text(lang).to_owned(), |value| format!("{value:+.1} WPM"));
     let next = app.next_bench_part();
-    let mut next_line = next.map_or_else(
-        || Msg::BenchViewSummary.text(lang).to_owned(),
-        |part| format!("{} {}", Msg::BenchNext.text(lang), crate::ui::bench_summary::part_label(part, lang)),
+    let next_v3 = app.next_bench_v3_part();
+    let mut next_line = next_v3.map_or_else(
+        || {
+            next.map_or_else(
+                || Msg::BenchViewSummary.text(lang).to_owned(),
+                |part| format!("{} {}", Msg::BenchNext.text(lang), crate::ui::bench_summary::part_label(part, lang)),
+            )
+        },
+        |part| format!("{} {}", Msg::BenchNext.text(lang), crate::ui::bench_summary::v3_part_label(part, lang)),
     );
     let remaining = app.result_input_delay_remaining();
     if let Some(remaining) = remaining {

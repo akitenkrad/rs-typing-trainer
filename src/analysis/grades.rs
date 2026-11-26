@@ -514,6 +514,12 @@ pub fn analyze_grades(
     english_corpus: &[String],
     japanese_corpus: &[JapaneseText],
 ) -> GradesAnalysis {
+    let filtered = records
+        .iter()
+        .filter(|record| !record.header.bench_id.as_deref().is_some_and(crate::bench::is_v3_bench_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let records = filtered.as_slice();
     let mut languages = Vec::new();
     for language in ["en", "ja"] {
         if let Some(grade) = current_language_grade(

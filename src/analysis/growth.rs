@@ -139,6 +139,12 @@ pub struct Headline {
 }
 
 pub fn build_growth(records: &[SessionRecord], progress: &Progress, as_of: NaiveDate) -> GrowthReport {
+    let filtered = records
+        .iter()
+        .filter(|record| !record.header.bench_id.as_deref().is_some_and(crate::bench::is_v3_bench_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let records = filtered.as_slice();
     let mut languages = progress
         .trends
         .iter()
