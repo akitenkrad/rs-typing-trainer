@@ -296,6 +296,8 @@ fn period_label(period: AnalysisPeriod, lang: Lang) -> &'static str {
     match period {
         AnalysisPeriod::All => Msg::PeriodAll.text(lang),
         AnalysisPeriod::Days30 => Msg::PeriodDays30.text(lang),
+        AnalysisPeriod::Days182 => Msg::PeriodDays182.text(lang),
+        AnalysisPeriod::Days365 => Msg::PeriodDays365.text(lang),
         AnalysisPeriod::Days7 => Msg::PeriodDays7.text(lang),
     }
 }

@@ -81,6 +81,8 @@ pub fn render(frame: &mut Frame, app: &App) {
     let period = match app.analysis_period {
         AnalysisPeriod::All => Msg::PeriodAll.text(lang),
         AnalysisPeriod::Days30 => Msg::PeriodDays30.text(lang),
+        AnalysisPeriod::Days182 => Msg::PeriodDays182.text(lang),
+        AnalysisPeriod::Days365 => Msg::PeriodDays365.text(lang),
         AnalysisPeriod::Days7 => Msg::PeriodDays7.text(lang),
     };
     let mode = app
@@ -2599,11 +2601,7 @@ fn render_skills(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         return;
     };
     let today = app.analysis_day();
-    let since = match app.analysis_period {
-        AnalysisPeriod::All => None,
-        AnalysisPeriod::Days30 => Some(today - ChronoDuration::days(29)),
-        AnalysisPeriod::Days7 => Some(today - ChronoDuration::days(6)),
-    };
+    let since = app.analysis_period.start_date(today);
     let rows = skill_rows(app, &language, since);
     let history = app
         .analysis_skills

@@ -262,24 +262,45 @@ fn key(code: KeyCode) -> KeyEvent {
 }
 
 #[test]
-fn analysis_opens_on_thirty_days_and_p_reaches_the_whole_period() {
-    let dates = [ymd(2026, 4, 27), ymd(2026, 4, 28), ymd(2026, 11, 10), ymd(2026, 11, 15)];
-    let (_directory, mut app) = seeded_app(&dates, ymd(2026, 11, 19));
+fn analysis_opens_on_thirty_days_and_p_cycles_through_the_long_periods() {
+    let dates = [
+        ymd(2025, 12, 31),
+        ymd(2026, 1, 1),
+        ymd(2026, 7, 2),
+        ymd(2026, 7, 3),
+        ymd(2026, 12, 10),
+        ymd(2026, 12, 31),
+    ];
+    let (_directory, mut app) = seeded_app(&dates, ymd(2026, 12, 31));
     app.handle_key(key(KeyCode::Char('a')));
     assert_eq!(app.screen, Screen::Analysis);
     assert_eq!(app.analysis_period, AnalysisPeriod::Days30);
-    assert_eq!(app.analysis_records.len(), 2, "30 days: only November");
+    assert_eq!(app.analysis_records.len(), 2, "30 days includes December 2 through December 31");
     let header = rows(&render_buffer(&app, 120, 40)).join("\n");
     assert!(header.contains("30 days") || header.contains("30d"), "{header}");
 
     app.handle_key(key(KeyCode::Char('p')));
-    assert_eq!(app.analysis_period, AnalysisPeriod::Days7);
+    assert_eq!(app.analysis_period, AnalysisPeriod::Days182);
+    assert_eq!(app.analysis_records.len(), 3, "182 days includes July 3 but excludes July 2");
+    app.handle_key(key(KeyCode::Char('p')));
+    assert_eq!(app.analysis_period, AnalysisPeriod::Days365);
+    assert_eq!(
+        app.analysis_records.len(),
+        5,
+        "365 days includes January 1 but excludes December 31, 2025"
+    );
     app.handle_key(key(KeyCode::Char('p')));
     assert_eq!(app.analysis_period, AnalysisPeriod::All);
-    assert_eq!(app.analysis_records.len(), 4);
+    assert_eq!(app.analysis_records.len(), 6);
     app.analysis_tab = rs_typing_trainer::app::ANALYSIS_TREND_TAB;
     let text = rows(&render_buffer(&app, 120, 40)).join("\n");
     assert!(text.contains('≈'), "{text}");
+    app.handle_key(key(KeyCode::Char('p')));
+    assert_eq!(app.analysis_period, AnalysisPeriod::Days7);
+    assert_eq!(app.analysis_records.len(), 1);
+    app.handle_key(key(KeyCode::Char('p')));
+    assert_eq!(app.analysis_period, AnalysisPeriod::Days30);
+    assert_eq!(app.analysis_records.len(), 2);
 
     // Leaving and opening again starts from 30 days again.
     app.handle_key(key(KeyCode::Esc));

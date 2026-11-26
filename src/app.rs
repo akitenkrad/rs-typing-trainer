@@ -184,7 +184,21 @@ pub struct HistoryDetailData {
 pub enum AnalysisPeriod {
     All,
     Days30,
+    Days182,
+    Days365,
     Days7,
+}
+
+impl AnalysisPeriod {
+    pub(crate) fn start_date(self, today: chrono::NaiveDate) -> Option<chrono::NaiveDate> {
+        match self {
+            Self::All => None,
+            Self::Days7 => Some(today - chrono::Duration::days(6)),
+            Self::Days30 => Some(today - chrono::Duration::days(29)),
+            Self::Days182 => Some(today - chrono::Duration::days(181)),
+            Self::Days365 => Some(today - chrono::Duration::days(364)),
+        }
+    }
 }
 
 impl HistorySort {
@@ -1773,9 +1787,11 @@ impl App {
             }
             KeyCode::Char('p') | KeyCode::Char('P') => {
                 self.analysis_period = match self.analysis_period {
-                    AnalysisPeriod::All => AnalysisPeriod::Days30,
-                    AnalysisPeriod::Days30 => AnalysisPeriod::Days7,
-                    AnalysisPeriod::Days7 => AnalysisPeriod::All,
+                    AnalysisPeriod::All => AnalysisPeriod::Days7,
+                    AnalysisPeriod::Days30 => AnalysisPeriod::Days182,
+                    AnalysisPeriod::Days182 => AnalysisPeriod::Days365,
+                    AnalysisPeriod::Days365 => AnalysisPeriod::All,
+                    AnalysisPeriod::Days7 => AnalysisPeriod::Days30,
                 };
                 self.reload_analysis();
             }
@@ -1864,11 +1880,7 @@ impl App {
 
     fn reload_analysis(&mut self) {
         let today = self.analysis_as_of;
-        let since = match self.analysis_period {
-            AnalysisPeriod::All => None,
-            AnalysisPeriod::Days30 => Some(today - chrono::Duration::days(29)),
-            AnalysisPeriod::Days7 => Some(today - chrono::Duration::days(6)),
-        };
+        let since = self.analysis_period.start_date(today);
         self.analysis_records = db::load_records_filtered(&self.db_path(), since, self.analysis_mode_filter.as_deref()).unwrap_or_default();
         let geometry = crate::layout::geometry::geometry(&self.config.keyboard.geometry)
             .or_else(|| crate::layout::geometry::geometry("ansi"))
@@ -2513,7 +2525,7 @@ impl App {
             }
             KeyCode::Char('p') | KeyCode::Char('P') => {
                 self.history_period = match self.history_period {
-                    AnalysisPeriod::All => AnalysisPeriod::Days30,
+                    AnalysisPeriod::All | AnalysisPeriod::Days182 | AnalysisPeriod::Days365 => AnalysisPeriod::Days30,
                     AnalysisPeriod::Days30 => AnalysisPeriod::Days7,
                     AnalysisPeriod::Days7 => AnalysisPeriod::All,
                 };
@@ -4798,11 +4810,7 @@ struct HistoryFilter<'a> {
 fn summary_matches(summary: &SessionSummary, filter: HistoryFilter<'_>) -> bool {
     let mode_matches = filter.mode.is_none_or(|expected| history_effective_mode(summary) == expected);
     let language_matches = filter.language.is_none_or(|expected| history_language(summary) == Some(expected));
-    let since = match filter.period {
-        AnalysisPeriod::All => None,
-        AnalysisPeriod::Days30 => Some(filter.today - chrono::Duration::days(29)),
-        AnalysisPeriod::Days7 => Some(filter.today - chrono::Duration::days(6)),
-    };
+    let since = filter.period.start_date(filter.today);
     let period_matches = since.is_none_or(|minimum| summary.finished_at.date_naive() >= minimum);
     mode_matches && language_matches && period_matches
 }

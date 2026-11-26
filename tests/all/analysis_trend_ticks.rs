@@ -74,6 +74,18 @@ fn thirty_days(spike: Option<NaiveDate>) -> Vec<SessionRecord> {
         .collect()
 }
 
+/// One calendar year ending on 2026-12-31, with one long gap that both the
+/// six-month and one-year views must squeeze out of the x axis.
+fn one_year_with_gap() -> Vec<SessionRecord> {
+    ymd(2026, 1, 1)
+        .iter_days()
+        .take(365)
+        .filter(|date| !(*date > ymd(2026, 9, 1) && *date < ymd(2026, 9, 21)))
+        .enumerate()
+        .map(|(index, date)| record(date, 30.0 + (index % 7) as f64, None))
+        .collect()
+}
+
 /// Three days at the end of April and four days in November.
 fn april_and_november() -> Vec<SessionRecord> {
     [
@@ -293,6 +305,40 @@ fn image_trend_over_thirty_days_labels_ticks_where_the_image_places_their_day() 
                 column.abs_diff(expected) <= 1,
                 "{width}x{height}: {month:02}/{day:02} at {column}, its day at {expected}\n{text}"
             );
+        }
+    }
+}
+
+#[test]
+fn long_period_trends_render_ticks_breaks_and_localized_footers_at_reference_sizes() {
+    let records = one_year_with_gap();
+    let today = ymd(2026, 12, 31);
+    for (period, days, lang, label) in [
+        (AnalysisPeriod::Days182, 182, Lang::En, "6 months"),
+        (AnalysisPeriod::Days182, 182, Lang::Ja, "半年"),
+        (AnalysisPeriod::Days365, 365, Lang::En, "1 year"),
+        (AnalysisPeriod::Days365, 365, Lang::Ja, "1 年"),
+    ] {
+        let since = today - chrono::Duration::days(days - 1);
+        let visible = records
+            .iter()
+            .filter(|record| chrono::DateTime::parse_from_rfc3339(&record.header.finished_at).unwrap().date_naive() >= since)
+            .cloned()
+            .collect();
+        let mut app = trend_app(visible, false);
+        app.analysis_period = period;
+        app.config.general.lang = lang;
+        for (width, height) in [(80, 24), (120, 40)] {
+            let buffer = render_buffer(&app, width, height);
+            let text = rows(&buffer).join("\n");
+            let compact_text = compact(&text);
+            assert!(compact_text.contains(&compact(label)), "{period:?} {lang:?} {width}x{height}:\n{text}");
+            assert!(text.contains('≈'), "{period:?} {lang:?} {width}x{height}:\n{text}");
+            let labels = rows(&buffer)
+                .iter()
+                .flat_map(|row| tick_labels(&row.chars().collect::<Vec<_>>()))
+                .collect::<Vec<_>>();
+            assert!(!labels.is_empty(), "{period:?} {lang:?} {width}x{height}:\n{text}");
         }
     }
 }

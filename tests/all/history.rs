@@ -6,7 +6,7 @@ use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::{Color, Modifier, Style};
-use rs_typing_trainer::app::{ResultOrigin, Screen};
+use rs_typing_trainer::app::{AnalysisPeriod, ResultOrigin, Screen};
 use rs_typing_trainer::config::{Config, ModeKind};
 use rs_typing_trainer::engine::item::Item;
 use rs_typing_trainer::engine::session::Session;
@@ -93,6 +93,25 @@ fn style_for(buffer: &Buffer, row_contains: &str, value: &str) -> Style {
         }
     }
     panic!("missing row containing {row_contains:?}");
+}
+
+#[test]
+fn history_period_cycle_stays_all_then_thirty_then_seven_days() {
+    let date = chrono::NaiveDate::from_ymd_opt(2026, 11, 16).unwrap();
+    let mut app = test_app_at(Config::default(), date);
+    open_history(&mut app);
+    assert_eq!(app.history_period, AnalysisPeriod::All);
+
+    for expected in [AnalysisPeriod::Days30, AnalysisPeriod::Days7, AnalysisPeriod::All] {
+        app.handle_key(key(KeyCode::Char('p')));
+        assert_eq!(app.history_period, expected);
+    }
+
+    for unexpected in [AnalysisPeriod::Days182, AnalysisPeriod::Days365] {
+        app.history_period = unexpected;
+        app.handle_key(key(KeyCode::Char('p')));
+        assert_eq!(app.history_period, AnalysisPeriod::Days30);
+    }
 }
 
 #[test]

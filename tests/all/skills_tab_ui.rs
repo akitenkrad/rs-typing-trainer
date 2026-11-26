@@ -251,7 +251,9 @@ fn p_limits_the_period_including_the_prescription_history() {
     let month = compact(&text(&render_buffer(&app, 80, 24)));
     assert!(month.contains("Widenpreview"), "{month}");
     assert!(month.contains("Accuracygate"), "{month}");
-    app.handle_key(key(KeyCode::Char('p')));
+    for _ in 0..4 {
+        app.handle_key(key(KeyCode::Char('p')));
+    }
     // 7 days: day 3 onwards — preview.wide (days 0–1) is out of the period.
     let week = compact(&text(&render_buffer(&app, 80, 24)));
     assert!(week.contains("7days") || week.contains("7d"), "{week}");

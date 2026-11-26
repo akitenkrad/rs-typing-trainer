@@ -402,7 +402,9 @@ fn no_record_today_says_so() {
 fn seven_day_period_keeps_the_7_day_average() {
     let (_directory, config) = seed(Lang::Ja);
     let mut app = open_today(config, GraphicsMode::Off);
-    app.handle_key(key(KeyCode::Char('p')));
+    for _ in 0..4 {
+        app.handle_key(key(KeyCode::Char('p')));
+    }
     assert_eq!(app.analysis_period, AnalysisPeriod::Days7);
     // The 7-day period (11/13–11/19) drops 11/12 from the other tabs …
     assert!(
