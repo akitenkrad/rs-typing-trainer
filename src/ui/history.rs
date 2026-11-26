@@ -362,8 +362,14 @@ fn truncate(value: &str, width: usize) -> String {
 
 fn render_hint(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let hint = match app.config.general.lang {
-        Lang::En => "[↑/↓/k/j] Move  [Enter] Open  [Tab] Type  [M] Mode  [L] Language  [P] Period  [S] Sort  [Esc/Q] Back",
-        Lang::Ja => "[↑/↓/k/j] 移動  [Enter] 開閉・詳細  [Tab] 種類  [M] モード  [L] 言語  [P] 期間  [S] 並べ替え  [Esc/Q] 戻る",
+        Lang::En => vec![
+            Line::from("[↑/↓/k/j] Move  [Enter] Open  [Tab] Type  [M] Mode  [L] Language  [P] Period  [S] Sort"),
+            Line::from("[R] Reading reports  [Esc/Q] Back"),
+        ],
+        Lang::Ja => vec![
+            Line::from("[↑/↓/k/j] 移動  [Enter] 開閉・詳細  [Tab] 種類  [M] モード  [L] 言語  [P] 期間  [S] 並べ替え"),
+            Line::from("[R] 読みの報告  [Esc/Q] 戻る"),
+        ],
     };
     frame.render_widget(Paragraph::new(hint).style(Style::default().fg(theme.accent)), left_inset(area));
 }

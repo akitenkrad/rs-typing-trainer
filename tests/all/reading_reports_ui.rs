@@ -1,0 +1,258 @@
+use chrono::{TimeZone, Utc};
+use ratatui::Terminal;
+use ratatui::backend::TestBackend;
+use ratatui::buffer::Buffer;
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use rs_typing_trainer::app::Screen;
+use rs_typing_trainer::config::Config;
+use rs_typing_trainer::i18n::Lang;
+use rs_typing_trainer::practice::reading_report::{ReadingReportKind, append_reading_report};
+use rs_typing_trainer::ui;
+
+use crate::common;
+use crate::common::TestApp;
+
+const LONG_TEXT: &str = "十分に長い日本語の表記を一覧では省略して全文欄の末尾まで表示";
+const LONG_READING: &str = "じゅうぶんにながいにほんごのひょうきをいちらんではしょうりゃくしてぜんぶんらんのまつびまですべてひょうじ";
+
+fn key(code: KeyCode) -> KeyEvent {
+    KeyEvent::new(code, KeyModifiers::NONE)
+}
+
+fn report(app: &TestApp, hour: u32, kind: ReadingReportKind, text: &str, reading: &str) {
+    let db_path = app.db_path();
+    let directory = db_path.parent().unwrap();
+    append_reading_report(directory, Utc.with_ymd_and_hms(2026, 11, 14, hour, 30, 0).unwrap(), kind, text, reading).unwrap();
+}
+
+fn open_reading_reports(app: &mut TestApp) {
+    app.handle_key(key(KeyCode::Char('h')));
+    assert_eq!(app.screen, Screen::History);
+    app.handle_key(key(KeyCode::Char('r')));
+    assert_eq!(app.screen, Screen::ReadingReports);
+}
+
+fn render_buffer(app: &TestApp, width: u16, height: u16) -> Buffer {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    terminal.draw(|frame| ui::render(frame, app)).unwrap();
+    terminal.backend().buffer().clone()
+}
+
+fn buffer_text(buffer: &Buffer) -> String {
+    (0..buffer.area.height)
+        .map(|y| (0..buffer.area.width).map(|x| buffer[(x, y)].symbol()).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn render(app: &TestApp, width: u16, height: u16) -> String {
+    buffer_text(&render_buffer(app, width, height))
+}
+
+fn row(buffer: &Buffer, y: u16) -> String {
+    (0..buffer.area.width).map(|x| buffer[(x, y)].symbol()).collect()
+}
+
+fn contains_display(output: &str, expected: &str) -> bool {
+    output.contains(expected) || output.replace(' ', "").contains(&expected.replace(' ', ""))
+}
+
+fn long_report_app(lang: Lang) -> TestApp {
+    let mut config = Config::default();
+    config.general.lang = lang;
+    let mut app = common::test_app(config);
+    report(&app, 9, ReadingReportKind::Romaji, "十分", "じゅうふん");
+    report(&app, 10, ReadingReportKind::Romaji, "十分", "じゅうふん");
+    report(&app, 11, ReadingReportKind::Sentence, LONG_TEXT, LONG_READING);
+    open_reading_reports(&mut app);
+    app
+}
+
+fn find_cell_in_row(buffer: &Buffer, row_text: &str, symbol: &str) -> (u16, u16) {
+    for y in 0..buffer.area.height {
+        let rendered_row = row(buffer, y);
+        if contains_display(&rendered_row, row_text) {
+            for x in 0..buffer.area.width {
+                if buffer[(x, y)].symbol() == symbol {
+                    return (x, y);
+                }
+            }
+        }
+    }
+    panic!("missing {symbol:?} in row containing {row_text:?}");
+}
+
+#[test]
+fn history_r_opens_reading_reports_and_escape_returns_to_history() {
+    let mut app = common::test_app(Config::default());
+    app.handle_key(key(KeyCode::Char('h')));
+    assert_eq!(app.screen, Screen::History);
+
+    app.handle_key(key(KeyCode::Char('r')));
+    assert_eq!(app.screen, Screen::ReadingReports);
+
+    app.handle_key(key(KeyCode::Esc));
+    assert_eq!(app.screen, Screen::History);
+}
+
+#[test]
+fn empty_reading_reports_explain_how_to_report_in_both_languages() {
+    for (lang, expected) in [(Lang::Ja, "まだ報告はありません"), (Lang::En, "There are no reading reports yet")] {
+        let mut config = Config::default();
+        config.general.lang = lang;
+        let mut app = common::test_app(config);
+        open_reading_reports(&mut app);
+
+        let output = render(&app, 120, 40);
+        assert!(contains_display(&output, expected), "missing {expected:?}:\n{output}");
+        assert!(output.contains("Ctrl+R"), "missing report shortcut:\n{output}");
+        assert!(output.contains("F2"), "missing report shortcut:\n{output}");
+    }
+}
+
+#[test]
+fn three_reports_render_at_narrow_and_wide_sizes_in_both_languages() {
+    for lang in [Lang::Ja, Lang::En] {
+        let mut config = Config::default();
+        config.general.lang = lang;
+        let mut app = common::test_app(config);
+        report(&app, 9, ReadingReportKind::Romaji, "十分", "じゅうぶん");
+        report(&app, 10, ReadingReportKind::Sentence, "今日は晴れです。", "きょうははれです。");
+        report(&app, 11, ReadingReportKind::Romaji, LONG_TEXT, LONG_READING);
+        report(&app, 12, ReadingReportKind::Romaji, LONG_TEXT, LONG_READING);
+        open_reading_reports(&mut app);
+
+        for (width, height) in [(80, 24), (120, 40)] {
+            let buffer = render_buffer(&app, width, height);
+            let output = buffer_text(&buffer);
+            let expected_summary = if lang == Lang::Ja { "報告 3 件" } else { "3 reports" };
+            let expected_word = if lang == Lang::Ja { "単語" } else { "Word" };
+            let expected_sentence = if lang == Lang::Ja { "短文" } else { "Sentence" };
+            assert!(contains_display(&output, expected_summary), "{width}x{height}:\n{output}");
+            assert!(contains_display(&output, expected_word), "{width}x{height}:\n{output}");
+            assert!(contains_display(&output, expected_sentence), "{width}x{height}:\n{output}");
+            assert!(output.contains("×2"), "{width}x{height}:\n{output}");
+            assert!(
+                contains_display(&output, "十分に長い日本語の表記"),
+                "selected full text missing:\n{output}"
+            );
+            assert!(
+                contains_display(&output, "じゅうぶんにながいにほんご"),
+                "selected full reading missing:\n{output}"
+            );
+            assert!(output.contains('…'), "narrowable columns should use an ellipsis:\n{output}");
+        }
+
+        let buffer = render_buffer(&app, 80, 24);
+        let hint = row(&buffer, 22);
+        let expected_hint = if lang == Lang::Ja { "[↑/↓] 選ぶ" } else { "[↑/↓] Select" };
+        assert!(contains_display(&hint, expected_hint), "bottom hint row was {hint:?}");
+    }
+}
+
+#[test]
+fn confirmation_replaces_the_bottom_hint_with_visible_y_and_n_actions() {
+    for (lang, remove, cancel) in [(Lang::Ja, "[Y] 取り消す", "[N] やめる"), (Lang::En, "[Y] Remove", "[N] Cancel")] {
+        let mut app = long_report_app(lang);
+        app.handle_key(key(KeyCode::Char('d')));
+
+        let buffer = render_buffer(&app, 80, 24);
+        let hint = row(&buffer, 22);
+        assert!(contains_display(&hint, remove), "bottom hint row was {hint:?}");
+        assert!(contains_display(&hint, cancel), "bottom hint row was {hint:?}");
+    }
+}
+
+#[test]
+fn header_and_data_columns_start_at_the_same_cells() {
+    let app = long_report_app(Lang::Ja);
+    let buffer = render_buffer(&app, 80, 24);
+
+    let (header_x, _) = find_cell_in_row(&buffer, "日時", "日");
+    let (data_x, _) = find_cell_in_row(&buffer, "2026-", "2");
+
+    assert_eq!(header_x, data_x);
+}
+
+#[test]
+fn selected_long_text_and_reading_show_their_ends_at_both_sizes() {
+    let app = long_report_app(Lang::Ja);
+
+    for (width, height) in [(80, 24), (120, 40)] {
+        let output = render(&app, width, height);
+        assert!(contains_display(&output, "全文欄の末尾まで表示"), "{width}x{height}:\n{output}");
+        assert!(contains_display(&output, "まつびまですべてひょうじ"), "{width}x{height}:\n{output}");
+    }
+}
+
+#[test]
+fn delete_confirmation_ignores_other_keys_then_n_cancels_and_y_removes_the_group() {
+    let mut config = Config::default();
+    config.general.lang = Lang::Ja;
+    let mut app = common::test_app(config);
+    report(&app, 9, ReadingReportKind::Sentence, "今日は晴れです。", "きょうははれです。");
+    report(&app, 10, ReadingReportKind::Romaji, "十分", "じゅうふん");
+    report(&app, 11, ReadingReportKind::Romaji, "十分", "じゅうふん");
+    open_reading_reports(&mut app);
+    let path = app.db_path().parent().unwrap().join("reading_reports.tsv");
+    let before = std::fs::read(&path).unwrap();
+
+    app.handle_key(key(KeyCode::Char('d')));
+    let confirmation = render(&app, 120, 40);
+    assert!(contains_display(&confirmation, "この報告を取り消しますか？"), "{confirmation}");
+    assert!(
+        contains_display(&confirmation, "次に練習を始めたときから再び出題されます"),
+        "{confirmation}"
+    );
+
+    app.handle_key(key(KeyCode::Char('j')));
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert!(contains_display(&render(&app, 120, 40), "取り消しますか？"));
+
+    app.handle_key(key(KeyCode::Char('n')));
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert!(!contains_display(&render(&app, 120, 40), "取り消しますか？"));
+
+    app.handle_key(key(KeyCode::Delete));
+    app.handle_key(key(KeyCode::Char('y')));
+
+    let after = std::fs::read_to_string(&path).unwrap();
+    assert!(!after.contains("十分\tじゅうふん"), "{after:?}");
+    assert!(after.contains("今日は晴れです。\tきょうははれです。"), "{after:?}");
+    let output = render(&app, 120, 40);
+    assert!(contains_display(&output, "報告 1 件"), "{output}");
+    assert!(contains_display(&output, "取り消しました．"), "{output}");
+    assert!(contains_display(&output, "次に練習を始めたときから再び出題されます"), "{output}");
+}
+
+#[test]
+fn english_confirmation_and_removal_notice_use_fixed_visible_messages() {
+    let mut app = long_report_app(Lang::En);
+
+    app.handle_key(key(KeyCode::Char('d')));
+    let confirmation = render(&app, 80, 24);
+    assert!(contains_display(&confirmation, "Remove this report?"), "{confirmation}");
+    assert!(contains_display(&confirmation, "It will appear in prompts again"), "{confirmation}");
+    assert!(contains_display(&confirmation, "practicing."), "{confirmation}");
+
+    app.handle_key(key(KeyCode::Char('y')));
+    let notice = render(&app, 80, 24);
+    assert!(contains_display(&notice, "Removed."), "{notice}");
+    assert!(contains_display(&notice, "It will appear in prompts again"), "{notice}");
+    assert!(contains_display(&notice, "practicing."), "{notice}");
+    assert!(!notice.contains(LONG_TEXT), "notice must not repeat the removed text: {notice}");
+}
+
+#[test]
+fn reading_report_load_errors_are_rendered_without_panicking() {
+    let mut config = Config::default();
+    config.general.lang = Lang::Ja;
+    let mut app = common::test_app(config);
+    let path = app.db_path().parent().unwrap().join("reading_reports.tsv");
+    std::fs::create_dir_all(&path).unwrap();
+
+    open_reading_reports(&mut app);
+
+    let output = render(&app, 80, 24);
+    assert!(contains_display(&output, "読みの報告を読み込めませんでした"), "{output}");
+}

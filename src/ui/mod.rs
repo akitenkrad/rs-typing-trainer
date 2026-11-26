@@ -23,6 +23,7 @@ pub mod menu_summary;
 pub mod mode_select;
 pub mod playing;
 pub mod prompt;
+pub mod reading_reports;
 pub mod replay;
 pub mod result;
 pub mod result_image;
@@ -59,6 +60,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             }
         }
         Screen::History => history::render(frame, app),
+        Screen::ReadingReports => reading_reports::render(frame, app),
         Screen::Settings => settings::render(frame, app),
         Screen::BenchSelect => bench_select::render(frame, app),
         Screen::BenchSummary => bench_summary::render(frame, app),

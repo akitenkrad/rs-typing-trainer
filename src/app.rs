@@ -33,7 +33,9 @@ use crate::metrics::stats::{GameResult, LiveMetrics};
 use crate::practice::adaptive::{AdaptiveHistory, AdaptiveOptions, TransitionCost, build_plan_seeded};
 use crate::practice::deck::{DeckOptions, KeySelection, WeeklyTheme, build_daily_deck, weekly_theme};
 use crate::practice::ghost::{GhostCondition, GhostTrack, select_ghost};
-use crate::practice::reading_report::{ReadingReportKind, append_reading_report, load_reading_exclusions};
+use crate::practice::reading_report::{
+    ReadingReportEntry, ReadingReportKind, append_reading_report, load_reading_exclusions, load_reading_reports, remove_reading_report,
+};
 use crate::practice::recovery::RecoveryMetrics;
 use crate::practice::review::update_review;
 use crate::practice::session_variants::{BurstSeries, EnduranceComparison};
@@ -83,6 +85,7 @@ pub enum Screen {
     Result,
     Review,
     History,
+    ReadingReports,
     HistoryDetail,
     Replay,
     Settings,
@@ -254,6 +257,11 @@ pub struct App {
     pub history_expanded: HashSet<i64>,
     pub history_origin: HistoryOrigin,
     pub history_load_error: Option<String>,
+    pub reading_reports: Vec<ReadingReportEntry>,
+    pub reading_reports_selected: usize,
+    pub reading_reports_error: Option<String>,
+    pub reading_reports_confirming: bool,
+    pub reading_reports_notice: Option<String>,
     pub history_detail: Option<HistoryDetailData>,
     pub history_replay: Option<Box<crate::replay::Replay>>,
     history_replay_started: Option<Instant>,
@@ -487,6 +495,11 @@ impl App {
             history_expanded: HashSet::new(),
             history_origin: HistoryOrigin::Title,
             history_load_error: None,
+            reading_reports: Vec::new(),
+            reading_reports_selected: 0,
+            reading_reports_error: None,
+            reading_reports_confirming: false,
+            reading_reports_notice: None,
             history_detail: None,
             history_replay: None,
             history_replay_started: None,
@@ -950,6 +963,7 @@ impl App {
             Screen::Result => self.handle_result_key(key, action, now),
             Screen::Review => self.handle_review_key(key, action, now),
             Screen::History => self.handle_history_key(key, action),
+            Screen::ReadingReports => self.handle_reading_reports_key(key, action),
             Screen::HistoryDetail => self.handle_history_detail_key(key, action, now),
             Screen::Replay => self.handle_history_replay_key(key, action, now),
             Screen::Settings => self.handle_settings_key(key, action),
@@ -2322,6 +2336,7 @@ impl App {
                 self.history_selected = 0;
                 self.rebuild_history();
             }
+            KeyCode::Char('r') | KeyCode::Char('R') => self.open_reading_reports(),
             KeyCode::Enter => self.activate_history_entry(),
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
                 self.leave_history();
@@ -2330,6 +2345,99 @@ impl App {
         }
         if matches!(action, InputAction::Abort) && !matches!(key.code, KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q')) {
             self.leave_history();
+        }
+    }
+
+    fn open_reading_reports(&mut self) {
+        self.reading_reports_selected = 0;
+        self.reading_reports_confirming = false;
+        self.reading_reports_notice = None;
+        self.reload_reading_reports();
+        self.screen = Screen::ReadingReports;
+    }
+
+    fn reload_reading_reports(&mut self) {
+        let db_path = self.db_path();
+        let directory = db_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+        match load_reading_reports(directory) {
+            Ok(reports) => {
+                self.reading_reports = reports;
+                self.reading_reports_selected = self.reading_reports_selected.min(self.reading_reports.len().saturating_sub(1));
+                self.reading_reports_error = None;
+            }
+            Err(error) => {
+                self.reading_reports.clear();
+                self.reading_reports_selected = 0;
+                self.reading_reports_error = Some(match self.config.general.lang {
+                    Lang::En => format!("Could not load reading reports: {error}"),
+                    Lang::Ja => format!("読みの報告を読み込めませんでした: {error}"),
+                });
+            }
+        }
+    }
+
+    fn handle_reading_reports_key(&mut self, key: KeyEvent, action: InputAction) {
+        if self.reading_reports_confirming {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => self.remove_selected_reading_report(),
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => self.reading_reports_confirming = false,
+                _ => {}
+            }
+            return;
+        }
+
+        self.reading_reports_notice = None;
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.reading_reports_selected = self.reading_reports_selected.saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.reading_reports_selected = (self.reading_reports_selected + 1).min(self.reading_reports.len().saturating_sub(1));
+            }
+            KeyCode::PageUp => {
+                self.reading_reports_selected = self.reading_reports_selected.saturating_sub(10);
+            }
+            KeyCode::PageDown => {
+                self.reading_reports_selected = (self.reading_reports_selected + 10).min(self.reading_reports.len().saturating_sub(1));
+            }
+            KeyCode::Home => self.reading_reports_selected = 0,
+            KeyCode::End if !self.reading_reports.is_empty() => {
+                self.reading_reports_selected = self.reading_reports.len() - 1;
+            }
+            KeyCode::Char('d') | KeyCode::Char('D') | KeyCode::Delete if !self.reading_reports.is_empty() => {
+                self.reading_reports_confirming = true;
+            }
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => self.screen = Screen::History,
+            _ => {}
+        }
+        if matches!(action, InputAction::Abort) && !matches!(key.code, KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q')) {
+            self.screen = Screen::History;
+        }
+    }
+
+    fn remove_selected_reading_report(&mut self) {
+        self.reading_reports_confirming = false;
+        let Some(report) = self.reading_reports.get(self.reading_reports_selected).cloned() else {
+            return;
+        };
+        let db_path = self.db_path();
+        let directory = db_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+        match remove_reading_report(directory, report.kind, &report.text, &report.reading) {
+            Ok(_) => {
+                self.reload_reading_reports();
+                if self.reading_reports_error.is_none() {
+                    self.reading_reports_notice = Some(match self.config.general.lang {
+                        Lang::En => "Removed. It will appear in prompts again the next time you start practicing.".to_owned(),
+                        Lang::Ja => "取り消しました．次に練習を始めたときから再び出題されます．".to_owned(),
+                    });
+                }
+            }
+            Err(error) => {
+                self.reading_reports_error = Some(match self.config.general.lang {
+                    Lang::En => format!("Could not remove the reading report: {error}"),
+                    Lang::Ja => format!("読みの報告を取り消せませんでした: {error}"),
+                });
+            }
         }
     }
 

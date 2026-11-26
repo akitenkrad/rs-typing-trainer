@@ -81,7 +81,11 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | History | `M` / `L` / `P` | Cycle recorded modes, language, or period |
 | History | `S` | Cycle newest, oldest, WPM and accuracy sort orders |
 | History | `Enter` | Expand/collapse a benchmark run, or open a session/part in detail |
+| History | `R` | Open reading reports |
 | History | `Esc` / `Q` | Return to the screen that opened history |
+| Reading reports | `↑` / `↓` (`k` / `j`), `PgUp` / `PgDn` / `Home` / `End` | Move the selection |
+| Reading reports | `D` / `Delete` | Remove the selected report after confirmation; the item returns to prompts the next time practice starts |
+| Reading reports | `Esc` / `Q` | Return to history |
 | History detail | `Space` / `Enter` / `Esc` | Return to history |
 | History detail | `R` | Replay a v2 session inside the application; `Esc` returns to the detail |
 | History detail | `E` | Export a v2 session as `session-ID.ttrec` and show the path |

@@ -56,7 +56,7 @@ The data API has two entry points. The fixed complete catalog is reserved for re
 
 Daily decks normally contain 65% high-frequency core items and 35% broad-tail items. Due mistakes return 1, 3, 7, and 14 days after the last mistake, up to 10% of the deck. Sentence selection prefers `item_exposure.count = 0`, then the least-exposed rows. Wednesday favors sentences with digits or symbols, Friday favors one Japanese author, and Sunday uses a 50% broad tail. The current theme appears on the title and mode-selection screens.
 
-Press `Ctrl+R` (or `F2`; on macOS `F2` needs `fn` by default) while practicing Japanese words or sentences to report a wrong reading. The item is skipped and excluded on later starts. Reports are appended as `timestamp<TAB>kind<TAB>text<TAB>reading` to `reading_reports.tsv` beside the configured database.
+Press `Ctrl+R` (or `F2`; on macOS `F2` needs `fn` by default) while practicing Japanese words or sentences to report a wrong reading. The item is skipped and excluded on later starts. Reports are appended as `timestamp<TAB>kind<TAB>text<TAB>reading` to `reading_reports.tsv` beside the configured database. Press `R` on the history screen to view the reports. Select a report and press `D` to remove it; the item returns to prompts the next time practice starts.
 
 ## Regeneration
 

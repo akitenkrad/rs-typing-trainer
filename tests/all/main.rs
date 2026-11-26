@@ -76,6 +76,7 @@ mod progress;
 mod prompt_layout;
 mod prompt_source;
 mod reading_report;
+mod reading_reports_ui;
 mod records;
 mod recovery;
 mod remap;
