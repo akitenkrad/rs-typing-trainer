@@ -106,6 +106,7 @@ fn style_of(terminal: &Terminal<TestBackend>, symbol: &str) -> Style {
 fn start_selected_mode(app: &mut App, now: Instant) {
     app.handle_key_at(key(KeyCode::Enter), now);
     app.handle_key_at(key(KeyCode::Enter), now);
+    common::accept_briefing(app, now);
     assert!(matches!(app.screen, Screen::Countdown { .. }));
     app.on_tick_at(Duration::from_secs(3), now).unwrap();
     app.on_tick_at(Duration::from_millis(1), now).unwrap();
@@ -239,6 +240,7 @@ fn romaji_play_screen_has_surface_kana_and_guide_rows() {
     app.handle_key_at(key(KeyCode::Enter), now);
     assert_eq!(app.screen, Screen::KeyPicker);
     app.handle_key_at(key(KeyCode::Enter), now);
+    common::accept_briefing(&mut app, now);
     app.on_tick_at(Duration::from_secs(3), now).unwrap();
     app.on_tick_at(Duration::from_millis(1), now).unwrap();
 
@@ -270,6 +272,7 @@ fn sentence_screen_wraps_a_long_sentence() {
     let now = Instant::now();
     app.handle_key_at(key(KeyCode::Enter), now);
     app.handle_key_at(key(KeyCode::Enter), now);
+    common::accept_briefing(&mut app, now);
     assert!(matches!(app.screen, Screen::Countdown { .. }));
     app.on_tick_at(Duration::from_secs(3), now).unwrap();
     app.on_tick_at(Duration::from_millis(1), now).unwrap();
@@ -533,6 +536,7 @@ fn start_any_mode(app: &mut App, now: Instant) {
     if app.screen == Screen::KeyPicker {
         app.handle_key_at(key(KeyCode::Enter), now);
     }
+    common::accept_briefing(app, now);
     assert!(matches!(app.screen, Screen::Countdown { .. }), "{:?}", app.screen);
     app.on_tick_at(Duration::from_secs(3), now).unwrap();
     app.on_tick_at(Duration::from_millis(1), now).unwrap();

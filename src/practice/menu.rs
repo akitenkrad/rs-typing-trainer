@@ -2659,7 +2659,21 @@ fn render_text(menu: &DailyMenu, lang: Lang) -> String {
     }
     for (index, step) in menu.steps.iter().enumerate() {
         let level = step.level.map_or_else(|| "-".to_owned(), |level| level.to_string());
-        let evidence = step.evidence.as_deref().unwrap_or("-");
+        let cell = step_cell(step)
+            .map(|cell| crate::ui::mode_select::cell_label(cell, lang))
+            .unwrap_or_else(|| "-".to_owned());
+        let briefing = crate::practice::briefing::resolve_menu_step(step).ok();
+        let purpose = briefing.as_ref().map_or("-", |entry| entry.purpose.text(lang));
+        let goal = briefing.as_ref().map_or("-", |entry| entry.goal.text(lang));
+        let content = briefing.as_ref().map_or("-", |entry| entry.content.text(lang));
+        let evidence = match (step.evidence.as_deref(), step.evidence_note.as_deref()) {
+            (Some(strength), Some(note)) if !note.is_empty() && lang == Lang::Ja => format!("{strength}（{note}）"),
+            (Some(strength), Some(note)) if !note.is_empty() => format!("{strength} ({note})"),
+            (Some(strength), _) => strength.to_owned(),
+            (None, Some(note)) if !note.is_empty() && lang == Lang::Ja => format!("-（{note}）"),
+            (None, Some(note)) if !note.is_empty() => format!("- ({note})"),
+            (None, _) => "-".to_owned(),
+        };
         match lang {
             Lang::En => {
                 let _ = writeln!(output, "\nStep: {} {}", index + 1, role_label(step.role, lang));
@@ -2669,9 +2683,13 @@ fn render_text(menu: &DailyMenu, lang: Lang) -> String {
                 let _ = writeln!(output, "Level: {level}");
                 let _ = writeln!(output, "Mode: {}", step.mode);
                 let _ = writeln!(output, "Time: {} min", step.minutes);
-                let _ = writeln!(output, "Reason selected: {}", step.reason);
+                let _ = writeln!(output, "Drill: {cell}");
+                let _ = writeln!(output, "Purpose: {purpose}");
+                let _ = writeln!(output, "Goal: {goal}");
+                let _ = writeln!(output, "Content: {content}");
                 let _ = writeln!(output, "Focus: {}", step.focus);
-                let _ = writeln!(output, "Advance condition: {}", step.advance);
+                let _ = writeln!(output, "Graduation condition: {}", step.advance);
+                let _ = writeln!(output, "Selected because: {}", step.reason);
                 let _ = writeln!(output, "Evidence strength: {evidence}");
             }
             Lang::Ja => {
@@ -2682,9 +2700,13 @@ fn render_text(menu: &DailyMenu, lang: Lang) -> String {
                 let _ = writeln!(output, "レベル: {level}");
                 let _ = writeln!(output, "モード: {}", step.mode);
                 let _ = writeln!(output, "時間: {} 分", step.minutes);
-                let _ = writeln!(output, "選んだ理由: {}", step.reason);
+                let _ = writeln!(output, "訓練: {cell}");
+                let _ = writeln!(output, "目的: {purpose}");
+                let _ = writeln!(output, "達成すること: {goal}");
+                let _ = writeln!(output, "訓練の内容: {content}");
                 let _ = writeln!(output, "意識すること: {}", step.focus);
                 let _ = writeln!(output, "卒業の条件: {}", step.advance);
+                let _ = writeln!(output, "選んだ理由: {}", step.reason);
                 let _ = writeln!(output, "根拠の強さ: {evidence}");
             }
         }
@@ -2731,4 +2753,54 @@ fn role_label(role: MenuRole, lang: Lang) -> &'static str {
 #[allow(dead_code)]
 fn _level_name(level: Level) -> &'static str {
     level.as_str()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plain_menu_uses_the_briefing_fields_in_the_requested_order() {
+        let prescription = bundled_catalog().unwrap().prescription("accuracy.gate").unwrap();
+        let level = &prescription.levels[0];
+        let selected = (prescription, level, 1, prescription.component);
+        let menu = DailyMenu {
+            date: NaiveDate::from_ymd_opt(2026, 11, 25).unwrap(),
+            language: "en".to_owned(),
+            catalog_version: MENU_VERSION.to_owned(),
+            requested_minutes: 4,
+            introductory: false,
+            bench_recommended: false,
+            steps: vec![prescription_step_with_reason(
+                &selected,
+                MenuRole::PrimaryA,
+                4,
+                Lang::En,
+                Lang::En,
+                "Accuracy needs attention.",
+            )],
+        };
+
+        let output = render_text(&menu, Lang::En);
+        let headings = [
+            "Drill:",
+            "Purpose:",
+            "Goal:",
+            "Content:",
+            "Focus:",
+            "Graduation condition:",
+            "Selected because:",
+            "Evidence strength:",
+        ];
+        let positions = headings.map(|heading| output.find(heading).unwrap_or_else(|| panic!("missing {heading:?}:\n{output}")));
+        assert!(
+            positions.windows(2).all(|pair| pair[0] < pair[1]),
+            "wrong field order: {positions:?}\n{output}"
+        );
+        let evidence = output.lines().find(|line| line.starts_with("Evidence strength:")).unwrap();
+        assert!(
+            evidence.contains('(') && evidence.ends_with(')'),
+            "evidence note must share the line: {evidence}"
+        );
+    }
 }

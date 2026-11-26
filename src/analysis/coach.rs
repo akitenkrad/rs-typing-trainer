@@ -624,7 +624,7 @@ fn top_coachable_error(rows: &[ErrorKindMetric]) -> Option<(&ErrorKindMetric, bo
     Some((row, first_errors < MIN_ERROR_OPPORTUNITY_N))
 }
 
-fn error_advice(kind: ErrorKind, lang: Lang) -> Option<&'static str> {
+pub(crate) fn error_advice(kind: ErrorKind, lang: Lang) -> Option<&'static str> {
     match (kind, lang) {
         (ErrorKind::Anticipation, Lang::En) => {
             Some("Slow down until you can confirm the next character before pressing it (set the pacer to 90% of your speed).")
@@ -810,7 +810,7 @@ fn practice_for_component(component: Component, lang: Lang) -> &'static str {
     }
 }
 
-fn error_label(kind: ErrorKind, lang: Lang) -> &'static str {
+pub(crate) fn error_label(kind: ErrorKind, lang: Lang) -> &'static str {
     match (kind, lang) {
         (ErrorKind::Anticipation, Lang::En) => "Anticipation errors",
         (ErrorKind::Anticipation, Lang::Ja) => "先走り（次の文字を先に押す）",

@@ -134,6 +134,7 @@ fn start_cell(app: &mut App, cell: DrillCell, practice: Lang, now: Instant) -> I
     if app.screen == Screen::KeyPicker {
         app.handle_key_at(key(KeyCode::Enter), now);
     }
+    crate::common::accept_briefing(app, now);
     assert!(matches!(app.screen, Screen::Countdown { .. }), "{cell:?}: {:?}", app.screen);
     let started = now + Duration::from_secs(4);
     app.on_tick_at(Duration::from_secs(3), started).unwrap();
@@ -220,8 +221,8 @@ fn start_menu(app: &mut App, steps: Vec<MenuStep>, now: Instant) -> Instant {
     });
     app.menu_selected = 0;
     app.handle_key_at(key(KeyCode::Enter), now);
-    assert!(matches!(app.screen, Screen::MenuFocus { .. }), "{:?}", app.screen);
-    app.handle_key_at(key(KeyCode::Char('x')), now + Duration::from_millis(10));
+    assert!(matches!(app.screen, Screen::Briefing), "{:?}", app.screen);
+    app.handle_key_at(key(KeyCode::Enter), now + Duration::from_millis(10));
     let started = now + Duration::from_secs(4);
     app.on_tick_at(Duration::from_secs(3), started).unwrap();
     assert_eq!(app.screen, Screen::Playing);

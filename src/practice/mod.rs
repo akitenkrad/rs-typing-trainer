@@ -1,6 +1,7 @@
 //! Daily practice-deck selection and reading-quality reports.
 
 pub mod adaptive;
+pub mod briefing;
 pub mod deck;
 pub mod drill;
 pub mod gate;
@@ -12,5 +13,6 @@ pub mod reading_report;
 pub mod recovery;
 pub mod review;
 pub mod rhythm;
+pub mod session_review;
 pub mod session_variants;
 pub mod unlock;

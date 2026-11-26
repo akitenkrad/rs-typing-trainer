@@ -37,6 +37,7 @@ fn f2_reports_and_immediately_leaves_the_bad_item() {
     let now = std::time::Instant::now();
     app.handle_key_at(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
     app.handle_key_at(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+    common::accept_briefing(&mut app, now);
     app.on_tick_at_date(std::time::Duration::from_secs(3), now, date).unwrap();
     app.on_tick_at_date(std::time::Duration::from_millis(1), now, date).unwrap();
     let reported = app.game.as_ref().unwrap().current_prompt.text.clone();
@@ -67,6 +68,7 @@ fn ctrl_r_reports_like_f2_because_macos_sends_f2_only_with_fn() {
     let now = std::time::Instant::now();
     app.handle_key_at(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
     app.handle_key_at(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+    common::accept_briefing(&mut app, now);
     app.on_tick_at_date(std::time::Duration::from_secs(3), now, date).unwrap();
     app.on_tick_at_date(std::time::Duration::from_millis(1), now, date).unwrap();
     let reported = app.game.as_ref().unwrap().current_prompt.text.clone();

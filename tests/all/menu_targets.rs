@@ -332,7 +332,7 @@ fn the_app_draws_a_menu_step_from_the_words_that_contain_its_target() {
     }
     app.menu_selected = 1;
     app.handle_key_at(key(KeyCode::Enter), now);
-    app.handle_key_at(key(KeyCode::Char('x')), now + Duration::from_millis(10));
+    app.handle_key_at(key(KeyCode::Enter), now + Duration::from_millis(10));
     app.on_tick_at(Duration::from_secs(3), now + Duration::from_secs(4)).unwrap();
     assert_eq!(app.screen, Screen::Playing);
     let game = app.game.as_ref().unwrap();

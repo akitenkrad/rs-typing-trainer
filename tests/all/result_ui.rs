@@ -135,6 +135,9 @@ fn text_result_keeps_reaction_distribution_next_to_insight_and_separates_bars() 
     let text = rendered.join("\n");
     assert!(text.contains("Reaction Time Distribution"), "{text}");
     assert!(text.contains("This session's observation"), "{text}");
+    assert!(text.contains("Accuracy was 85.7%."), "{text}");
+    assert!(text.contains("Accuracy was 85.7%. → Slow down a little and confirm"), "{text}");
+    assert!(text.contains("each keystroke."), "the wrapped action must remain visible:\n{text}");
     let reaction_row = rendered.iter().position(|row| row.contains("Reaction Time Distribution")).unwrap();
     let bar_rows = rendered[..reaction_row]
         .iter()
@@ -154,6 +157,7 @@ fn result_is_non_overlapping_at_80_by_24_with_and_without_images() {
         let text = rendered.join("\n");
         assert!(text.contains("GAME RESULT"), "{graphics:?}: {text}");
         assert!(text.contains("Restart"), "{graphics:?}: {text}");
+        assert!(text.contains("[D] Review"), "{graphics:?}: {text}");
         assert_eq!(rendered.iter().filter(|row| row.contains("Restart")).count(), 1, "{graphics:?}: {text}");
         assert_eq!(
             rendered.iter().filter(|row| row.contains("Saved to DB")).count(),

@@ -107,6 +107,7 @@ fn choose(app: &mut App, cell: DrillCell, practice: Lang, now: Instant) {
     if app.screen == Screen::KeyPicker {
         app.handle_key_at(key(KeyCode::Enter), now);
     }
+    crate::common::accept_briefing(app, now);
 }
 
 fn start(cell: DrillCell, practice: Lang) -> (TestApp, Instant) {
@@ -364,6 +365,7 @@ fn l_switches_the_practice_language_and_the_choice_is_saved() {
     // Rhythm × sentences, then the next start opens there in Japanese.
     first.drill_cell = DrillCell::new(DrillSkill::Rhythm, PromptUnit::Sentence);
     first.handle_key_at(key(KeyCode::Enter), now);
+    crate::common::accept_briefing(&mut first, now);
     assert!(matches!(first.screen, Screen::Countdown { .. }));
     let saved = fs::read_to_string(&path).unwrap();
     assert!(saved.contains("skill = \"rhythm\""), "{saved}");

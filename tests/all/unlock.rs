@@ -144,6 +144,7 @@ fn play_screen_shows_unlock_legend_and_progress() {
         let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
         app.handle_key_at(enter, now);
         app.handle_key_at(enter, now);
+        crate::common::accept_briefing(&mut app, now);
         app.on_tick_at(Duration::from_secs(3), now).unwrap();
         app.on_tick_at(Duration::ZERO, now).unwrap();
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();

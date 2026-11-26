@@ -305,9 +305,13 @@ fn stats_menu_outputs_text_and_machine_readable_json_using_only_a_temporary_db()
         "レベル",
         "モード",
         "時間",
-        "選んだ理由",
+        "訓練",
+        "目的",
+        "達成すること",
+        "訓練の内容",
         "意識すること",
         "卒業の条件",
+        "選んだ理由",
         "根拠の強さ",
     ] {
         assert!(text.contains(expected), "missing {expected:?}: {text}");
@@ -333,6 +337,19 @@ fn stats_menu_outputs_text_and_machine_readable_json_using_only_a_temporary_db()
     let separated = String::from_utf8(separated.stdout).unwrap();
     assert!(separated.contains("Today's practice menu"), "{separated}");
     assert!(separated.contains("Language: Japanese"), "{separated}");
+    for expected in [
+        "Drill:",
+        "Purpose:",
+        "Goal:",
+        "Content:",
+        "Focus:",
+        "Graduation condition:",
+        "Selected because:",
+        "Evidence strength:",
+    ] {
+        assert!(separated.contains(expected), "missing {expected:?}: {separated}");
+    }
+    assert!(separated.contains("("), "evidence note must share the evidence line: {separated}");
     assert!(!separated.contains("今日の練習メニュー"), "{separated}");
 }
 

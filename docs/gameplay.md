@@ -30,7 +30,7 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | Title | `S` | Open settings |
 | Title | `Q` / `Esc` | Quit |
 | Individual training | `←` `↓` `↑` `→` (`h` `j` `k` `l`) | Move over the table: rows are skills, columns what you type (see [Individual training](modes.md#individual-training)) |
-| Individual training | `Enter` / `Space` | Start the cell (through the key picker for Letters, Combos and the Words cells of the first five rows); a `—` cell does not start |
+| Individual training | `Enter` / `Space` | Open the cell's briefing (through the key picker for Letters, Combos and the Words cells of the first five rows); a `—` cell does not start |
 | Individual training | `L` | Switch the practice language of every cell: English ⇄ Japanese (saved) |
 | Individual training | `W` | Play the 1-minute warm-up on its own, in the practice language |
 | Individual training | `C` | In the Phrases column, cycle the course: short / normal / long / mixed |
@@ -45,13 +45,16 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | Key selection | Arrow keys | Move on the keyboard |
 | Key selection | `Space` | Toggle the current key |
 | Key selection | `Tab` | Switch `include` / `only` |
-| Key selection | `Enter` | Save the selection and start the countdown |
+| Key selection | `Enter` | Save the selection and open the cell's briefing |
+| Briefing | `Enter` | Start the countdown |
+| Briefing | `Esc` | Return to the practice menu or Individual training; other keys do nothing |
 | Countdown | `Esc` twice within 2 seconds | Abort to the title screen; another key or the timeout cancels the first press |
 | Play | Printable keys | Type the word |
 | Play | `Backspace` | Move back in `advance` error mode |
 | Play | `Esc` twice within 2 seconds | Abort to the title screen; the timer continues after the first press, and another key or the timeout cancels it |
 | Just-played result | Any key during `session.result_input_delay_ms` | Ignore the input; the hint shows the approximate remaining delay |
 | Result | `Space` / `Enter` | Start another session |
+| Result | `D` | Open the review of the session just played (not available for benchmark results) |
 | Result | `H` | Open history |
 | Result | `Q` / `Esc` | Quit |
 | Benchmark part result | `Space` / `Enter` | Continue to the next part or summary after the input delay |
@@ -85,9 +88,8 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | Settings | `Enter` | Save and return to the title |
 | Settings | `Esc` / `Q` | Cancel and return to the title |
 | Practice menu | `↑` / `↓` (`k` / `j`) | Select a step |
-| Practice menu | `Enter` / `Space` | Start the selected step |
+| Practice menu | `Enter` / `Space` | Open the selected step's briefing |
 | Practice menu | `Esc` / `Q` | Return to the title screen |
-| Menu focus | Any key / `Esc` | Start the countdown now (it starts after about two seconds otherwise) / abandon the step |
 | Menu step countdown or play | `Esc` twice within 2 seconds | Abandon the step without saving it and leave the run; another key or the timeout cancels the first press |
 | Menu step result | `Space` / `Enter` | Continue with the next step (or the next `burst` sprint) |
 | Menu step result | `Esc` | Leave the run: the summary when a step has finished, otherwise the menu |
@@ -128,6 +130,12 @@ The lower row maps expected mistyped characters to the configured keyboard layou
 
 If terminal images are disabled or unavailable, the result uses text for the same information. A narrow or short terminal also falls back to text for visuals that do not fit. Text mistype bars use separated `▆` rows, and the reaction distribution remains visible even when a session observation exists. Benchmark-part results keep their dedicated comparison screen; adaptive details and history conditions remain part of their respective result views.
 
+### Review
+
+Press `D` on a just-played result to open a full-screen review. Benchmark results do not offer this page. Use `↑`/`↓` or `PageUp`/`PageDown` to scroll, and press `D` or `Esc` to return to the result. `Enter` performs the result screen's normal action: it starts the next menu step or repeats an individual session without showing the briefing again.
+
+The review first names the step or cell and lists the result, target line and verdict when that session had a live goal. It also shows the difference from the line, comparisons with the preceding session and personal best when available, menu graduation progress, and WPM, CPS, accuracy and mistypes. Up to three good points follow when supported by the result. The improvement section gives up to three prioritized observations, each pairing a numeric description of what happened with a concrete action for next time. It can use goal attainment, accuracy, the most frequent first-error class, the most frequently mistyped expected key and a second-half slowdown. The final section says what to do next and, for a menu step, how many successful sessions remain before graduation. Sessions from the Normal row have the same review without a target section.
+
 After the final benchmark part, the summary fills the available height with three sections. The top shows the run grade and component grades beside one card per completed part. Each card contains WPM, accuracy, the change from the preceding run, the change from the previous personal best, and the short form ID. The middle shows up to 20 attempts per part with separate WPM and accuracy lines; the current run is enlarged. For A/C, a labelled v2 divider breaks the line between versions. The lower section combines expected mistyped keys across every part in this run and lists up to five sufficiently observed slow transitions, one or two weak fingers, improvements and regressions from the preceding matching part, and one to three concrete practice suggestions. Existing active transition prescriptions take priority.
 
 The summary degrades visuals in this order as space becomes scarce: trends, mistype keyboard, grade badge, then part cards. Its text form still includes the grade line, every part's WPM/accuracy/preceding/personal-best values, and the analysis prose. An 80×24 terminal therefore remains usable without overlapping the return hint.
@@ -138,7 +146,7 @@ Choose Today's training (the first title item, or `M`) to open today's practice 
 
 ### Playing the steps
 
-Select a step with `↑`/`↓` and press `Enter`. The steps are normally played from the top, but any step can be started. Before each step, a `FOCUS` screen shows what to attend to for about two seconds; any key starts the countdown at once, and `Esc` abandons the step. The step then runs with its own mode and settings for the minutes shown on the menu. These settings apply only to that session; your configuration file is not changed.
+Select a step with `↑`/`↓` and press `Enter`. The steps are normally played from the top, but any step can be started. Before each new step, a briefing explains its purpose, goal, content and tips. It also shows the focus, graduation condition, selection reason and concrete target line when available. The screen does not advance on its own: `Enter` starts the countdown, `Esc` abandons the step, and other keys do nothing. The step then runs with its own mode and settings for the minutes shown on the menu. These settings apply only to that session; your configuration file is not changed. Individual-training cells use the same briefing after any key selection. Repeating a session from its result starts the countdown directly, without showing the briefing again.
 
 The finish step consists of three `burst` sprints: `Enter` after each sprint starts the next one, and the step counts as finished after the third. On the result screen of every step, `Enter` continues with the next step, and `Esc` leaves the run. During the countdown or play of a menu step, `Esc` asks first, as in ordinary sessions: the first press shows `Press Esc again to stop (this step is not recorded)` during play (`Press Esc again to quit` during the countdown), and a second `Esc` within 2 seconds abandons the step without saving it and leaves the run. Another key or the timeout cancels the first press. A finished step is marked `Done` on the menu. Playing a `Done` step again saves the session but does not count toward the menu a second time.
 

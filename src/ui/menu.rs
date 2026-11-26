@@ -1,14 +1,14 @@
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Constraint, Direction, Layout};
+use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Paragraph};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::App;
 use crate::i18n::Lang;
 use crate::practice::menu::{MenuRole, MenuStep};
-use crate::ui::{left_inset, theme::Theme};
+use crate::ui::{left_inset, theme::Theme, wrap_field};
 
 pub fn render(frame: &mut Frame, app: &App) {
     let lang = app.config.general.lang;
@@ -91,9 +91,10 @@ pub fn render(frame: &mut Frame, app: &App) {
     frame.render_widget(Paragraph::new(step_lines), left_inset(rows[1]));
 
     if let Some(step) = menu.steps.get(app.menu_selected) {
+        let detail_area = left_inset(rows[3]);
         frame.render_widget(
-            Paragraph::new(detail_lines(step, lang, theme)).wrap(Wrap { trim: false }),
-            left_inset(rows[3]),
+            Paragraph::new(detail_lines(step, lang, theme, usize::from(detail_area.width))),
+            detail_area,
         );
     }
     let hint = match lang {
@@ -103,57 +104,80 @@ pub fn render(frame: &mut Frame, app: &App) {
     frame.render_widget(Paragraph::new(hint).style(Style::default().fg(theme.accent)), left_inset(rows[4]));
 }
 
-pub fn render_focus(frame: &mut Frame, app: &App, remaining: f32) {
-    let lang = app.config.general.lang;
-    let theme = Theme::from_name(&app.config.ui.theme);
-    let step = app
-        .daily_menu
-        .as_ref()
-        .and_then(|menu| app.menu_active_step.and_then(|index| menu.steps.get(index)));
-    let title = match lang {
-        Lang::En => " FOCUS ",
-        Lang::Ja => " 意識すること ",
-    };
-    let block = Block::default().borders(Borders::ALL).title(title).style(Style::default().fg(theme.fg));
-    let inner = block.inner(frame.area());
-    frame.render_widget(block, frame.area());
-    let focus = step.map_or("—", |step| step.focus.as_str());
-    let instruction = match lang {
-        Lang::En => format!("Starting in {:.1}s · press any key to continue · [Esc] Menu", remaining.max(0.0)),
-        Lang::Ja => format!("あと {:.1} 秒で開始・任意のキーで続ける・[Esc] メニュー", remaining.max(0.0)),
-    };
-    // MYTASK-3640: the cell of the individual-training table this step plays.
-    let cell = step.and_then(|step| step_cell_label(step, lang)).unwrap_or_default();
-    let lines = vec![
-        Line::from(""),
-        Line::from(Span::styled(cell, Style::default().fg(theme.accent))),
-        Line::from(Span::styled(focus, Style::default().fg(theme.warning).add_modifier(Modifier::BOLD))),
-        Line::from(""),
-        Line::from(instruction),
-    ];
-    frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), inner);
-}
-
 /// The name of the cell a menu step plays, «正確さ × 単語» /
 /// «Accuracy × Words» (MYTASK-3640).
 pub fn step_cell_label(step: &MenuStep, lang: Lang) -> Option<String> {
     crate::practice::menu::step_cell(step).map(|cell| crate::ui::mode_select::cell_label(cell, lang))
 }
 
-fn detail_lines(step: &MenuStep, lang: Lang, theme: Theme) -> Vec<Line<'static>> {
-    let (drill, reason, focus, advance, evidence) = match lang {
-        Lang::En => ("Drill", "Selected because", "Focus", "Graduation condition", "Evidence strength"),
-        Lang::Ja => ("訓練", "選んだ理由", "意識すること", "卒業の条件", "根拠の強さ"),
+fn detail_lines(step: &MenuStep, lang: Lang, theme: Theme, width: usize) -> Vec<Line<'static>> {
+    let labels = match lang {
+        Lang::En => [
+            "Drill",
+            "Purpose",
+            "Goal",
+            "Content",
+            "Focus",
+            "Graduation condition",
+            "Selected because",
+            "Evidence strength",
+        ],
+        Lang::Ja => [
+            "訓練",
+            "目的",
+            "達成すること",
+            "訓練の内容",
+            "意識すること",
+            "卒業の条件",
+            "選んだ理由",
+            "根拠の強さ",
+        ],
     };
+    let heading_width = labels.iter().map(|label| UnicodeWidthStr::width(*label)).max().unwrap_or(0);
+    let briefing = crate::practice::briefing::resolve_menu_step(step).ok();
     let cell = step_cell_label(step, lang).unwrap_or_else(|| "—".to_owned());
-    vec![
-        Line::from(Span::styled(format!("{drill}: {cell}"), Style::default().fg(theme.accent))),
-        Line::from(Span::styled(format!("{reason}: {}", step.reason), Style::default().fg(theme.accent))),
-        Line::from(Span::styled(format!("{focus}: {}", step.focus), Style::default().fg(theme.warning))),
-        Line::from(format!("{advance}: {}", step.advance)),
-        Line::from(format!("{evidence}: {}", step.evidence.as_deref().unwrap_or("—"))),
-        Line::from(step.evidence_note.clone().unwrap_or_default()),
-    ]
+    let purpose = briefing.as_ref().map_or("—", |entry| entry.purpose.text(lang));
+    let goal = briefing.as_ref().map_or("—", |entry| entry.goal.text(lang));
+    let content = briefing.as_ref().map_or("—", |entry| entry.content.text(lang));
+    let evidence = match (step.evidence.as_deref(), step.evidence_note.as_deref()) {
+        (Some(strength), Some(note)) if !note.is_empty() && lang == Lang::Ja => format!("{strength}（{note}）"),
+        (Some(strength), Some(note)) if !note.is_empty() => format!("{strength} ({note})"),
+        (Some(strength), _) => strength.to_owned(),
+        (None, Some(note)) if !note.is_empty() && lang == Lang::Ja => format!("—（{note}）"),
+        (None, Some(note)) if !note.is_empty() => format!("— ({note})"),
+        (None, _) => "—".to_owned(),
+    };
+    let values = [
+        cell,
+        purpose.to_owned(),
+        goal.to_owned(),
+        content.to_owned(),
+        step.focus.clone(),
+        step.advance.clone(),
+        step.reason.clone(),
+        evidence,
+    ];
+    let styles = [
+        Style::default().fg(theme.accent),
+        Style::default(),
+        Style::default(),
+        Style::default(),
+        Style::default().fg(theme.warning),
+        Style::default(),
+        Style::default().fg(theme.accent),
+        Style::default(),
+    ];
+
+    labels
+        .into_iter()
+        .zip(values)
+        .zip(styles)
+        .flat_map(|((label, value), style)| {
+            wrap_field(label, &value, heading_width, width)
+                .into_iter()
+                .map(move |field| Line::from(vec![Span::raw(field.label), Span::styled(field.value, style)]))
+        })
+        .collect()
 }
 
 fn step_line(index: usize, step: &MenuStep, completion: &str, lang: Lang) -> String {
@@ -350,4 +374,87 @@ pub fn progress_band_after_step(app: &App, width: usize) -> Option<String> {
     let marker = (next < menu.steps.len()).then_some(next);
     let position = marker.map_or(current + 1, |index| index + 1);
     Some(progress_band(menu, &app.menu_completed, marker, position, app.config.general.lang, width))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+
+    fn step() -> MenuStep {
+        MenuStep {
+            role: MenuRole::PrimaryA,
+            language: Lang::Ja,
+            prescription_id: "accuracy.gate".to_owned(),
+            title: "正確さの関門".to_owned(),
+            level: Some(1),
+            mode: "words".to_owned(),
+            minutes: 4,
+            reason: "正確さを優先するため".to_owned(),
+            focus: "1 打ずつ確実に打つ".to_owned(),
+            advance: "関門を 3 回続けて通る".to_owned(),
+            advance_condition: None,
+            evidence: Some("中".to_owned()),
+            evidence_note: Some("速さより正確さを優先する".to_owned()),
+            settings: BTreeMap::new(),
+        }
+    }
+
+    fn text(line: &Line<'_>) -> String {
+        line.spans.iter().map(|span| span.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn detail_uses_briefing_fields_in_the_requested_order() {
+        let lines = detail_lines(&step(), Lang::Ja, Theme::from_name("default"), 120);
+        let labels = lines
+            .iter()
+            .map(text)
+            .filter_map(|line| {
+                [
+                    "達成すること",
+                    "訓練の内容",
+                    "意識すること",
+                    "卒業の条件",
+                    "選んだ理由",
+                    "根拠の強さ",
+                    "訓練",
+                    "目的",
+                ]
+                .into_iter()
+                .find(|label| line.trim_start().starts_with(label))
+                .map(str::to_owned)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            labels,
+            [
+                "訓練",
+                "目的",
+                "達成すること",
+                "訓練の内容",
+                "意識すること",
+                "卒業の条件",
+                "選んだ理由",
+                "根拠の強さ"
+            ]
+        );
+    }
+
+    #[test]
+    fn detail_wraps_values_at_the_shared_value_column_without_colons() {
+        let lines = detail_lines(&step(), Lang::Ja, Theme::from_name("default"), 40);
+        let text = lines.iter().map(text).collect::<Vec<_>>();
+        let content = text.iter().position(|line| line.trim_start().starts_with("訓練の内容")).unwrap();
+
+        assert!(!text[content].contains(':'), "headings no longer use colons: {text:?}");
+        assert!(text[content].contains("誤打すると"), "the value must begin beside its heading: {text:?}");
+        let value_column = UnicodeWidthStr::width(lines[content].spans[0].content.as_ref());
+        assert!(
+            text.get(content + 1)
+                .is_some_and(|_| UnicodeWidthStr::width(lines[content + 1].spans[0].content.as_ref()) == value_column),
+            "continuation rows must be indented to the value column: {text:?}"
+        );
+    }
 }

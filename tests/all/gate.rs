@@ -67,6 +67,7 @@ fn result_screen_explains_gate_failure() {
     let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
     app.handle_key_at(key(KeyCode::Enter), now);
     app.handle_key_at(key(KeyCode::Enter), now);
+    crate::common::accept_briefing(&mut app, now);
     app.on_tick_at(Duration::from_secs(3), now).unwrap();
     app.on_tick_at(Duration::from_millis(1), now).unwrap();
     app.handle_key_at(key(KeyCode::Char('b')), now + Duration::from_millis(10));

@@ -1,8 +1,10 @@
 #![allow(dead_code)]
 
 use std::ops::{Deref, DerefMut};
+use std::time::Instant;
 
-use rs_typing_trainer::app::App;
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use rs_typing_trainer::app::{App, Screen};
 use rs_typing_trainer::config::Config;
 use tempfile::TempDir;
 
@@ -49,6 +51,14 @@ pub fn test_app_at(mut config: Config, date: chrono::NaiveDate) -> TestApp {
     // lower; `title_ui` checks the real starting row with `App::new` directly.
     app.title_selected = 1;
     TestApp { app, _home: home }
+}
+
+/// Accepts the pre-session briefing when a test is interested in the session
+/// that follows it rather than the briefing itself.
+pub fn accept_briefing(app: &mut App, now: Instant) {
+    if app.screen == Screen::Briefing {
+        app.handle_key_at(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+    }
 }
 
 /// The phrase that marks the metrics row of the playing screen: the combo of

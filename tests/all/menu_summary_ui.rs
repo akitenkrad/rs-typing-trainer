@@ -466,9 +466,11 @@ fn enter_or_escape_on_the_summary_returns_to_the_menu() {
 // ---------------------------------------------------------------------------
 
 fn play_selected_step(app: &mut rs_typing_trainer::app::App, now: &mut Instant) {
-    assert!(matches!(app.screen, Screen::MenuFocus { .. }), "{:?}", app.screen);
-    *now += Duration::from_millis(10);
-    app.handle_key_at(key(KeyCode::Char('x')), *now);
+    if app.screen == Screen::Briefing {
+        *now += Duration::from_millis(10);
+        app.handle_key_at(key(KeyCode::Enter), *now);
+    }
+    assert!(matches!(app.screen, Screen::Countdown { .. }), "{:?}", app.screen);
     *now += Duration::from_secs(4);
     app.on_tick_at(Duration::from_secs(3), *now).unwrap();
     assert_eq!(app.screen, Screen::Playing);
@@ -538,7 +540,7 @@ fn escape_while_playing_a_later_step_also_shows_the_summary_so_far() {
     play_selected_step(&mut app, &mut now);
     now += Duration::from_secs(1);
     app.handle_key_at(key(KeyCode::Enter), now);
-    assert!(matches!(app.screen, Screen::MenuFocus { .. }));
+    assert!(matches!(app.screen, Screen::Briefing));
     app.handle_key_at(key(KeyCode::Esc), now + Duration::from_millis(10));
     assert_eq!(app.screen, Screen::MenuSummary);
     let text = rows(&render_buffer(&app, 80, 24)).join("\n");
@@ -551,7 +553,7 @@ fn escape_before_any_step_is_finished_returns_straight_to_the_menu() {
     let mut app = flow_app(Lang::En);
     let now = Instant::now();
     app.handle_key_at(key(KeyCode::Enter), now);
-    assert!(matches!(app.screen, Screen::MenuFocus { .. }));
+    assert!(matches!(app.screen, Screen::Briefing));
     app.handle_key_at(key(KeyCode::Esc), now + Duration::from_millis(10));
     assert_eq!(app.screen, Screen::Menu);
     assert!(app.menu_summary.is_none());

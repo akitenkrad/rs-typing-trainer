@@ -45,8 +45,8 @@ fn open_menu(app: &mut rs_typing_trainer::app::App, now: Instant) {
 
 fn finish_selected_step(app: &mut rs_typing_trainer::app::App, now: Instant) {
     app.handle_key_at(key(KeyCode::Enter), now);
-    assert!(matches!(app.screen, Screen::MenuFocus { .. }));
-    app.handle_key_at(key(KeyCode::Char('x')), now + Duration::from_millis(10));
+    assert!(matches!(app.screen, Screen::Briefing));
+    app.handle_key_at(key(KeyCode::Enter), now + Duration::from_millis(10));
     assert!(matches!(app.screen, Screen::Countdown { .. }));
     app.on_tick_at(Duration::from_secs(3), now + Duration::from_secs(4)).unwrap();
     assert_eq!(app.screen, Screen::Playing);
@@ -68,9 +68,10 @@ fn menu_screen_fits_at_80_by_24_and_shows_rows_and_selected_details() {
         "TODAY'S MENU",
         "Warm-up",
         "Adaptive transitions",
+        "Purpose",
+        "Goal",
+        "Content",
         "Focus",
-        "Graduation condition",
-        "Evidence strength",
         "[Enter] Start",
     ] {
         assert!(text.contains(expected), "missing {expected:?}:\n{text}");
@@ -86,7 +87,7 @@ fn selected_reason_is_complete_in_the_detail_and_not_truncated_in_the_step_row()
     app.handle_key(key(KeyCode::Down));
     let reason = app.daily_menu.as_ref().unwrap().steps[1].reason.clone();
 
-    let rows = render(&app, 80, 24);
+    let rows = render(&app, 120, 40);
     let text = rows.join("\n");
     let compact = rows
         .iter()
@@ -95,7 +96,7 @@ fn selected_reason_is_complete_in_the_detail_and_not_truncated_in_the_step_row()
         .chars()
         .filter(|character| !character.is_whitespace())
         .collect::<String>();
-    let expected = format!("Selected because: {reason}")
+    let expected = format!("Selected because {reason}")
         .chars()
         .filter(|character| !character.is_whitespace())
         .collect::<String>();
@@ -104,6 +105,56 @@ fn selected_reason_is_complete_in_the_detail_and_not_truncated_in_the_step_row()
     let step_row = rows.iter().find(|row| row.contains("Adaptive transitions")).unwrap();
     assert!(!step_row.contains(&reason), "reason must be in the detail only:\n{text}");
     assert!(!step_row.contains('…'), "the step row should fit without truncating its reason:\n{text}");
+}
+
+#[test]
+fn japanese_menu_detail_headings_share_one_display_column() {
+    let mut config = base_config();
+    config.general.lang = rs_typing_trainer::i18n::Lang::Ja;
+    let mut app = test_app_at(config, chrono::NaiveDate::from_ymd_opt(2026, 11, 18).unwrap());
+    open_menu(&mut app, Instant::now());
+    app.handle_key(key(KeyCode::Down));
+
+    let rows = render(&app, 120, 40);
+    let value_columns = [
+        "訓練",
+        "目的",
+        "達成すること",
+        "訓練の内容",
+        "意識すること",
+        "卒業の条件",
+        "選んだ理由",
+        "根拠の強さ",
+    ]
+    .map(|heading| {
+        let row = rows
+            .iter()
+            .find(|row| {
+                row.chars()
+                    .filter(|character| !character.is_whitespace())
+                    .collect::<String>()
+                    .contains(heading)
+            })
+            .unwrap_or_else(|| panic!("missing {heading:?}:\n{}", rows.join("\n")));
+        let value_column = row
+            .chars()
+            .enumerate()
+            .filter(|(_, character)| !character.is_whitespace() && *character != '│')
+            .nth(heading.chars().count())
+            .map(|(column, _)| column)
+            .unwrap_or_else(|| panic!("missing value after {heading:?}: {row}"));
+        assert!(
+            row.chars().take(value_column).all(|character| character != ':'),
+            "detail headings no longer use colons: {row}"
+        );
+        value_column
+    });
+
+    assert!(
+        value_columns.windows(2).all(|pair| pair[0] == pair[1]),
+        "unaligned detail headings: {value_columns:?}\n{}",
+        rows.join("\n")
+    );
 }
 
 #[test]
@@ -164,7 +215,7 @@ fn menu_rows_show_practice_language_and_display_language_stays_independent() {
     assert_eq!(app.config.adaptive.lang, "ja");
     assert_eq!(app.config.mode.sentence.lang, "ja");
     assert_eq!(app.config.mode.phrase.lang, "ja");
-    app.handle_key_at(key(KeyCode::Char('x')), now + Duration::from_millis(20));
+    app.handle_key_at(key(KeyCode::Enter), now + Duration::from_millis(20));
     app.on_tick_at(Duration::from_secs(3), now + Duration::from_secs(4)).unwrap();
     assert_eq!(app.screen, Screen::Playing);
     assert!(
@@ -207,7 +258,7 @@ fn japanese_ngram_menu_step_keeps_its_mode_and_uses_japanese_prompts() {
 
     app.handle_key_at(key(KeyCode::Enter), now + Duration::from_millis(10));
     assert_eq!(app.config.mode.kind, ModeKind::Ngram);
-    app.handle_key_at(key(KeyCode::Char('x')), now + Duration::from_millis(20));
+    app.handle_key_at(key(KeyCode::Enter), now + Duration::from_millis(20));
     app.on_tick_at(Duration::from_secs(3), now + Duration::from_secs(4)).unwrap();
 
     assert_eq!(app.screen, Screen::Playing);
@@ -253,12 +304,12 @@ fn menu_runs_steps_in_order_restores_settings_and_keeps_completion_marks() {
     );
 
     app.handle_key_at(key(KeyCode::Enter), now + Duration::from_secs(130));
-    assert!(matches!(app.screen, Screen::MenuFocus { .. }));
+    assert!(matches!(app.screen, Screen::Briefing));
     assert_eq!(app.menu_active_step, Some(1));
     assert_eq!(app.config.mode.kind, ModeKind::Adaptive);
     assert_eq!(app.config.adaptive.drill_ratio, 0.3);
 
-    app.handle_key_at(key(KeyCode::Char('x')), now + Duration::from_secs(131));
+    app.handle_key_at(key(KeyCode::Enter), now + Duration::from_secs(131));
     app.on_tick_at(Duration::from_secs(3), now + Duration::from_secs(135)).unwrap();
     assert_eq!(app.screen, Screen::Playing);
     // MYTASK-3624: the first Esc of a menu step only asks for confirmation
@@ -378,6 +429,44 @@ fn menu_result_adds_the_graduation_condition_and_current_outcome_line() {
     });
     let text = render(&app, 80, 24).join("\n");
     assert!(text.contains("This session: met 2/3"), "{text}");
+}
+
+#[test]
+fn menu_review_keeps_the_full_graduation_condition_and_combines_the_next_tip() {
+    let mut config = base_config();
+    config.general.lang = rs_typing_trainer::i18n::Lang::Ja;
+    let mut app = test_app_at(config, chrono::NaiveDate::from_ymd_opt(2026, 11, 18).unwrap());
+    let now = Instant::now();
+    open_menu(&mut app, now);
+    app.handle_key(key(KeyCode::Down));
+    let step = app.daily_menu.as_ref().unwrap().steps[1].clone();
+    let tip = rs_typing_trainer::practice::briefing::resolve_menu_step(&step).unwrap().tips[0]
+        .text(rs_typing_trainer::i18n::Lang::Ja)
+        .to_owned();
+    finish_selected_step(&mut app, now + Duration::from_secs(1));
+    app.handle_key(key(KeyCode::Char('d')));
+    assert_eq!(app.screen, Screen::Review);
+
+    let rows = render(&app, 120, 40);
+    let compact = rows
+        .join("")
+        .chars()
+        .filter(|character| !character.is_whitespace() && *character != '│')
+        .collect::<String>();
+    let condition = format!("卒業の条件:{}—この回:", step.advance)
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect::<String>();
+    let next = format!("次回:{tip}")
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect::<String>();
+    assert!(
+        compact.contains(&condition),
+        "missing full graduation line {condition:?}:\n{}",
+        rows.join("\n")
+    );
+    assert!(compact.contains(&next), "missing combined next action {next:?}:\n{}", rows.join("\n"));
 }
 
 #[test]
@@ -608,7 +697,7 @@ fn wide_menu_result_line_names_the_step_position_and_level() {
 
 fn start_selected_step(app: &mut rs_typing_trainer::app::App, now: Instant) {
     app.handle_key_at(key(KeyCode::Enter), now);
-    app.handle_key_at(key(KeyCode::Char('x')), now + Duration::from_millis(10));
+    app.handle_key_at(key(KeyCode::Enter), now + Duration::from_millis(10));
     app.on_tick_at(Duration::from_secs(3), now + Duration::from_secs(4)).unwrap();
     assert_eq!(app.screen, Screen::Playing);
 }
@@ -649,7 +738,7 @@ fn esc_during_a_menu_countdown_also_asks_for_confirmation() {
     let now = Instant::now();
     open_menu(&mut app, now);
     app.handle_key_at(key(KeyCode::Enter), now);
-    app.handle_key_at(key(KeyCode::Char('x')), now + Duration::from_millis(10));
+    app.handle_key_at(key(KeyCode::Enter), now + Duration::from_millis(10));
     assert!(matches!(app.screen, Screen::Countdown { .. }));
 
     app.handle_key_at(key(KeyCode::Esc), now + Duration::from_millis(100));
@@ -665,6 +754,8 @@ fn esc_outside_the_menu_keeps_the_existing_confirmation_text() {
     app.handle_key_at(key(KeyCode::Char(' ')), now);
     assert_eq!(app.screen, Screen::ModeSelect);
     app.handle_key_at(key(KeyCode::Enter), now);
+    assert_eq!(app.screen, Screen::Briefing);
+    app.handle_key_at(key(KeyCode::Enter), now + Duration::from_millis(10));
     app.on_tick_at(Duration::from_secs(3), now + Duration::from_secs(4)).unwrap();
     assert_eq!(app.screen, Screen::Playing);
     app.handle_key_at(key(KeyCode::Esc), now + Duration::from_secs(5));
@@ -745,6 +836,8 @@ fn rhythm_menu_levels_set_the_tempo_from_their_pacer_ratio_and_free_play_keeps_n
     app.handle_key_at(key(KeyCode::Char(' ')), later);
     assert_eq!(app.screen, Screen::ModeSelect);
     app.handle_key_at(key(KeyCode::Enter), later);
+    assert_eq!(app.screen, Screen::Briefing);
+    app.handle_key_at(key(KeyCode::Enter), later + Duration::from_millis(10));
     app.on_tick_at(Duration::from_secs(3), later + Duration::from_secs(4)).unwrap();
     assert_eq!(app.screen, Screen::Playing);
     assert_eq!(app.rhythm_bpm, Some(100.0), "a fixed rhythm.bpm still wins outside the menu");
@@ -770,7 +863,7 @@ fn japanese_warm_up_step_shows_surface_kana_and_romaji_rows() {
     assert_eq!(app.daily_menu.as_ref().unwrap().steps[0].mode, "words");
 
     app.handle_key_at(key(KeyCode::Enter), now + Duration::from_millis(10));
-    app.handle_key_at(key(KeyCode::Char('x')), now + Duration::from_millis(20));
+    app.handle_key_at(key(KeyCode::Enter), now + Duration::from_millis(20));
     app.on_tick_at(Duration::from_secs(3), now + Duration::from_secs(4)).unwrap();
     assert_eq!(app.screen, Screen::Playing);
     assert_eq!(app.config.mode.kind, ModeKind::Words);

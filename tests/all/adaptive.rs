@@ -403,6 +403,7 @@ fn adaptive_result_warns_that_wpm_is_not_an_improvement_measure() {
     let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
     app.handle_key_at(enter, now);
     app.handle_key_at(enter, now);
+    common::accept_briefing(&mut app, now);
     app.on_tick_at(std::time::Duration::from_secs(3), now).unwrap();
     app.on_tick_at(std::time::Duration::from_millis(1), now).unwrap();
     app.on_tick_at(std::time::Duration::from_secs(2), now + std::time::Duration::from_secs(2))
@@ -425,6 +426,7 @@ fn adaptive_language_is_independent_from_display_language() {
     let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
     app.handle_key_at(enter, now);
     app.handle_key_at(enter, now);
+    common::accept_briefing(&mut app, now);
     app.on_tick_at(std::time::Duration::from_secs(3), now).unwrap();
     app.on_tick_at(std::time::Duration::from_millis(1), now).unwrap();
     assert!(app.game.as_ref().unwrap().current_prompt.reading.is_none());
@@ -437,6 +439,7 @@ fn adaptive_language_is_independent_from_display_language() {
     let mut app = test_app(config);
     app.handle_key_at(enter, now);
     app.handle_key_at(enter, now);
+    common::accept_briefing(&mut app, now);
     app.on_tick_at(std::time::Duration::from_secs(3), now).unwrap();
     app.on_tick_at(std::time::Duration::from_millis(1), now).unwrap();
     assert!(app.game.as_ref().unwrap().current_prompt.reading.is_some());

@@ -96,6 +96,7 @@ fn retry_on_error_repeats_the_item_once_immediately() {
     let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
     app.handle_key_at(enter, now);
     app.handle_key_at(enter, now);
+    crate::common::accept_briefing(&mut app, now);
     app.on_tick_at(Duration::from_secs(3), now).unwrap();
     app.on_tick_at(Duration::ZERO, now).unwrap();
     let original = app.game.as_ref().unwrap().current_prompt.text.clone();

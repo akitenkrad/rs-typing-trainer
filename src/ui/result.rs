@@ -17,7 +17,7 @@ use crate::metrics::stats::GameResult;
 use crate::record::SessionRecord;
 use crate::ui::keyboard::{KeyboardState, KeyboardStyle, KeyboardView, keycap_tile_placements};
 use crate::ui::result_image::{ItemSpeedPoint, MetricCardSpec, MistypeKeyboardSpec, ReactionHistogramSpec, ResultImageColors, SpeedChartSpec};
-use crate::ui::{left_inset, theme::Theme};
+use crate::ui::{left_inset, theme::Theme, wrap_display};
 
 pub fn item_speed_points(record: &SessionRecord) -> Vec<ItemSpeedPoint> {
     if record.header.metrics_version == 0 {
@@ -713,23 +713,99 @@ fn render_observations(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, 
         let mut lines = notices;
         let limit = if app.config.display.feedback == "detailed" { 3 } else { 1 };
         lines.extend(app.result_insights.iter().take(limit).cloned().map(Line::from));
+        append_review_observation(&mut lines, app, theme, lang, inner);
         frame.render_widget(Paragraph::new(lines), left_inset(inner));
         return;
     }
     if result_mode_is(app, crate::config::ModeKind::Adaptive) && app.result_origin == ResultOrigin::JustPlayed {
-        render_adaptive_result(frame, app, theme, left_inset(inner), lang);
+        let area = left_inset(inner);
+        let improvement = review_improvement_lines(app, theme, area.width.saturating_sub(4));
+        let improvement_height = improvement.len().min(2) as u16;
+        if improvement_height > 0 && area.height >= improvement_height.saturating_add(2) {
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(0), Constraint::Length(improvement_height), Constraint::Length(1)])
+                .split(area);
+            render_adaptive_result(frame, app, theme, rows[0], lang);
+            frame.render_widget(Paragraph::new(improvement), rows[1]);
+            render_review_hint(frame, theme, lang, rows[2]);
+        } else {
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(0), Constraint::Length(1)])
+                .split(area);
+            render_adaptive_result(frame, app, theme, rows[0], lang);
+            render_review_hint(frame, theme, lang, rows[1]);
+        }
     } else if app.result_insights.is_empty() {
-        frame.render_widget(
-            Paragraph::new(Msg::NoData.text(lang)).style(Style::default().fg(theme.muted)),
-            left_inset(inner),
-        );
+        let mut lines = vec![Line::from(Span::styled(Msg::NoData.text(lang), Style::default().fg(theme.muted)))];
+        append_review_observation(&mut lines, app, theme, lang, inner);
+        frame.render_widget(Paragraph::new(lines), left_inset(inner));
     } else {
         let limit = if app.config.display.feedback == "detailed" { 3 } else { 1 };
-        frame.render_widget(
-            Paragraph::new(app.result_insights.iter().take(limit).cloned().map(Line::from).collect::<Vec<_>>()),
-            left_inset(inner),
-        );
+        let mut lines = app.result_insights.iter().take(limit).cloned().map(Line::from).collect::<Vec<_>>();
+        append_review_observation(&mut lines, app, theme, lang, inner);
+        frame.render_widget(Paragraph::new(lines), left_inset(inner));
     }
+}
+
+fn append_review_observation(lines: &mut Vec<Line<'static>>, app: &App, theme: &Theme, lang: Lang, area: Rect) {
+    if !review_available(app) {
+        return;
+    }
+    let capacity = usize::from(area.height);
+    let improvement = review_improvement_lines(app, theme, area.width.saturating_sub(4));
+    let hint = Line::from(Span::styled(
+        match lang {
+            Lang::En => "[D] Review",
+            Lang::Ja => "[D] 振り返り",
+        },
+        Style::default().fg(theme.accent),
+    ));
+    if lines.len().saturating_add(improvement.len()).saturating_add(1) <= capacity {
+        lines.extend(improvement);
+    }
+    if lines.len() < capacity {
+        lines.push(hint);
+    } else if capacity > 0 {
+        lines[capacity - 1] = hint;
+        lines.truncate(capacity);
+    }
+}
+
+fn review_available(app: &App) -> bool {
+    app.review_available()
+}
+
+fn review_improvement_lines(app: &App, theme: &Theme, width: u16) -> Vec<Line<'static>> {
+    let Some(item) = review_available(app)
+        .then(|| crate::ui::review::build_report(app))
+        .flatten()
+        .and_then(|report| report.improvements.first().cloned())
+    else {
+        return Vec::new();
+    };
+    let text = if item.advice.is_empty() {
+        item.finding
+    } else {
+        format!("{} → {}", item.finding, item.advice)
+    };
+    wrap_display(&text, usize::from(width))
+        .into_iter()
+        .take(2)
+        .map(|text| Line::from(Span::styled(text, Style::default().fg(theme.warning))))
+        .collect()
+}
+
+fn render_review_hint(frame: &mut Frame, theme: &Theme, lang: Lang, area: Rect) {
+    frame.render_widget(
+        Paragraph::new(match lang {
+            Lang::En => "[D] Review",
+            Lang::Ja => "[D] 振り返り",
+        })
+        .style(Style::default().fg(theme.accent)),
+        area,
+    );
 }
 
 fn result_notice_lines(app: &App, theme: &Theme, lang: Lang) -> Vec<Line<'static>> {
@@ -970,7 +1046,7 @@ fn render_result_hint(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, l
     }
 }
 
-fn menu_result_line(app: &App, lang: Lang, width: usize) -> Option<String> {
+pub(crate) fn menu_result_line(app: &App, lang: Lang, width: usize) -> Option<String> {
     let step = app.daily_menu.as_ref()?.steps.get(app.menu_active_step?)?;
     if step.advance_condition.is_none() {
         return menu_check_judgments_line(app, lang, width);
@@ -1556,7 +1632,7 @@ fn render_mistype_heatmap(frame: &mut Frame, r: &GameResult, theme: &Theme, area
 
 fn render_hint(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, lang: Lang) {
     let remaining = app.result_input_delay_remaining();
-    let base = if app.menu_active_step.is_some() {
+    let navigation = if app.menu_active_step.is_some() {
         match lang {
             Lang::En => "[Enter] Next step    [Esc] Menu",
             Lang::Ja => "[Enter] 次の段    [Esc] メニュー",
@@ -1564,7 +1640,12 @@ fn render_hint(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, lang: La
     } else {
         Msg::ResultHint.text(lang)
     };
-    let hint = remaining.map_or_else(|| base.to_owned(), |remaining| format!("{base}  … {:.1}s", remaining.as_secs_f32()));
+    let base = match (lang, review_available(app)) {
+        (Lang::En, true) => format!("{navigation}    [D] Review"),
+        (Lang::Ja, true) => format!("{navigation}    [D] 振り返り"),
+        (_, false) => navigation.to_owned(),
+    };
+    let hint = remaining.map_or_else(|| base.clone(), |remaining| format!("{base}  … {:.1}s", remaining.as_secs_f32()));
     let color = if remaining.is_some() { theme.muted } else { theme.accent };
     let p = Paragraph::new(hint).style(Style::default().fg(color));
     frame.render_widget(p, left_inset(area));

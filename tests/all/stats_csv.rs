@@ -16,7 +16,7 @@ fn fixture() -> (TempDir, std::path::PathBuf, std::path::PathBuf) {
     let config_path = directory.path().join("config.toml");
     std::fs::write(&config_path, format!("[storage]\ndb_path = {:?}\n", db_path)).unwrap();
     for (kind, started, text, reading, input) in [
-        (ModeKind::Words, Utc.with_ymd_and_hms(2026, 11, 14, 0, 0, 0).unwrap(), "as", None, "as"),
+        (ModeKind::Words, Utc::now(), "as", None, "as"),
         (
             ModeKind::Romaji,
             Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),

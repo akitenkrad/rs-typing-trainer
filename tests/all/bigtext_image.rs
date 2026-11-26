@@ -50,6 +50,7 @@ fn playing_app() -> common::TestApp {
     if app.screen == Screen::KeyPicker {
         app.handle_key_at(enter, now);
     }
+    common::accept_briefing(&mut app, now);
     app.on_tick_at(Duration::from_secs(3), now).unwrap();
     app.on_tick_at(Duration::from_millis(1), now).unwrap();
     assert_eq!(app.screen, Screen::Playing);

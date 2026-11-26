@@ -1,0 +1,217 @@
+# Briefing texts shown before a drill starts and reused by the review page
+# after it ends.
+#
+# [[skill]]  one entry per row of the individual-training table (DrillSkill).
+# [[step]]   overrides for the fixed menu steps, whose purpose differs from
+#            the row they play (the warm-up and the check play «normal», the
+#            finish plays «burst»). Fields left out fall back to the skill.
+#
+# Fields:
+#   purpose  why the drill exists (目的)
+#   goal     what counts as success in this session, in general terms
+#            (達成すること). The briefing adds the concrete line (gate, own
+#            median, pacer target) when it is known.
+#   content  what happens on screen (訓練の内容)
+#   tips     two or three things to keep in mind (コツ)
+#   missed   the improvement point shown on the review page when the goal
+#            was not reached (改善点)
+#   met      the next step shown when the goal was reached
+
+version = "briefing-v1"
+
+[[skill]]
+skill = "normal"
+purpose = { en = "Type with your own settings and see where you stand today.", ja = "自分の設定のまま打ち，今日の調子を確かめる" }
+goal = { en = "No target line. Type as you usually do; the result feeds your records and analysis.", ja = "目標の線はありません．いつもどおりに打ちます．結果は記録と分析に使われます" }
+content = { en = "Prompts and settings are your own. Nothing is added or taken away.", ja = "出題も設定も自分のものです．補助を足したり外したりはしません" }
+tips = [
+  { en = "Do not change how you type because it is being recorded.", ja = "記録されるからといって，打ち方を変えない" },
+  { en = "If you make an error, fix it calmly and carry on.", ja = "誤打したら落ち着いて直し，そのまま続ける" },
+]
+missed = { en = "Compare with the previous session and pick one drill for the part that dropped.", ja = "前回と比べて落ちたところを 1 つ選び，それに合う訓練を個別訓練の表から選ぶ" }
+met = { en = "Keep the same way of typing next time.", ja = "次回も同じ打ち方を続ける" }
+
+[[skill]]
+skill = "accuracy"
+purpose = { en = "Build clean keystrokes first. Speed stacked on sloppy keystrokes does not last.", ja = "速さより先に，正確な打鍵を身につける．雑な打鍵の上に積んだ速さは長続きしない" }
+goal = { en = "Keep your accuracy at or above the gate to the end.", ja = "最後まで正確さを関門以上に保つ" }
+content = { en = "A typo stops you until you type the right key. The meter shows your accuracy against the gate.", ja = "誤打すると，正しいキーを打つまで先へ進みません．メーターが正確さと関門の線を示します" }
+tips = [
+  { en = "Give up speed; make every keystroke certain.", ja = "速さを捨て，1 打ずつ確実に打つ" },
+  { en = "After an error, pause for one beat before going on.", ja = "誤打したら 1 拍置いてから続ける" },
+  { en = "Keep your fingers on the home row.", ja = "指をホームポジションに戻す" },
+]
+missed = { en = "Slow down until you can see each letter before pressing it. Speed comes back once accuracy holds.", ja = "1 文字ずつ見てから押せる速さまで落とす．正確さが保てれば，速さは後から戻る" }
+met = { en = "Keep the gate next time at a slightly more natural pace.", ja = "次回は少し自然な速さで，同じ関門を保つ" }
+
+[[skill]]
+skill = "speed"
+purpose = { en = "Raise your speed a little at a time while keeping accuracy.", ja = "正確さを保ったまま，速さを少しずつ引き上げる" }
+goal = { en = "Reach the pacer target with 95% accuracy or better.", ja = "正確さ 95% 以上で，ペーサーの目標に届く" }
+content = { en = "A pacer runs a little faster than your recent speed. A second meter shows accuracy against 95%.", ja = "最近の速さより少し速いペーサーが走ります．2 本目のメーターで，正確さと 95% の線を示します" }
+tips = [
+  { en = "Follow the pacer, but stop chasing it once accuracy breaks.", ja = "ペーサーに付いていく．ただし正確さが崩れたら追わない" },
+  { en = "Speed up by moving to the next key sooner, not by pressing harder.", ja = "強く打つのではなく，次のキーへ早く移って速くする" },
+]
+missed = { en = "If accuracy fell, slow down; if speed fell short, look one word ahead to keep moving.", ja = "正確さが落ちたなら速さを落とす．速さが足りなかったなら，1 語先を見て止まらずに打つ" }
+met = { en = "Hold the same pace again; the level goes up after three sessions in a row.", ja = "同じ速さをもう一度保つ．3 回続けて届くとレベルが上がる" }
+
+[[skill]]
+skill = "recovery"
+purpose = { en = "Lose less time after an error, so a typo does not break your pace.", ja = "誤打の後に失う時間を減らし，1 つの誤りで調子を崩さないようにする" }
+goal = { en = "Keep the extra time after errors at or below your own median.", ja = "誤打の後の余分な時間を，自分の中央値以下に抑える" }
+content = { en = "A typo does not stop you. The prompt you missed comes back later. Each error shows how much extra time you needed.", ja = "誤打しても止まりません．間違えた問題は後でもう一度出ます．誤打のたびに，元の速さに戻るまでの余分な時間が出ます" }
+tips = [
+  { en = "Do not dwell on an error; look at the next character at once.", ja = "誤打を気にせず，すぐ次の文字を見る" },
+  { en = "Return to the pace you had before the error.", ja = "誤打の前の速さにそのまま戻る" },
+]
+missed = { en = "You slowed down after errors. Next time, look at the next character the moment you notice a typo.", ja = "誤打の後に速さが落ちていました．次回は誤打に気づいた瞬間に次の文字へ目を移す" }
+met = { en = "Keep recovering this quickly; three sessions in a row raise the level.", ja = "この立ち直りの速さを保つ．3 回続けるとレベルが上がる" }
+
+[[skill]]
+skill = "blind"
+purpose = { en = "Stop relying on the on-screen keyboard and type from finger memory.", ja = "画面のキーボードに頼らず，指の記憶で打てるようにする" }
+goal = { en = "Keep your accuracy at or above your own median while the keyboard fades.", ja = "キーボードの表示が消えても，正確さを自分の中央値以上に保つ" }
+content = { en = "Keys you know well fade from the on-screen keyboard. The meter shows accuracy against your median.", ja = "よく打てるキーから，画面のキーボードの表示が消えていきます．メーターが正確さと自分の中央値の線を示します" }
+tips = [
+  { en = "Keep your eyes on the prompt, not the keyboard.", ja = "視線は出題に置き，キーボードを見ない" },
+  { en = "Feel the home-row bumps (F and J) to find your place.", ja = "F と J の突起で指の位置を確かめる" },
+]
+missed = { en = "Accuracy dropped without the keyboard. Slow down and check finger positions from the home row.", ja = "表示が消えると正確さが落ちていました．速さを落とし，ホームポジションから指の位置を確かめる" }
+met = { en = "Try the same with fewer keys shown next time.", ja = "次回は表示がさらに少なくても同じ正確さを保つ" }
+
+[[skill]]
+skill = "anticipation"
+purpose = { en = "Reduce anticipation errors: pressing the key after next before the current one.", ja = "先走り（今打つ文字を飛ばし，次の文字のキーを先に押す誤り）を減らす" }
+goal = { en = "Keep the share of anticipation errors among your first errors at or below your own median.", ja = "最初の誤打に占める先走りの割合を，自分の中央値以下に抑える" }
+content = { en = "A pacer runs 10% slower than your recent speed. «Anticipated!» appears right after an anticipation error.", ja = "最近の速さより 10% 遅いペーサーが走ります．先走りをすると，その直後に «先走り!» と出ます" }
+tips = [
+  { en = "Confirm the next character before pressing it.", ja = "次の文字を確かめてから押す" },
+  { en = "Do not get ahead of the pacer; type at its pace.", ja = "ペーサーより先に行かず，その速さで打つ" },
+]
+missed = { en = "Your fingers ran ahead of your eyes. Next time, stay with the pacer and press only what you have read.", ja = "指が目より先に進んでいました．次回はペーサーに合わせ，読んだ文字だけを押す" }
+met = { en = "Keep the same care; the pacer gets faster at the next level.", ja = "同じ確かめ方を続ける．次のレベルではペーサーが少し速くなる" }
+
+[[skill]]
+skill = "preview"
+purpose = { en = "Read ahead so you do not stop at the start of each word.", ja = "先を読み，単語の頭で止まらないようにする" }
+goal = { en = "Keep the delay at word starts at or below your own median.", ja = "語頭の遅れを，自分の中央値以下に抑える" }
+content = { en = "Several prompts ahead are shown. The count shows how many words in a row you typed without stopping.", ja = "数問先まで表示されます．止まらずに続けて打てた語数を数えます" }
+tips = [
+  { en = "Look at the next word, not the character you are typing.", ja = "打っている文字ではなく，次の単語を見る" },
+  { en = "Let your fingers finish the word while your eyes move on.", ja = "目は先へ進め，指に単語の残りを任せる" },
+]
+missed = { en = "You paused at word starts. Next time, move your eyes to the next word while the current one is still being typed.", ja = "語頭で止まっていました．次回は今の単語を打っている間に，目を次の単語へ移す" }
+met = { en = "Keep reading ahead with less help next time.", ja = "次回は表示が少なくても同じように先を読む" }
+
+[[skill]]
+skill = "overlap"
+purpose = { en = "Type with relaxed fingers that can press the next key before releasing the last.", ja = "力を抜き，前のキーを離す前に次のキーを押せる打ち方にする" }
+goal = { en = "Keep the rollover rate at or above your own median.", ja = "ロールオーバー率（キーが重なった割合）を，自分の中央値以上にする" }
+content = { en = "Short sprints. The meter shows how many key pairs overlapped. Terminals that cannot report key releases do not measure it.", ja = "短い区間を打ちます．メーターが重なったキーの組の割合を示します．キーを離した時刻が取れない端末では測りません" }
+tips = [
+  { en = "Release keys lightly; do not press them to the bottom.", ja = "キーを底まで押し込まず，軽く離す" },
+  { en = "It is fine to press the next key before the last one is up.", ja = "前のキーが上がる前に次を押してよい" },
+]
+missed = { en = "Your keystrokes stayed separate. Relax your hands and let the next finger start moving early.", ja = "打鍵が 1 つずつ離れていました．手の力を抜き，次の指を早めに動かし始める" }
+met = { en = "Keep the same relaxed hands at a slightly higher pace.", ja = "少し速い速さでも，同じ力の抜け具合を保つ" }
+
+[[skill]]
+skill = "spelling"
+purpose = { en = "Settle on one romaji spelling per kana so your fingers stop hesitating.", ja = "仮名ごとのローマ字綴りを 1 つに決め，指の迷いをなくす" }
+goal = { en = "Use the suggested spelling for 80% or more of the kana it covers.", ja = "勧めた綴りで打つ割合を 80% 以上にする" }
+content = { en = "Japanese only. The suggested spelling (for example し: si → shi) is shown with how often you used it.", ja = "日本語のみです．勧めた綴り（例: し: si → shi）と，それを使った回数を表示します" }
+tips = [
+  { en = "Check the suggested spelling before you start.", ja = "始める前に勧めた綴りを確かめる" },
+  { en = "When you notice the old spelling, slow down for that kana only.", ja = "前の綴りに気づいたら，その仮名だけ速さを落とす" },
+]
+missed = { en = "The old spelling still came out. Next time, slow down on that kana and type the suggested one deliberately.", ja = "前の綴りがまだ出ていました．次回はその仮名で速さを落とし，勧めた綴りを意識して打つ" }
+met = { en = "Keep the suggested spelling until it becomes automatic.", ja = "意識しなくても出るまで，勧めた綴りを使い続ける" }
+
+[[skill]]
+skill = "weak"
+purpose = { en = "Speed up the key transitions you are slowest at or miss most often.", ja = "遅い・間違えやすいキーの移り変わり（遷移）を速くする" }
+goal = { en = "Type the target transitions faster than their estimates.", ja = "対象の遷移を，推定より速く打つ" }
+content = { en = "Prompts contain more of your weak transitions. Each one shows its time and whether it beat the estimate.", ja = "苦手な遷移を多く含む出題になります．対象の遷移を打つたびに，その時間と推定より速いか遅いかが出ます" }
+tips = [
+  { en = "Prepare the next finger before you type.", ja = "打つ前に次の指を準備する" },
+  { en = "When the same finger repeats, move it quickly.", ja = "同じ指が続くときは素早く移す" },
+]
+missed = { en = "The target transitions were slower than estimated. Try them slowly and accurately first, then bring back the speed.", ja = "対象の遷移が推定より遅れていました．まずゆっくり正確に形を覚え，それから速さを戻す" }
+met = { en = "Use these transitions inside ordinary words next.", ja = "次はこの遷移を普通の単語の中でも滑らかに打つ" }
+
+[[skill]]
+skill = "rhythm"
+purpose = { en = "Even out the intervals between keystrokes. An even rhythm leads to steady speed.", ja = "打鍵の間隔をそろえる．間隔がそろうと速さも安定する" }
+goal = { en = "Keep the variation of intervals within words (IKI CV) at or below your own median.", ja = "語中の打鍵間隔のばらつき（IKI の CV）を，自分の中央値以下に抑える" }
+content = { en = "Type on the metronome beat. The band shows your recent intervals within words.", ja = "メトロノームの拍に合わせて打ちます．直近の語中の打鍵間隔を帯で示します" }
+tips = [
+  { en = "Keep intervals even instead of typing faster.", ja = "速く打つより，間隔をそろえる" },
+  { en = "Do not rush the easy letters or stall on the hard ones.", ja = "打ちやすい文字で急がず，難しい文字で止まらない" },
+]
+missed = { en = "The intervals varied. Slow down to a pace where the hard letters fit the same beat.", ja = "間隔がばらついていました．難しい文字も同じ拍に収まる速さまで落とす" }
+met = { en = "Keep the same rhythm; at the last level the beat goes away.", ja = "同じリズムを保つ．最後のレベルでは拍なしで打つ" }
+
+[[skill]]
+skill = "burst"
+purpose = { en = "Find your top speed over short distances while staying relaxed.", ja = "短い区間で，力を抜いたまま出せる最高の速さを知る" }
+goal = { en = "Type three all-out sprints; the fastest one counts.", ja = "全力の短い区間を 3 本打ち，最も速い 1 本を記録する" }
+content = { en = "Three short sprints. Each one shows its speed and marks a new fastest pace.", ja = "短い区間を 3 本打ちます．1 本ごとに速さが出て，最速を更新すると印が付きます" }
+tips = [
+  { en = "Go all out, but keep your shoulders and fingers loose.", ja = "全力で打つ．ただし肩と指の力は抜く" },
+  { en = "If you make an error, do not stop; finish the sprint.", ja = "誤打しても止まらず，その本を打ち切る" },
+]
+missed = { en = "The sprints did not beat your fastest. Check whether tension or errors slowed you, and relax before the next one.", ja = "最速を超えられませんでした．力みか誤打で遅れていないかを確かめ，次の本の前に力を抜く" }
+met = { en = "Bring part of this speed into longer passages.", ja = "この速さの一部を長い文でも出せるようにする" }
+
+[[skill]]
+skill = "endurance"
+purpose = { en = "Keep the same way of typing in the second half as in the first.", ja = "後半も前半と同じ打ち方を保つ" }
+goal = { en = "Keep the second-half slowdown under 15%.", ja = "後半の遅れを 15% 未満に抑える" }
+content = { en = "Type without a break for several minutes. The first half sets the baseline and the second half is compared with it.", ja = "数分間続けて打ちます．前半で基準を測り，後半をそれと比べます" }
+tips = [
+  { en = "Do not start too fast; begin at a pace you can keep.", ja = "最初から飛ばさず，保てる速さで始める" },
+  { en = "When you feel tired, relax your hands rather than pushing harder.", ja = "疲れを感じたら，強く打つのではなく手の力を抜く" },
+]
+missed = { en = "You slowed down in the second half. Start a little slower next time, and take a short rest before long sessions.", ja = "後半に遅れていました．次回は少し遅めに始め，長い練習の前には短く休む" }
+met = { en = "Keep the same steadiness again.", ja = "次回も同じように最後まで保つ" }
+
+[[skill]]
+skill = "unlock"
+purpose = { en = "Make the remote rows as quick as the home row, and always return home after reaching.", ja = "遠い段のキーもホーム段と同じ速さで打てるようにする．伸ばした指は必ずホームへ戻す" }
+goal = { en = "Keep the ratio of remote-row to home-row intervals at or below your own median.", ja = "遠い段とホーム段の打鍵間隔の比を，自分の中央値以下にする" }
+content = { en = "Words are built from the home row plus the keys being unlocked. The meter compares remote-row and home-row intervals.", ja = "ホーム段と，これから解放するキーでできた単語を打ちます．メーターが遠い段とホーム段の打鍵間隔を比べます" }
+tips = [
+  { en = "Reach with one finger only; keep the others on the home row.", ja = "伸ばすのは 1 本の指だけ．ほかの指はホームに置いたままにする" },
+  { en = "Return to the home row right after each reach.", ja = "伸ばしたらすぐホームへ戻す" },
+]
+missed = { en = "Remote keys were slower than the home row. Practice the reach slowly and check that your finger returns home.", ja = "遠い段がホーム段より遅れていました．ゆっくり伸ばし，指がホームへ戻るかを確かめる" }
+met = { en = "Keep the same movement with more keys unlocked.", ja = "解放するキーが増えても同じ動きを保つ" }
+
+[[step]]
+id = "fixed.warmup"
+purpose = { en = "Warm up your hands before the main drills.", ja = "主処方の前に手を温める" }
+goal = { en = "No target line. Type familiar words cleanly.", ja = "目標の線はありません．よく打つ単語を正確に打ちます" }
+content = { en = "One minute of familiar words. The pacer is off and there is no gate.", ja = "よく打つ単語を 1 分間打ちます．ペーサーも関門もありません" }
+tips = [
+  { en = "Favor clean keystrokes over speed.", ja = "速さより正確な打鍵を優先する" },
+  { en = "Check that your fingers are on the home row.", ja = "指がホームポジションにあるかを確かめる" },
+]
+missed = { en = "If accuracy was low, start the next step a little slower.", ja = "正確さが低かったなら，次の段は少し遅めに始める" }
+met = { en = "Your hands are ready; go on to the main drills.", ja = "手は温まりました．主処方へ進みます" }
+
+[[step]]
+id = "fixed.check"
+purpose = { en = "Check whether what you practiced holds without training aids. Several graduation conditions are judged here.", ja = "練習した打ち方が，補助なしでも保てるかを確かめる．いくつかの処方の卒業の条件はこの段で判定する" }
+goal = { en = "Type naturally without aids. The values judged here appear on the results.", ja = "補助なしで自然に打ちます．判定した値は結果に出ます" }
+content = { en = "Sentences with one prompt of preview and no pacer.", ja = "先読み 1 問，ペーサーなしで短文を打ちます" }
+tips = [
+  { en = "Keep the technique from today's main drills.", ja = "今日の主処方で意識したことを，補助なしでも保つ" },
+  { en = "Do not type differently because this step is judged.", ja = "判定されるからといって，打ち方を変えない" },
+]
+missed = { en = "The technique did not carry over yet. Repeat the same prescription next time.", ja = "練習した打ち方がまだ補助なしでは出ていません．次回も同じ処方を続ける" }
+met = { en = "The technique carried over without aids.", ja = "補助なしでも練習した打ち方が出ていました" }
+
+[[step]]
+id = "fixed.finish"
+purpose = { en = "End the session with a few short sprints at your top speed.", ja = "最後に短距離を全力で打ち，今日の練習を締めくくる" }

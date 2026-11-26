@@ -138,6 +138,7 @@ fn play_screen_and_keyboard_fit_at_eighty_by_twenty_four() {
     let now = Instant::now();
     app.handle_key_at(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
     app.handle_key_at(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+    common::accept_briefing(&mut app, now);
     app.on_tick_at(Duration::from_secs(3), now).unwrap();
     app.on_tick_at(Duration::from_millis(1), now).unwrap();
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
@@ -166,6 +167,7 @@ fn play_screen_orders_keyboard_timer_stats_and_centered_prompt() {
     let now = Instant::now();
     app.handle_key_at(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
     app.handle_key_at(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+    common::accept_briefing(&mut app, now);
     app.on_tick_at(Duration::from_secs(3), now).unwrap();
     app.on_tick_at(Duration::from_millis(1), now).unwrap();
 
@@ -214,6 +216,7 @@ fn short_play_screens_hide_the_keyboard_first_and_keep_prompt_and_footer() {
     let now = Instant::now();
     app.handle_key_at(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
     app.handle_key_at(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+    common::accept_briefing(&mut app, now);
     app.on_tick_at(Duration::from_secs(3), now).unwrap();
     app.on_tick_at(Duration::from_millis(1), now).unwrap();
     for (height, keyboard_expected) in [(24, true), (20, true), (16, false)] {

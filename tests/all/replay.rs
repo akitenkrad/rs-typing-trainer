@@ -228,6 +228,7 @@ fn replay_renderer_matches_the_playing_screen_except_for_its_status_row() {
     let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
     app.handle_key_at(enter, started);
     app.handle_key_at(enter, started);
+    common::accept_briefing(&mut app, started);
     app.on_tick_at(Duration::from_secs(3), started).unwrap();
     app.on_tick_at(Duration::ZERO, started).unwrap();
     app.handle_key_at(

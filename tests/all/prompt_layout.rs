@@ -44,6 +44,7 @@ fn start(kind: ModeKind, lang: Lang, configure: impl FnOnce(&mut Config)) -> com
     if app.screen == Screen::KeyPicker {
         app.handle_key_at(key(KeyCode::Enter), now);
     }
+    common::accept_briefing(&mut app, now);
     app.on_tick_at(Duration::from_secs(3), now).unwrap();
     app.on_tick_at(Duration::from_millis(1), now).unwrap();
     assert_eq!(app.screen, Screen::Playing);
@@ -520,6 +521,7 @@ fn z_on_mode_select_toggles_the_prompt_style_and_saves_it() {
 
         // Starting a mode saves the choice under the new key.
         app.handle_key(key(KeyCode::Enter));
+        common::accept_briefing(&mut app, Instant::now());
         assert!(matches!(app.screen, Screen::Countdown { .. }), "{:?}", app.screen);
         let saved = fs::read_to_string(&path).unwrap();
         assert!(saved.contains("prompt_style = \"normal\""), "{saved}");

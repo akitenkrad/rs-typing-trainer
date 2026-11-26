@@ -1,7 +1,7 @@
 //! Application state machine. Owns the current screen, the optional
 //! in-progress game, and the last completed result.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -70,9 +70,7 @@ const ABORT_CONFIRMATION_DURATION: Duration = Duration::from_secs(2);
 pub enum Screen {
     Title,
     Menu,
-    MenuFocus {
-        remaining: f32,
-    },
+    Briefing,
     /// Summary of a practice-menu run (design §7.1).
     MenuSummary,
     ModeSelect,
@@ -82,6 +80,7 @@ pub enum Screen {
     },
     Playing,
     Result,
+    Review,
     History,
     HistoryDetail,
     Replay,
@@ -237,6 +236,8 @@ pub struct App {
     pub last_save_error: Option<String>,
     pub result_insights: Vec<String>,
     pub result_grade_line: Option<String>,
+    pub review_scroll: u16,
+    review_scroll_max: Cell<u16>,
     pub mode_grade_line: Option<String>,
     pub history: Vec<HistoryEntry>,
     history_sessions: Vec<SessionSummary>,
@@ -466,6 +467,8 @@ impl App {
             last_save_error: None,
             result_insights: Vec::new(),
             result_grade_line: None,
+            review_scroll: 0,
+            review_scroll_max: Cell::new(0),
             mode_grade_line: None,
             history: Vec::new(),
             history_sessions: Vec::new(),
@@ -916,7 +919,7 @@ impl App {
         match self.screen {
             Screen::Title => self.handle_title_key(key, action),
             Screen::Menu => self.handle_menu_key(key, action),
-            Screen::MenuFocus { .. } => self.handle_menu_focus_key(key),
+            Screen::Briefing => self.handle_briefing_key(key),
             Screen::MenuSummary => self.handle_menu_summary_key(key, action),
             Screen::ModeSelect => self.handle_mode_select_key(key, action),
             Screen::KeyPicker => self.handle_key_picker_key(key, action),
@@ -939,6 +942,7 @@ impl App {
             }
             Screen::Playing => self.handle_playing_key(action, now),
             Screen::Result => self.handle_result_key(key, action, now),
+            Screen::Review => self.handle_review_key(key, action, now),
             Screen::History => self.handle_history_key(key, action),
             Screen::HistoryDetail => self.handle_history_detail_key(key, action, now),
             Screen::Replay => self.handle_history_replay_key(key, action, now),
@@ -1074,13 +1078,22 @@ impl App {
     /// Start the session of a table cell: its settings on an in-memory copy
     /// of the configuration (MYTASK-3638).
     fn start_cell_session(&mut self, cell: DrillCell) {
+        self.start_cell_session_with_briefing(cell, true);
+    }
+
+    fn start_cell_session_with_briefing(&mut self, cell: DrillCell, show_briefing: bool) {
         let base = self.cell_original_config.take().unwrap_or_else(|| self.config.clone());
         match crate::practice::drill::config_for_cell(&base, cell, self.practice_lang) {
             Ok(config) => {
                 self.config = config;
                 self.cell_original_config = Some(base);
                 self.pending_cell = None;
-                self.start_countdown();
+                if show_briefing {
+                    self.prepare_briefing_goal();
+                    self.screen = Screen::Briefing;
+                } else {
+                    self.start_countdown();
+                }
             }
             Err(error) => {
                 self.config = base;
@@ -1195,11 +1208,20 @@ impl App {
         }
     }
 
-    fn handle_menu_focus_key(&mut self, key: KeyEvent) {
-        if key.code == KeyCode::Esc {
-            self.abort_menu_step();
-        } else {
-            self.start_countdown();
+    fn handle_briefing_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Enter => self.start_countdown(),
+            KeyCode::Esc if self.menu_active_step.is_some() => self.abort_menu_step(),
+            KeyCode::Esc => {
+                self.game = None;
+                if let Some(config) = self.cell_original_config.take() {
+                    self.config = config;
+                }
+                self.pending_cell = None;
+                self.menu_live_goal = None;
+                self.screen = Screen::ModeSelect;
+            }
+            _ => {}
         }
     }
 
@@ -1262,7 +1284,12 @@ impl App {
                 self.clear_menu_step_result();
                 self.input_blocked_until = None;
                 self.abort_confirm_until = None;
-                self.screen = Screen::MenuFocus { remaining: 2.0 };
+                if new_step {
+                    self.prepare_briefing_goal();
+                    self.screen = Screen::Briefing;
+                } else {
+                    self.start_countdown();
+                }
             }
             Err(error) => self.menu_error = Some(error),
         }
@@ -1854,6 +1881,10 @@ impl App {
             .map(|deadline| deadline.saturating_duration_since(self.ui_now))
     }
 
+    pub fn review_available(&self) -> bool {
+        self.result_origin == ResultOrigin::JustPlayed && self.bench_run.is_none() && self.active_bench_id.is_none()
+    }
+
     fn handle_bench_summary_key(&mut self, key: KeyEvent, action: InputAction) {
         if matches!(
             key.code,
@@ -2130,6 +2161,10 @@ impl App {
 
     fn handle_result_key(&mut self, key: KeyEvent, action: InputAction, now: Instant) {
         match key.code {
+            KeyCode::Char('d') | KeyCode::Char('D') if self.review_available() => {
+                self.review_scroll = 0;
+                self.screen = Screen::Review;
+            }
             KeyCode::Char(' ') | KeyCode::Enter => match self.result_origin {
                 ResultOrigin::JustPlayed if self.menu_active_step.is_some() => self.continue_menu(),
                 ResultOrigin::JustPlayed if self.bench_run.is_some() => self.continue_benchmark(now),
@@ -2139,7 +2174,7 @@ impl App {
                 }
                 ResultOrigin::JustPlayed if self.result_cell.is_some() => {
                     if let Some(cell) = self.result_cell {
-                        self.start_cell_session(cell);
+                        self.start_cell_session_with_briefing(cell, false);
                     }
                 }
                 ResultOrigin::JustPlayed => self.start_countdown(),
@@ -2179,6 +2214,23 @@ impl App {
                 ResultOrigin::History => self.open_history(),
             }
         }
+    }
+
+    fn handle_review_key(&mut self, key: KeyEvent, action: InputAction, now: Instant) {
+        let max = self.review_scroll_max.get();
+        match key.code {
+            KeyCode::Up => self.review_scroll = self.review_scroll.saturating_sub(1),
+            KeyCode::Down => self.review_scroll = self.review_scroll.saturating_add(1).min(max),
+            KeyCode::PageUp => self.review_scroll = self.review_scroll.saturating_sub(10),
+            KeyCode::PageDown => self.review_scroll = self.review_scroll.saturating_add(10).min(max),
+            KeyCode::Char('d') | KeyCode::Char('D') | KeyCode::Esc => self.screen = Screen::Result,
+            KeyCode::Enter => self.handle_result_key(key, action, now),
+            _ => {}
+        }
+    }
+
+    pub(crate) fn set_review_scroll_max(&self, max: u16) {
+        self.review_scroll_max.set(max);
     }
 
     fn handle_history_key(&mut self, key: KeyEvent, action: InputAction) {
@@ -2838,16 +2890,7 @@ impl App {
         // The speed and anticipation rows of the table run their pacer on
         // every unit (MYTASK-3638, MYTASK-3640: a Japanese word cell runs
         // `romaji`); elsewhere only the modes that always offered it.
-        let pacer_supported = matches!(
-            self.config.mode.kind,
-            ModeKind::Words | ModeKind::Sentence | ModeKind::Phrase | ModeKind::Adaptive
-        ) || self
-            .config
-            .mode
-            .drill
-            .is_some_and(|cell| matches!(cell.skill, crate::config::DrillSkill::Speed | crate::config::DrillSkill::Anticipation));
-        self.config.pacer.target_wpm = (!is_bench && pacer_supported && self.config.pacer.enabled)
-            .then(|| crate::practice::pacer::target_wpm(&records, self.config.pacer.ratio, self.config.pacer.min_wpm));
+        self.prepare_pacer_target(&records, is_bench);
         if !is_bench
             && let Some(directory) = db_path.parent()
             && let Ok(exclusions) = load_reading_exclusions(directory)
@@ -3158,6 +3201,34 @@ impl App {
         self.cell_live_goal(self.cell_active()?, self.practice_lang, planned, records)
     }
 
+    /// Prepare the same goal data used by gameplay while the explanation is
+    /// on screen, so its concrete target line is already available.
+    fn prepare_briefing_goal(&mut self) {
+        let records = db::load_records_filtered(&self.db_path(), None, None).unwrap_or_default();
+        self.prepare_pacer_target(&records, false);
+        let planned = if self.menu_active_step.is_some() {
+            self.config.session.duration()
+        } else if self.config.mode.kind == ModeKind::Endurance {
+            Duration::from_secs(self.config.endurance.minutes * 60)
+        } else {
+            self.config.session.duration()
+        };
+        self.menu_live_goal = self.build_live_goal(planned, &records);
+    }
+
+    fn prepare_pacer_target(&mut self, records: &[SessionRecord], is_bench: bool) {
+        let pacer_supported = matches!(
+            self.config.mode.kind,
+            ModeKind::Words | ModeKind::Sentence | ModeKind::Phrase | ModeKind::Adaptive
+        ) || self
+            .config
+            .mode
+            .drill
+            .is_some_and(|cell| matches!(cell.skill, crate::config::DrillSkill::Speed | crate::config::DrillSkill::Anticipation));
+        self.config.pacer.target_wpm = (!is_bench && pacer_supported && self.config.pacer.enabled)
+            .then(|| crate::practice::pacer::target_wpm(records, self.config.pacer.ratio, self.config.pacer.min_wpm));
+    }
+
     /// What every goal needs from the configuration when it starts.
     fn goal_base(&self, planned: Duration) -> crate::practice::menu::live_goal::GoalSetup {
         crate::practice::menu::live_goal::GoalSetup {
@@ -3393,14 +3464,6 @@ impl App {
         self.analysis_as_of = date;
         self.elapsed_total += dt;
         match self.screen {
-            Screen::MenuFocus { remaining } => {
-                let new_remaining = remaining - dt.as_secs_f32();
-                if new_remaining <= 0.0 {
-                    self.start_countdown();
-                } else {
-                    self.screen = Screen::MenuFocus { remaining: new_remaining };
-                }
-            }
             Screen::Countdown { remaining } => {
                 let new_remaining = remaining - dt.as_secs_f32();
                 if new_remaining <= 0.0 {

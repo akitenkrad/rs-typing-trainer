@@ -112,8 +112,9 @@ fn menu_app(lang: Lang, steps: Vec<MenuStep>) -> TestApp {
 /// Start the selected step and return the time the session started.
 fn start_step(app: &mut App, now: Instant) -> Instant {
     app.handle_key_at(key(KeyCode::Enter), now);
-    assert!(matches!(app.screen, Screen::MenuFocus { .. }), "{:?}", app.screen);
-    app.handle_key_at(key(KeyCode::Char('x')), now + Duration::from_millis(10));
+    if app.screen == Screen::Briefing {
+        app.handle_key_at(key(KeyCode::Enter), now + Duration::from_millis(10));
+    }
     assert!(matches!(app.screen, Screen::Countdown { .. }));
     let started = now + Duration::from_secs(4);
     app.on_tick_at(Duration::from_secs(3), started).unwrap();
@@ -481,10 +482,9 @@ fn three_sprints_show_the_runs_and_the_fastest_one() {
                 assert!(text.contains(expected), "missing {expected:?}:\n{text}");
             }
         } else {
-            app.handle_key_at(key(KeyCode::Enter), now);
-            assert!(matches!(app.screen, Screen::MenuFocus { .. }));
-            // Back to the focus screen of the same step; the next Enter of
-            // `start_step` is not needed.
+            // Return to the menu so the next loop iteration starts the same
+            // menu step afresh. Result-screen retry itself is covered by the
+            // briefing-flow test and deliberately skips the briefing.
             app.screen = Screen::Menu;
         }
     }

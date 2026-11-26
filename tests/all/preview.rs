@@ -15,6 +15,7 @@ fn start(config: Config) -> common::TestApp {
     let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
     app.handle_key_at(enter, now);
     app.handle_key_at(enter, now);
+    common::accept_briefing(&mut app, now);
     app.on_tick_at(Duration::from_secs(3), now).unwrap();
     app.on_tick_at(Duration::ZERO, now).unwrap();
     app

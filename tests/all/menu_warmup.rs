@@ -331,6 +331,7 @@ fn ordinary_words_after_a_warm_up_keep_the_users_settings() {
     app.handle_key_at(key(KeyCode::Enter), later);
     assert_eq!(app.screen, Screen::KeyPicker);
     app.handle_key_at(key(KeyCode::Enter), later);
+    crate::common::accept_briefing(&mut app, later);
     app.on_tick_at(Duration::from_secs(3), later).unwrap();
     assert_eq!(app.screen, Screen::Playing);
     assert!(!app.warmup_active());
@@ -360,7 +361,7 @@ fn aborting_a_warm_up_restores_the_users_settings() {
     let later = now + Duration::from_secs(20);
     app.title_selected = 1;
     select_warmup(&mut app, later);
-    app.handle_key_at(key(KeyCode::Enter), later);
+    app.handle_key_at(key(KeyCode::Char('w')), later);
     assert!(matches!(app.screen, Screen::Countdown { .. }));
     app.handle_key_at(key(KeyCode::Esc), later);
     app.handle_key_at(key(KeyCode::Esc), later + Duration::from_millis(100));

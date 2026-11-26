@@ -64,8 +64,8 @@ fn menu_app(lang: Lang) -> TestApp {
 /// Start the selected step and stop at its countdown.
 fn to_countdown(app: &mut rs_typing_trainer::app::App, now: Instant) {
     app.handle_key_at(key(KeyCode::Enter), now);
-    assert!(matches!(app.screen, Screen::MenuFocus { .. }));
-    app.handle_key_at(key(KeyCode::Char('x')), now + Duration::from_millis(10));
+    assert!(matches!(app.screen, Screen::Briefing));
+    app.handle_key_at(key(KeyCode::Enter), now + Duration::from_millis(10));
     assert!(matches!(app.screen, Screen::Countdown { .. }));
 }
 
@@ -115,8 +115,8 @@ fn countdown_and_result_show_the_whole_menu_in_japanese_at_80_by_24() {
     // Into the second step: the band moves with it.
     let next = now + Duration::from_secs(20);
     app.handle_key_at(key(KeyCode::Enter), next);
-    assert!(matches!(app.screen, Screen::MenuFocus { .. }));
-    app.handle_key_at(key(KeyCode::Char('x')), next + Duration::from_millis(10));
+    assert!(matches!(app.screen, Screen::Briefing));
+    app.handle_key_at(key(KeyCode::Enter), next + Duration::from_millis(10));
     assert!(matches!(app.screen, Screen::Countdown { .. }));
     let text = render(&app, 80, 24).join("\n");
     assert!(
@@ -211,6 +211,7 @@ fn individual_training_shows_no_band() {
         app.handle_key_at(key(KeyCode::Char(' ')), now);
         assert_eq!(app.screen, Screen::ModeSelect);
         app.handle_key_at(key(KeyCode::Enter), now);
+        crate::common::accept_briefing(&mut app, now);
         assert!(matches!(app.screen, Screen::Countdown { .. }));
         let text = render(&app, 80, 24).join("\n");
         assert!(

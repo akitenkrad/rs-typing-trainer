@@ -46,6 +46,7 @@ fn start_practice(config: Config, started: Instant) -> TestApp {
     let mut app = test_app(config);
     app.handle_key_at(key(KeyCode::Enter), started);
     app.handle_key_at(key(KeyCode::Enter), started);
+    common::accept_briefing(&mut app, started);
     assert!(matches!(app.screen, Screen::Countdown { .. }));
     app.on_tick_at(Duration::from_secs(3), started).unwrap();
     assert_eq!(app.screen, Screen::Playing);
@@ -138,6 +139,7 @@ fn countdown_escape_requires_two_presses_and_other_keys_disarm_it() {
             app.handle_key_at(key(KeyCode::Enter), started);
         }
         app.handle_key_at(key(KeyCode::Enter), started);
+        common::accept_briefing(&mut app, started);
         assert!(matches!(app.screen, Screen::Countdown { .. }));
 
         app.handle_key_at(key(KeyCode::Esc), started + Duration::from_millis(100));
@@ -153,6 +155,7 @@ fn countdown_escape_requires_two_presses_and_other_keys_disarm_it() {
             app.handle_key_at(key(KeyCode::Enter), started);
         }
         app.handle_key_at(key(KeyCode::Enter), started);
+        common::accept_briefing(&mut app, started);
         app.handle_key_at(key(KeyCode::Esc), started + Duration::from_millis(100));
         app.handle_key_at(key(KeyCode::Char('x')), started + Duration::from_millis(200));
         app.handle_key_at(key(KeyCode::Esc), started + Duration::from_millis(300));
@@ -166,6 +169,7 @@ fn countdown_escape_confirmation_expires_after_two_seconds() {
     let mut app = test_app(Config::default());
     app.handle_key_at(key(KeyCode::Enter), started);
     app.handle_key_at(key(KeyCode::Enter), started);
+    common::accept_briefing(&mut app, started);
     app.handle_key_at(key(KeyCode::Esc), started + Duration::from_millis(100));
     app.handle_key_at(key(KeyCode::Esc), started + Duration::from_millis(2_101));
     assert!(matches!(app.screen, Screen::Countdown { .. }));

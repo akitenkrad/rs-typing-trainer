@@ -448,8 +448,8 @@ fn type_prompt(app: &mut App, mut now: Instant) -> Instant {
 /// Start the selected step, type one prompt and end it by time.
 fn play_selected(app: &mut App, now: Instant) -> Instant {
     app.handle_key_at(key(KeyCode::Enter), now);
-    assert!(matches!(app.screen, Screen::MenuFocus { .. }), "{:?}", app.screen);
-    app.handle_key_at(key(KeyCode::Char('x')), now + Duration::from_millis(10));
+    assert!(matches!(app.screen, Screen::Briefing), "{:?}", app.screen);
+    app.handle_key_at(key(KeyCode::Enter), now + Duration::from_millis(10));
     let started = now + Duration::from_secs(4);
     app.on_tick_at(Duration::from_secs(3), started).unwrap();
     assert_eq!(app.screen, Screen::Playing);
@@ -506,7 +506,7 @@ fn a_japanese_step_keeps_its_language_over_the_tables() {
     app.practice_lang = Lang::En;
     let now = Instant::now();
     app.handle_key_at(key(KeyCode::Enter), now);
-    app.handle_key_at(key(KeyCode::Char('x')), now + Duration::from_millis(10));
+    app.handle_key_at(key(KeyCode::Enter), now + Duration::from_millis(10));
     app.on_tick_at(Duration::from_secs(3), now + Duration::from_secs(4)).unwrap();
     assert_eq!(app.screen, Screen::Playing);
     assert_eq!(app.config.mode.sentence.lang, "ja");
@@ -539,8 +539,8 @@ fn the_menu_focus_and_result_screens_name_the_cell_at_80_by_24() {
         }
         let screen = compact(&rows);
         let drill = match display {
-            Lang::En => "Drill:",
-            Lang::Ja => "訓練:",
+            Lang::En => "Drill",
+            Lang::Ja => "訓練",
         };
         assert!(screen.contains(&format!("{drill}{accuracy}")), "{display:?}:\n{}", rows.join("\n"));
         assert_frame(&rows, display);
@@ -552,7 +552,7 @@ fn the_menu_focus_and_result_screens_name_the_cell_at_80_by_24() {
         app.menu_selected = 0;
         let now = Instant::now();
         app.handle_key_at(key(KeyCode::Enter), now);
-        assert!(matches!(app.screen, Screen::MenuFocus { .. }));
+        assert!(matches!(app.screen, Screen::Briefing));
         let rows = render(&app, 80, 24);
         if std::env::var_os("RS_TYPING_TRAINER_DUMP_UI").is_some() {
             println!("\n--- focus {display:?} 80x24 ---\n{}", rows.join("\n"));

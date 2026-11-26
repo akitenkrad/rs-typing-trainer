@@ -117,6 +117,7 @@ fn ghost_marker_sits_above_the_large_character_it_has_reached() {
     let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
     app.handle_key_at(enter, start);
     app.handle_key_at(enter, start);
+    common::accept_briefing(&mut app, start);
     app.on_tick_at(Duration::from_secs(3), start).unwrap();
     app.on_tick_at(Duration::ZERO, start + Duration::from_millis(200)).unwrap();
     app.on_tick_at(Duration::ZERO, start + Duration::from_millis(400)).unwrap();
