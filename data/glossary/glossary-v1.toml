@@ -379,3 +379,27 @@ category = "bench"
 term = { en = "Pseudo-word", ja = "擬似語" }
 short = { en = "A made-up word with English-like letter patterns, to measure finger transitions without word familiarity.", ja = "英語らしい文字の並びで作った実在しない語．単語の慣れに頼らない指の移り変わりを測る" }
 screens = ["bench", "analysis.bench"]
+
+[[term]]
+id = "tempo"
+category = "bench"
+term = { en = "Tempo", ja = "テンポ" }
+short = { en = "WPM converted from the median interval between eligible correct keystrokes.", ja = "対象となる正しい打鍵間隔の中央値を WPM に換算した速さ" }
+detail = { en = "It uses consecutive correct keystrokes within one item. The first keystroke of each item, the first three correct keystrokes after an error, and intervals above the pause threshold are excluded.", ja = "同じ項目の中で連続する正しい打鍵を使います．各項目の最初の打鍵，誤打後の最初の 3 正打，休止のしきい値を超える間隔は除きます．" }
+screens = ["bench", "history", "result"]
+
+[[term]]
+id = "effective-wpm"
+category = "bench"
+term = { en = "Accuracy-adjusted speed", ja = "正確さを含む速さ" }
+short = { en = "The benchmark's main score: tempo multiplied by accuracy.", ja = "テンポに正確さを掛けた，ベンチの主な点数" }
+detail = { en = "It expresses how quickly the correctly typed share was entered. Tempo and accuracy are shown beside it so that changes can be interpreted.", ja = "正確に打てた割合を含めた速さを表します．変化の内訳を読めるよう，テンポと正確さも並べて表示します．" }
+screens = ["bench", "history", "result"]
+
+[[term]]
+id = "error-margin"
+category = "bench"
+term = { en = "This run's error margin", ja = "この回の誤差の目安" }
+short = { en = "Half the difference between accuracy-adjusted speeds for the odd- and even-numbered items.", ja = "奇数番目と偶数番目の項目で求めた正確さを含む速さの差の半分" }
+detail = { en = "Tempo and accuracy are calculated separately for each half and multiplied. Half of the absolute difference is shown as a split-half estimate of the run's error.", ja = "各半分でテンポと正確さを別々に求めて掛けます．その差の絶対値の半分を，折半法によるこの回の誤差の目安として表示します．" }
+screens = ["bench", "history", "result"]

@@ -270,5 +270,23 @@ One of eight versions of each benchmark part, used in turn so you do not memoris
 
 A made-up word with English-like letter patterns, to measure finger transitions without word familiarity.
 
+### Tempo
+
+WPM converted from the median interval between eligible correct keystrokes.
+
+It uses consecutive correct keystrokes within one item. The first keystroke of each item, the first three correct keystrokes after an error, and intervals above the pause threshold are excluded.
+
+### Accuracy-adjusted speed
+
+The benchmark's main score: tempo multiplied by accuracy.
+
+It expresses how quickly the correctly typed share was entered. Tempo and accuracy are shown beside it so that changes can be interpreted.
+
+### This run's error margin
+
+Half the difference between accuracy-adjusted speeds for the odd- and even-numbered items.
+
+Tempo and accuracy are calculated separately for each half and multiplied. Half of the absolute difference is shown as a split-half estimate of the run's error.
+
 ## Records
 

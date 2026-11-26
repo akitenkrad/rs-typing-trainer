@@ -21,7 +21,11 @@ fn key(code: KeyCode) -> KeyEvent {
 }
 
 fn render(app: &rs_typing_trainer::app::App) -> String {
-    let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+    render_size(app, 120, 30)
+}
+
+fn render_size(app: &rs_typing_trainer::app::App, width: u16, height: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     terminal.draw(|frame| ui::render(frame, app)).unwrap();
     terminal
         .backend()
@@ -31,6 +35,32 @@ fn render(app: &rs_typing_trainer::app::App) -> String {
         .map(|cell| cell.symbol())
         .collect::<Vec<_>>()
         .join("")
+}
+
+fn activate_and_type_correct(app: &mut rs_typing_trainer::app::App, started: Instant, date: chrono::NaiveDate, count: usize) {
+    let mut at = started + Duration::from_millis(1);
+    app.on_tick_at_date(Duration::from_millis(1), at, date).unwrap();
+    for _ in 0..count {
+        let expected = app
+            .game
+            .as_ref()
+            .and_then(|game| game.session.expected())
+            .expect("active benchmark prompt");
+        at += Duration::from_millis(100);
+        app.handle_key_at(key(KeyCode::Char(expected.chars().next().unwrap())), at);
+        // With animation disabled, the first tick promotes a completed item
+        // and the second activates the next item. Both are harmless while an
+        // item is still active.
+        at += Duration::from_millis(1);
+        app.on_tick_at_date(Duration::from_millis(1), at, date).unwrap();
+        at += Duration::from_millis(1);
+        app.on_tick_at_date(Duration::from_millis(1), at, date).unwrap();
+    }
+    assert_eq!(
+        app.game.as_ref().map(|game| game.session.log().keystrokes.len()),
+        Some(count),
+        "every synthetic keystroke must be recorded"
+    );
 }
 
 fn v3_config() -> Config {
@@ -332,4 +362,148 @@ fn v3_japanese_prompts_accept_common_romaji_spelling_variants() {
         }
         assert_eq!(result, JudgeResult::ItemCompleted, "{spelling}");
     }
+}
+
+#[test]
+fn v3_part_result_and_history_detail_show_accuracy_adjusted_metrics_at_80x24() {
+    let date = chrono::NaiveDate::from_ymd_opt(2026, 11, 26).unwrap();
+    for lang in [rs_typing_trainer::i18n::Lang::En, rs_typing_trainer::i18n::Lang::Ja] {
+        let mut config = v3_config();
+        config.general.lang = lang;
+        config.ui.animation_enabled = false;
+        let mut app = test_app_at(config, date);
+        let origin = Instant::now();
+
+        start_benchmark(&mut app, origin);
+        start_current_part(&mut app, origin, date);
+        finish_current_part(&mut app, origin, 15, date);
+        app.handle_key_at(key(KeyCode::Enter), origin + Duration::from_secs(16));
+
+        let part_started = origin + Duration::from_secs(20);
+        start_current_part(&mut app, part_started, date);
+        activate_and_type_correct(&mut app, part_started, date, 24);
+        finish_current_part(&mut app, part_started, 60, date);
+        assert_eq!(app.screen, Screen::Result);
+
+        let output = render_size(&app, 80, 24);
+        let expected = match lang {
+            rs_typing_trainer::i18n::Lang::En => [
+                "Accuracy-adjusted speed",
+                "Tempo",
+                "Accuracy",
+                "net WPM",
+                "This run's error margin",
+                "Previous",
+            ],
+            rs_typing_trainer::i18n::Lang::Ja => ["正確さを含む速さ", "テンポ", "正確さ", "net WPM", "この回の誤差の目安", "前回"],
+        };
+        for label in expected {
+            assert!(contains_compact(&output, label), "missing {label:?} for {lang:?}:\n{output}");
+        }
+
+        // Abort the remaining run, then expand the saved v3 run and open EW.
+        app.handle_key_at(key(KeyCode::Esc), part_started + Duration::from_secs(62));
+        app.handle_key_at(key(KeyCode::Esc), part_started + Duration::from_secs(63));
+        assert_eq!(app.screen, Screen::Title);
+        app.handle_key(key(KeyCode::Char('h')));
+        assert_eq!(app.screen, Screen::History);
+        app.handle_key(key(KeyCode::Enter));
+        app.handle_key(key(KeyCode::Down));
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(app.screen, Screen::HistoryDetail);
+        let history = render_size(&app, 80, 24);
+        for label in expected {
+            assert!(contains_compact(&history, label), "history missing {label:?} for {lang:?}:\n{history}");
+        }
+    }
+}
+
+#[test]
+fn v3_summary_shows_parts_and_language_rollups_at_80x24() {
+    let date = chrono::NaiveDate::from_ymd_opt(2026, 11, 26).unwrap();
+    for lang in [rs_typing_trainer::i18n::Lang::En, rs_typing_trainer::i18n::Lang::Ja] {
+        let mut config = v3_config();
+        config.general.lang = lang;
+        config.ui.animation_enabled = false;
+        let mut app = test_app_at(config, date);
+        let origin = Instant::now();
+
+        start_benchmark(&mut app, origin);
+        start_current_part(&mut app, origin, date);
+        finish_current_part(&mut app, origin, 15, date);
+        app.handle_key_at(key(KeyCode::Enter), origin + Duration::from_secs(16));
+
+        let durations = [60, 60, 60, 60, 30];
+        let mut part_started = origin + Duration::from_secs(20);
+        for (index, duration) in durations.into_iter().enumerate() {
+            start_current_part(&mut app, part_started, date);
+            activate_and_type_correct(&mut app, part_started, date, 24);
+            finish_current_part(&mut app, part_started, duration, date);
+            assert_eq!(app.screen, Screen::Result);
+            app.handle_key_at(key(KeyCode::Enter), part_started + Duration::from_secs(duration + 2));
+            if index + 1 < durations.len() {
+                assert!(matches!(app.screen, Screen::Countdown { .. }));
+            }
+            part_started += Duration::from_secs(duration + 5);
+        }
+        assert_eq!(app.screen, Screen::BenchSummary);
+
+        let output = render_size(&app, 80, 24);
+        let expected = match lang {
+            rs_typing_trainer::i18n::Lang::En => [
+                "English words",
+                "English sentences",
+                "Japanese words",
+                "Japanese sentences",
+                "Pseudo-words",
+                "English total",
+                "Japanese total",
+                "Transitions",
+                "v3 analysis is coming soon",
+            ],
+            rs_typing_trainer::i18n::Lang::Ja => [
+                "英単語",
+                "英文",
+                "日本語の単語と句",
+                "日本語の短文",
+                "擬似語",
+                "英語",
+                "日本語",
+                "移り変わり",
+                "v3 の分析は準備中",
+            ],
+        };
+        for label in expected {
+            assert!(contains_compact(&output, label), "missing {label:?} for {lang:?}:\n{output}");
+        }
+        for label in ["WPM", "%"] {
+            assert!(output.contains(label), "missing {label:?} for {lang:?}:\n{output}");
+        }
+
+        // The heading and the five part rows are right-aligned columns, so
+        // they end in the same terminal cell. Full-width headings (主 WPM,
+        // テンポ) once drifted from their values.
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|frame| ui::render(frame, &app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        // A full-width character starts in one cell and covers the next, so
+        // a row ends at its last character's start plus its width.
+        let last_cell = |y: u16| {
+            (1..79u16)
+                .rev()
+                .find(|&x| !buffer[(x, y)].symbol().trim().is_empty())
+                .map(|x| x + unicode_width::UnicodeWidthStr::width(buffer[(x, y)].symbol()) as u16 - 1)
+        };
+        let table_ends = (1..=6u16).map(last_cell).collect::<Vec<_>>();
+        assert!(
+            table_ends.iter().all(|end| end.is_some() && *end == table_ends[0]),
+            "{lang:?}: {table_ends:?}\n{output}"
+        );
+    }
+}
+
+fn contains_compact(output: &str, expected: &str) -> bool {
+    let compact_output = output.chars().filter(|character| !character.is_whitespace()).collect::<String>();
+    let compact_expected = expected.chars().filter(|character| !character.is_whitespace()).collect::<String>();
+    compact_output.contains(&compact_expected)
 }

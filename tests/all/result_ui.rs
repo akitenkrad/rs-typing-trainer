@@ -49,6 +49,7 @@ fn result_app(graphics: GraphicsMode) -> common::TestApp {
     app.result_record = Some(record);
     app.result_comparison = ResultComparison {
         previous_wpm_delta: Some(3.0),
+        previous_effective_wpm_delta: None,
         previous_cps_delta: Some(-0.2),
         previous_accuracy_delta: Some(0.01),
         best_wpm: Some(60.0),

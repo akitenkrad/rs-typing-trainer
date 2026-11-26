@@ -112,6 +112,7 @@ pub enum ResultOrigin {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ResultComparison {
     pub previous_wpm_delta: Option<f64>,
+    pub previous_effective_wpm_delta: Option<f64>,
     pub previous_cps_delta: Option<f64>,
     pub previous_accuracy_delta: Option<f64>,
     pub best_wpm: Option<f64>,
@@ -2126,6 +2127,7 @@ impl App {
                 {
                     self.bench_v3_results = results;
                 }
+                self.refresh_v3_bench_summary(parallel_index);
             } else {
                 if let Ok(results) = db::bench_results_for_day_form(&self.db_path(), crate::bench::BENCH_SERIES, self.analysis_as_of, parallel_index)
                     && !results.is_empty()
@@ -2191,6 +2193,23 @@ impl App {
         }
         self.bench_summary_records = records;
         self.bench_summary_current = current;
+    }
+
+    fn refresh_v3_bench_summary(&mut self, parallel_index: u8) {
+        let records = db::load_records_filtered(&self.db_path(), None, Some("bench")).unwrap_or_default();
+        let mut selected = BTreeMap::new();
+        for record in &records {
+            let Some((part, index)) = record.header.bench_id.as_deref().and_then(parse_v3_bench_id) else {
+                continue;
+            };
+            let on_summary_day = chrono::DateTime::parse_from_rfc3339(&record.header.finished_at)
+                .is_ok_and(|finished| finished.with_timezone(&chrono::Local).date_naive() == self.analysis_as_of);
+            if part != BenchV3Part::W && index == parallel_index && on_summary_day {
+                selected.insert(part, record.clone());
+            }
+        }
+        self.bench_summary_current = selected.into_values().collect();
+        self.bench_summary_records = records;
     }
 
     fn abort_benchmark(&mut self) {
@@ -3331,7 +3350,9 @@ impl App {
         match (db::load_result(&path, entry.id, &self.config), db::load_record(&path, entry.id)) {
             (Ok(Some(result)), Ok(Some(record))) => {
                 let records = db::load_records_filtered(&path, None, None).unwrap_or_else(|_| vec![record.clone()]);
-                let result_comparison = build_result_comparison(&records, &record);
+                let mut result_comparison = build_result_comparison(&records, &record);
+                result_comparison.previous_effective_wpm_delta =
+                    crate::analysis::bench_v3::previous_effective_wpm_delta(&records, &record, self.config.analysis.pause_ms);
                 let personal_best_wpm = result_comparison.best_wpm;
                 let previous_wpm_delta = result_comparison.previous_wpm_delta;
                 self.last_result = Some(result);
@@ -4422,6 +4443,8 @@ impl App {
         self.refresh_result_coaching(&record);
         let result_records = db::load_records_filtered(&db_path, None, None).unwrap_or_else(|_| vec![record.clone()]);
         self.result_comparison = build_result_comparison(&result_records, &record);
+        self.result_comparison.previous_effective_wpm_delta =
+            crate::analysis::bench_v3::previous_effective_wpm_delta(&result_records, &record, self.config.analysis.pause_ms);
         self.result_record = Some(record);
         self.last_result = Some(result);
         self.legacy_wpm = None;
@@ -4951,6 +4974,7 @@ pub fn build_result_comparison(records: &[SessionRecord], current: &SessionRecor
     let recent_start = matching.len().saturating_sub(10);
     ResultComparison {
         previous_wpm_delta: previous.map(|record| current.header.net_wpm - record.header.net_wpm),
+        previous_effective_wpm_delta: None,
         previous_cps_delta: previous.map(|record| current.header.cps - record.header.cps),
         previous_accuracy_delta: previous.map(|record| current.header.accuracy - record.header.accuracy),
         best_wpm,

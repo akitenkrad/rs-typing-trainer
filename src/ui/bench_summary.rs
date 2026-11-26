@@ -6,8 +6,10 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui_image::Image;
+use unicode_width::UnicodeWidthStr;
 
 use crate::analysis::bench_summary::{BenchChange, BenchMetric, BenchmarkRunAnalysis, PracticeSuggestion, WeakFingerReason};
+use crate::analysis::bench_v3::{BenchV3Group, compute_bench_v3_group_metrics, compute_bench_v3_metrics, previous_effective_wpm_delta};
 use crate::analysis::grades::{Component, Level};
 use crate::app::App;
 use crate::bench::{BenchPart, parse_bench_id};
@@ -55,25 +57,44 @@ pub fn render(frame: &mut Frame, app: &App) {
 
 fn render_v3_text(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let lang = app.config.general.lang;
-    let mut lines = app
-        .bench_v3_results
-        .iter()
-        .map(|result| {
-            let previous = delta_pair(
-                lang,
-                result.comparison.previous_wpm_delta,
-                result.comparison.previous_accuracy_delta,
-                MetricDeltaKind::Previous,
-            );
-            Line::from(format!(
-                "{}  {:.1} WPM  {:.1}%  {previous}  {}",
-                v3_part_label(result.part, lang),
-                result.wpm,
-                result.accuracy * 100.0,
-                short_version(&result.id)
-            ))
-        })
-        .collect::<Vec<_>>();
+    let label_width = 26;
+    // Right-aligned by display width: `{:>n}` counts a full-width character
+    // as one column, which shifted the Japanese headings off their values.
+    let row = |label: &str, cells: [&str; 5]| {
+        let mut line = pad_display(label, label_width);
+        for (cell, width) in cells.into_iter().zip(V3_COLUMN_WIDTHS) {
+            line.push(' ');
+            line.push_str(&pad_left_display(cell, width));
+        }
+        line
+    };
+    let mut lines = vec![Line::from(match lang {
+        Lang::En => row("Part", ["Eff.WPM", "Tempo", "Acc.%", "±run", "Previous"]),
+        Lang::Ja => row("パート", ["主 WPM", "テンポ", "正確さ", "誤差", "前回"]),
+    })];
+    for record in &app.bench_summary_current {
+        let Some((part, _)) = record.header.bench_id.as_deref().and_then(crate::bench::parse_v3_bench_id) else {
+            continue;
+        };
+        let metrics = compute_bench_v3_metrics(std::slice::from_ref(record), app.config.analysis.pause_ms);
+        let previous = previous_effective_wpm_delta(&app.bench_summary_records, record, app.config.analysis.pause_ms);
+        lines.push(Line::from(row(
+            v3_part_label(part, lang),
+            [
+                &number(metrics.effective_wpm),
+                &number(metrics.tempo_wpm),
+                &percent(metrics.accuracy),
+                &signed_margin(metrics.error_margin_wpm),
+                &signed(previous),
+            ],
+        )));
+    }
+    lines.push(Line::from(""));
+    for group in [BenchV3Group::English, BenchV3Group::Japanese, BenchV3Group::Transition] {
+        if let Some(summary) = compute_bench_v3_group_metrics(&app.bench_summary_current, group, app.config.analysis.pause_ms) {
+            lines.push(Line::from(group_line(&summary, lang)));
+        }
+    }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         match lang {
@@ -83,6 +104,77 @@ fn render_v3_text(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
     )));
     frame.render_widget(Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: true }), left_inset(area));
+}
+
+fn group_line(summary: &crate::analysis::bench_v3::BenchV3GroupMetrics, lang: Lang) -> String {
+    let label = match (summary.group, lang) {
+        (BenchV3Group::English, Lang::En) => "English total",
+        (BenchV3Group::Japanese, Lang::En) => "Japanese total",
+        (BenchV3Group::Transition, Lang::En) => "Transitions",
+        (BenchV3Group::English, Lang::Ja) => "英語",
+        (BenchV3Group::Japanese, Lang::Ja) => "日本語",
+        (BenchV3Group::Transition, Lang::Ja) => "移り変わり",
+    };
+    let metrics = &summary.metrics;
+    let partial = if summary.partial {
+        match lang {
+            Lang::En => " (partial parts)",
+            Lang::Ja => "（一部のパートのみ）",
+        }
+    } else {
+        ""
+    };
+    match lang {
+        Lang::En => format!(
+            "{label} {} (tempo {} · accuracy {}) {}{partial}",
+            metric_wpm(metrics.effective_wpm),
+            number(metrics.tempo_wpm),
+            percent(metrics.accuracy),
+            signed_margin_with_unit(metrics.error_margin_wpm),
+        ),
+        Lang::Ja => format!(
+            "{label} {}（テンポ {}・正確さ {}） {}{partial}",
+            metric_wpm(metrics.effective_wpm),
+            number(metrics.tempo_wpm),
+            percent(metrics.accuracy),
+            signed_margin_with_unit(metrics.error_margin_wpm),
+        ),
+    }
+}
+
+fn pad_display(value: &str, width: usize) -> String {
+    format!("{value}{}", " ".repeat(width.saturating_sub(UnicodeWidthStr::width(value))))
+}
+
+/// Display widths of the v3 summary columns after the part name.
+const V3_COLUMN_WIDTHS: [usize; 5] = [8, 7, 7, 6, 8];
+
+fn pad_left_display(value: &str, width: usize) -> String {
+    format!("{}{value}", " ".repeat(width.saturating_sub(UnicodeWidthStr::width(value))))
+}
+
+fn number(value: Option<f64>) -> String {
+    value.map_or_else(|| "—".to_owned(), |value| format!("{value:.1}"))
+}
+
+fn metric_wpm(value: Option<f64>) -> String {
+    value.map_or_else(|| "—".to_owned(), |value| format!("{value:.1} WPM"))
+}
+
+fn percent(value: f64) -> String {
+    format!("{:.1}%", value * 100.0)
+}
+
+fn signed(value: Option<f64>) -> String {
+    value.map_or_else(|| "—".to_owned(), |value| format!("{value:+.1}"))
+}
+
+fn signed_margin(value: Option<f64>) -> String {
+    value.map_or_else(|| "—".to_owned(), |value| format!("±{value:.1}"))
+}
+
+fn signed_margin_with_unit(value: Option<f64>) -> String {
+    value.map_or_else(|| "—".to_owned(), |value| format!("±{value:.1} WPM"))
 }
 
 fn render_rich(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, badge: bool, keyboard: bool, trends: bool) {

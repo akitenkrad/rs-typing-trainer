@@ -18,6 +18,7 @@ use crate::metrics::stats::{LiveMetrics, percentile};
 use crate::record::SessionRecord;
 
 pub mod bench_summary;
+pub mod bench_v3;
 pub mod coach;
 pub mod errors;
 pub mod grades;

@@ -33,6 +33,19 @@ fn bundled_glossary_loads_and_has_unique_valid_entries() {
     assert_eq!(catalog.version(), "glossary-v1");
     assert!(catalog.terms().len() >= 40);
     assert_eq!(catalog.term("wpm").unwrap().term.en, "WPM");
+    for (id, en, ja) in [
+        ("tempo", "Tempo", "テンポ"),
+        ("effective-wpm", "Accuracy-adjusted speed", "正確さを含む速さ"),
+        ("error-margin", "This run's error margin", "この回の誤差の目安"),
+    ] {
+        let term = catalog.term(id).unwrap_or_else(|| panic!("missing glossary term {id}"));
+        assert_eq!(term.term.en, en);
+        assert_eq!(term.term.ja, ja);
+        assert_eq!(term.category, "bench");
+        assert!(term.screens.iter().any(|screen| screen == "bench"));
+        assert!(term.screens.iter().any(|screen| screen == "history"));
+        assert!(term.screens.iter().any(|screen| screen == "result"));
+    }
 }
 
 #[test]

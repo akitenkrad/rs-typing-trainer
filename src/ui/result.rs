@@ -11,7 +11,7 @@ use ratatui_image::Image;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::{App, ResultOrigin};
-use crate::bench::BenchPart;
+use crate::bench::{BenchPart, BenchV3Part, parse_v3_bench_id};
 use crate::i18n::{Lang, Msg};
 use crate::metrics::stats::GameResult;
 use crate::record::SessionRecord;
@@ -61,6 +61,10 @@ pub fn render(frame: &mut Frame, app: &App) {
     let lang = app.config.general.lang;
     let area = frame.area();
 
+    if let Some((record, part)) = v3_result_record(app) {
+        render_v3_benchmark_result(frame, app, record, part, &theme, area, lang);
+        return;
+    }
     if app.result_origin == ResultOrigin::JustPlayed && app.active_bench_id.is_some() {
         render_benchmark_result(frame, app, &theme, area, lang);
         return;
@@ -1320,6 +1324,86 @@ fn render_history_conditions(frame: &mut Frame, app: &App, theme: &Theme, area: 
 
 fn on_off(enabled: bool) -> &'static str {
     if enabled { "ON" } else { "OFF" }
+}
+
+fn v3_result_record(app: &App) -> Option<(&SessionRecord, BenchV3Part)> {
+    let record = app.result_record.as_ref()?;
+    let (part, _) = record.header.bench_id.as_deref().and_then(parse_v3_bench_id)?;
+    (part != BenchV3Part::W).then_some((record, part))
+}
+
+fn render_v3_benchmark_result(frame: &mut Frame, app: &App, record: &SessionRecord, part: BenchV3Part, theme: &Theme, area: Rect, lang: Lang) {
+    let outer = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" {} ", Msg::BenchResultTitle.text(lang)))
+        .style(Style::default().fg(theme.fg));
+    let inner = outer.inner(area);
+    frame.render_widget(outer, area);
+
+    let metrics = crate::analysis::bench_v3::compute_bench_v3_metrics(std::slice::from_ref(record), app.config.analysis.pause_ms);
+    let effective = metric_wpm(metrics.effective_wpm);
+    let tempo = metric_wpm(metrics.tempo_wpm);
+    let margin = metrics
+        .error_margin_wpm
+        .map_or_else(|| "—".to_owned(), |value| format!("±{value:.1} WPM"));
+    let previous = app
+        .result_comparison
+        .previous_effective_wpm_delta
+        .map_or_else(|| Msg::InitialResult.text(lang).to_owned(), |value| format!("{value:+.1} WPM"));
+    let labels = match lang {
+        Lang::En => ("Accuracy-adjusted speed", "Tempo", "Accuracy", "This run's error margin", "Previous"),
+        Lang::Ja => ("正確さを含む速さ", "テンポ", "正確さ", "この回の誤差の目安", "前回"),
+    };
+    let detail = match lang {
+        Lang::En => format!("{} {tempo} · {} {:.1}%", labels.1, labels.2, metrics.accuracy * 100.0),
+        Lang::Ja => format!("{} {tempo}・{} {:.1}%", labels.1, labels.2, metrics.accuracy * 100.0),
+    };
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            crate::ui::bench_summary::v3_part_label(part, lang),
+            Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(format!(
+            "{}: {}",
+            Msg::BenchVersion.text(lang),
+            record.header.bench_id.as_deref().unwrap_or_default()
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("{} {effective}", labels.0),
+            Style::default().fg(theme.correct).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(detail),
+        Line::from(format!("net WPM {:.1}", record.header.net_wpm)),
+        Line::from(format!("{} {margin}", labels.3)),
+        Line::from(format!("{}: {previous}", labels.4)),
+        Line::from(""),
+    ];
+    if app.result_origin == ResultOrigin::JustPlayed {
+        let mut next_line = app.next_bench_v3_part().map_or_else(
+            || Msg::BenchViewSummary.text(lang).to_owned(),
+            |next| format!("{} {}", Msg::BenchNext.text(lang), crate::ui::bench_summary::v3_part_label(next, lang)),
+        );
+        if let Some(remaining) = app.result_input_delay_remaining() {
+            next_line.push_str(&format!("  … {:.1}s", remaining.as_secs_f32()));
+        }
+        lines.push(Line::from(Span::styled(
+            next_line,
+            Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(Msg::BenchAbortNote.text(lang)));
+    } else {
+        lines.push(Line::from(Span::styled(
+            Msg::HistoryDetailHint.text(lang),
+            Style::default().fg(theme.accent),
+        )));
+    }
+    frame.render_widget(Paragraph::new(lines), left_inset(inner));
+}
+
+fn metric_wpm(value: Option<f64>) -> String {
+    value.map_or_else(|| "—".to_owned(), |value| format!("{value:.1} WPM"))
 }
 
 fn render_benchmark_result(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, lang: Lang) {
