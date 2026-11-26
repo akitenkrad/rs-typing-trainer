@@ -121,7 +121,7 @@ fn render_list(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(1), Constraint::Min(0)])
         .split(area);
-    let columns = Columns::for_width(area.width);
+    let columns = Columns::for_reports(area.width, &app.reading_reports, lang);
     frame.render_widget(
         Paragraph::new(format!("  {}", columns.header(lang))).style(Style::default().fg(theme.muted).add_modifier(Modifier::BOLD)),
         chunks[0],
@@ -143,59 +143,100 @@ fn render_list(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 #[derive(Clone, Copy)]
 struct Columns {
     width: usize,
+    date: usize,
+    kind: usize,
     text: usize,
     reading: usize,
+    corrected: usize,
 }
 
 impl Columns {
-    fn for_width(width: u16) -> Self {
+    fn for_reports(width: u16, reports: &[ReadingReportEntry], lang: Lang) -> Self {
         let width = usize::from(width.saturating_sub(2));
-        let variable = width.saturating_sub(34);
-        let text = variable / 2;
-        let reading = variable.saturating_sub(text);
+        let (date_header, kind_header, text_header, reading_header, corrected_header) = column_headers(lang);
+        let date = UnicodeWidthStr::width(date_header).max(16);
+        let mut kind = UnicodeWidthStr::width(kind_header);
+        let mut text = UnicodeWidthStr::width(text_header);
+        let mut reading = UnicodeWidthStr::width(reading_header);
+        let mut corrected = UnicodeWidthStr::width(corrected_header);
+        for report in reports {
+            kind = kind.max(UnicodeWidthStr::width(kind_text(report, lang).as_str()));
+            text = text.max(UnicodeWidthStr::width(report.text.as_str()));
+            reading = reading.max(UnicodeWidthStr::width(report.reading.as_str()));
+            corrected = corrected.max(UnicodeWidthStr::width(report.correct_reading.as_deref().unwrap_or("-")));
+        }
+        let natural_width = date
+            .saturating_add(kind)
+            .saturating_add(text)
+            .saturating_add(reading)
+            .saturating_add(corrected)
+            .saturating_add(8);
+        let mut excess = natural_width.saturating_sub(width);
+        shrink_column(&mut text, UnicodeWidthStr::width(text_header), &mut excess);
+        shrink_column(&mut reading, UnicodeWidthStr::width(reading_header), &mut excess);
+        shrink_column(&mut corrected, UnicodeWidthStr::width(corrected_header), &mut excess);
         Self {
             width,
-            text: text.max(1),
-            reading: reading.max(1),
+            date,
+            kind,
+            text,
+            reading,
+            corrected,
         }
     }
 
     fn header(self, lang: Lang) -> String {
-        let (date, kind, text, reading) = match lang {
-            Lang::En => ("Date", "Type", "Text", "Reading"),
-            Lang::Ja => ("日時", "種類", "表記", "読み"),
-        };
-        self.fields(date, kind, text, reading)
+        let (date, kind, text, reading, corrected) = column_headers(lang);
+        self.fields(date, kind, text, reading, corrected)
     }
 
     fn row(self, report: &ReadingReportEntry, lang: Lang) -> String {
         let date = report.latest_at.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string();
-        let kind = match (report.kind, lang) {
-            (ReadingReportKind::Romaji, Lang::En) => "Word",
-            (ReadingReportKind::Romaji, Lang::Ja) => "単語",
-            (ReadingReportKind::Sentence, Lang::En) => "Sentence",
-            (ReadingReportKind::Sentence, Lang::Ja) => "短文",
-        };
-        let kind = if report.count > 1 {
-            format!("{kind} ×{}", report.count)
-        } else {
-            kind.to_owned()
-        };
-        self.fields(&date, &kind, &report.text, &report.reading)
+        let kind = kind_text(report, lang);
+        let corrected = report.correct_reading.as_deref().unwrap_or("-");
+        self.fields(&date, &kind, &report.text, &report.reading, corrected)
     }
 
-    fn fields(self, date: &str, kind: &str, text: &str, reading: &str) -> String {
+    fn fields(self, date: &str, kind: &str, text: &str, reading: &str, corrected: &str) -> String {
         truncate_display(
             &format!(
-                "{}  {}  {}  {}",
-                pad_display(date, 16),
-                pad_display(kind, 12),
+                "{}  {}  {}  {}  {}",
+                pad_display(date, self.date),
+                pad_display(kind, self.kind),
                 pad_display(text, self.text),
                 pad_display(reading, self.reading),
+                pad_display(corrected, self.corrected),
             ),
             self.width,
         )
     }
+}
+
+fn column_headers(lang: Lang) -> (&'static str, &'static str, &'static str, &'static str, &'static str) {
+    match lang {
+        Lang::En => ("Date", "Type", "Text", "Reading", "Corrected"),
+        Lang::Ja => ("日時", "種類", "表記", "読み", "修正済み"),
+    }
+}
+
+fn kind_text(report: &ReadingReportEntry, lang: Lang) -> String {
+    let kind = match (report.kind, lang) {
+        (ReadingReportKind::Romaji, Lang::En) => "Word",
+        (ReadingReportKind::Romaji, Lang::Ja) => "単語",
+        (ReadingReportKind::Sentence, Lang::En) => "Sentence",
+        (ReadingReportKind::Sentence, Lang::Ja) => "短文",
+    };
+    if report.count > 1 {
+        format!("{kind} ×{}", report.count)
+    } else {
+        kind.to_owned()
+    }
+}
+
+fn shrink_column(width: &mut usize, minimum: usize, excess: &mut usize) {
+    let shrink = width.saturating_sub(minimum).min(*excess);
+    *width -= shrink;
+    *excess -= shrink;
 }
 
 fn render_path(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {

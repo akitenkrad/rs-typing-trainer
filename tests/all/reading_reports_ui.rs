@@ -8,12 +8,14 @@ use rs_typing_trainer::config::Config;
 use rs_typing_trainer::i18n::Lang;
 use rs_typing_trainer::practice::reading_report::{ReadingReportKind, append_reading_report, save_reading_correction};
 use rs_typing_trainer::ui;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::common;
 use crate::common::TestApp;
 
 const LONG_TEXT: &str = "十分に長い日本語の表記を一覧では省略して全文欄の末尾まで表示";
 const LONG_READING: &str = "じゅうぶんにながいにほんごのひょうきをいちらんではしょうりゃくしてぜんぶんらんのまつびまですべてひょうじ";
+const LONG_CORRECTED: &str = "じゅうぶんにながいしゅうせいごのよみをいちらんではしょうりゃくしてひょうじ";
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
@@ -65,6 +67,31 @@ fn render(app: &TestApp, width: u16, height: u16) -> String {
 
 fn row(buffer: &Buffer, y: u16) -> String {
     (0..buffer.area.width).map(|x| buffer[(x, y)].symbol()).collect()
+}
+
+fn row_y(buffer: &Buffer, row_text: &str) -> u16 {
+    (0..buffer.area.height)
+        .find(|&y| contains_display(&row(buffer, y), row_text))
+        .unwrap_or_else(|| panic!("missing row containing {row_text:?}"))
+}
+
+fn text_x(buffer: &Buffer, y: u16, text: &str) -> u16 {
+    (0..buffer.area.width)
+        .find(|&start| {
+            let mut x = start;
+            text.chars().all(|character| {
+                if x >= buffer.area.width || buffer[(x, y)].symbol() != character.to_string() {
+                    return false;
+                }
+                x = x.saturating_add(u16::try_from(UnicodeWidthChar::width(character).unwrap_or(0).max(1)).unwrap());
+                true
+            })
+        })
+        .unwrap_or_else(|| panic!("missing {text:?} on row {y}: {:?}", row(buffer, y)))
+}
+
+fn display_span(buffer: &Buffer, y: u16, start: u16, end: u16) -> String {
+    (start..end).map(|x| buffer[(x, y)].symbol()).collect()
 }
 
 fn contains_display(output: &str, expected: &str) -> bool {
@@ -186,6 +213,98 @@ fn header_and_data_columns_start_at_the_same_cells() {
     let (data_x, _) = find_cell_in_row(&buffer, "2026-", "2");
 
     assert_eq!(header_x, data_x);
+}
+
+#[test]
+fn corrected_column_shows_saved_reading_or_dash_with_localized_headers() {
+    for (lang, date_header, corrected_header) in [(Lang::Ja, "日時", "修正済み"), (Lang::En, "Date", "Corrected")] {
+        let mut config = Config::default();
+        config.general.lang = lang;
+        let mut app = common::test_app(config);
+        report(&app, 9, ReadingReportKind::Romaji, "十分", "じゅうふん");
+        report(&app, 10, ReadingReportKind::Romaji, "遠足", "えんそく");
+        correction(&app, ReadingReportKind::Romaji, "十分", "じゅうふん", "じゅうぶん");
+        open_reading_reports(&mut app);
+
+        let buffer = render_buffer(&app, 120, 40);
+        let header_y = row_y(&buffer, date_header);
+        let corrected_x = text_x(&buffer, header_y, corrected_header);
+        let corrected_y = row_y(&buffer, "十分");
+        let uncorrected_y = row_y(&buffer, "遠足");
+
+        assert_eq!(text_x(&buffer, corrected_y, "じゅうぶん"), corrected_x);
+        assert_eq!(buffer[(corrected_x, uncorrected_y)].symbol(), "-");
+    }
+}
+
+#[test]
+fn headers_and_data_share_content_sized_column_starts_at_wide_sizes() {
+    for (lang, headers, kind) in [
+        (Lang::Ja, ["日時", "種類", "表記", "読み", "修正済み"], "短文"),
+        (Lang::En, ["Date", "Type", "Text", "Reading", "Corrected"], "Sentence"),
+    ] {
+        let mut config = Config::default();
+        config.general.lang = lang;
+        let mut app = common::test_app(config);
+        report(&app, 11, ReadingReportKind::Sentence, "希少表記", "きしょうよみ");
+        correction(&app, ReadingReportKind::Sentence, "希少表記", "きしょうよみ", "ただしいよみ");
+        open_reading_reports(&mut app);
+
+        for (width, height) in [(120, 40), (200, 50)] {
+            let buffer = render_buffer(&app, width, height);
+            let header_y = row_y(&buffer, headers[0]);
+            let data_y = row_y(&buffer, "希少表記");
+            let header_starts = headers.map(|header| text_x(&buffer, header_y, header));
+            let data_starts = [
+                text_x(&buffer, data_y, "2026-"),
+                text_x(&buffer, data_y, kind),
+                text_x(&buffer, data_y, "希少表記"),
+                text_x(&buffer, data_y, "きしょうよみ"),
+                text_x(&buffer, data_y, "ただしいよみ"),
+            ];
+
+            assert_eq!(header_starts, data_starts, "{width}x{height}");
+
+            if width == 200 {
+                let expected_reading_x = header_starts[0]
+                    + 16
+                    + 2
+                    + u16::try_from(UnicodeWidthStr::width(kind).max(UnicodeWidthStr::width(headers[1]))).unwrap()
+                    + 2
+                    + u16::try_from(UnicodeWidthStr::width("希少表記").max(UnicodeWidthStr::width(headers[2]))).unwrap()
+                    + 2;
+                assert_eq!(header_starts[3], expected_reading_x);
+            }
+        }
+    }
+}
+
+#[test]
+fn narrow_list_truncates_all_variable_columns_without_cutting_date_kind_or_hint() {
+    for (lang, headers, kind, hint) in [
+        (Lang::Ja, ["日時", "種類", "表記", "読み", "修正済み"], "短文", "[↑/↓] 選ぶ"),
+        (Lang::En, ["Date", "Type", "Text", "Reading", "Corrected"], "Sentence", "[↑/↓] Select"),
+    ] {
+        let mut config = Config::default();
+        config.general.lang = lang;
+        let mut app = common::test_app(config);
+        report(&app, 11, ReadingReportKind::Sentence, LONG_TEXT, LONG_READING);
+        correction(&app, ReadingReportKind::Sentence, LONG_TEXT, LONG_READING, LONG_CORRECTED);
+        open_reading_reports(&mut app);
+
+        let buffer = render_buffer(&app, 80, 24);
+        let header_y = row_y(&buffer, headers[0]);
+        let data_y = row_y(&buffer, "2026-");
+        let starts = headers.map(|header| text_x(&buffer, header_y, header));
+        let data_row = row(&buffer, data_y);
+
+        assert!(contains_display(&data_row, "2026-11-14"), "date was cut: {data_row:?}");
+        assert!(contains_display(&data_row, kind), "kind was cut: {data_row:?}");
+        assert!(display_span(&buffer, data_y, starts[2], starts[3] - 2).contains('…'));
+        assert!(display_span(&buffer, data_y, starts[3], starts[4] - 2).contains('…'));
+        assert!(display_span(&buffer, data_y, starts[4], buffer.area.width).contains('…'));
+        assert!(contains_display(&row(&buffer, 22), hint));
+    }
 }
 
 #[test]
