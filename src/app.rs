@@ -69,6 +69,7 @@ const ABORT_CONFIRMATION_DURATION: Duration = Duration::from_secs(2);
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Screen {
     Title,
+    About,
     Menu,
     Briefing,
     /// Summary of a practice-menu run (design §7.1).
@@ -238,6 +239,8 @@ pub struct App {
     pub result_grade_line: Option<String>,
     pub review_scroll: u16,
     review_scroll_max: Cell<u16>,
+    pub about_scroll: u16,
+    about_scroll_max: Cell<u16>,
     pub mode_grade_line: Option<String>,
     pub history: Vec<HistoryEntry>,
     history_sessions: Vec<SessionSummary>,
@@ -469,6 +472,8 @@ impl App {
             result_grade_line: None,
             review_scroll: 0,
             review_scroll_max: Cell::new(0),
+            about_scroll: 0,
+            about_scroll_max: Cell::new(0),
             mode_grade_line: None,
             history: Vec::new(),
             history_sessions: Vec::new(),
@@ -918,6 +923,7 @@ impl App {
         }
         match self.screen {
             Screen::Title => self.handle_title_key(key, action),
+            Screen::About => self.handle_about_key(key),
             Screen::Menu => self.handle_menu_key(key, action),
             Screen::Briefing => self.handle_briefing_key(key),
             Screen::MenuSummary => self.handle_menu_summary_key(key, action),
@@ -979,8 +985,9 @@ impl App {
     fn handle_title_key(&mut self, key: KeyEvent, action: InputAction) {
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => self.title_selected = self.title_selected.saturating_sub(1),
-            KeyCode::Down | KeyCode::Char('j') => self.title_selected = (self.title_selected + 1).min(6),
+            KeyCode::Down | KeyCode::Char('j') => self.title_selected = (self.title_selected + 1).min(7),
             KeyCode::Enter => self.activate_title_selection(),
+            KeyCode::Char('?') => self.open_about(),
             KeyCode::Char(' ') => self.open_mode_select(),
             KeyCode::Char('h') | KeyCode::Char('H') => self.open_history(),
             KeyCode::Char('b') | KeyCode::Char('B') => {
@@ -1012,6 +1019,27 @@ impl App {
         if matches!(action, InputAction::Abort) {
             self.should_quit = true;
         }
+    }
+
+    fn open_about(&mut self) {
+        self.about_scroll = 0;
+        self.screen = Screen::About;
+    }
+
+    fn handle_about_key(&mut self, key: KeyEvent) {
+        let max = self.about_scroll_max.get();
+        match key.code {
+            KeyCode::Up => self.about_scroll = self.about_scroll.saturating_sub(1),
+            KeyCode::Down => self.about_scroll = self.about_scroll.saturating_add(1).min(max),
+            KeyCode::PageUp => self.about_scroll = self.about_scroll.saturating_sub(10),
+            KeyCode::PageDown => self.about_scroll = self.about_scroll.saturating_add(10).min(max),
+            KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q' | '?') | KeyCode::Char('Q') => self.screen = Screen::Title,
+            _ => {}
+        }
+    }
+
+    pub(crate) fn set_about_scroll_max(&self, max: u16) {
+        self.about_scroll_max.set(max);
     }
 
     fn open_mode_select(&mut self) {
@@ -1411,7 +1439,8 @@ impl App {
                 ));
                 self.screen = Screen::Settings;
             }
-            6 => self.should_quit = true,
+            6 => self.open_about(),
+            7 => self.should_quit = true,
             _ => {}
         }
     }

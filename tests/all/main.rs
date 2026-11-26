@@ -6,6 +6,7 @@
 
 mod common;
 
+mod about_ui;
 mod adaptive;
 mod analysis_image;
 mod analysis_metrics;
@@ -21,6 +22,7 @@ mod blind;
 mod briefing;
 mod briefing_flow;
 mod briefing_ui;
+mod build_info;
 mod burst_endurance;
 mod cli;
 mod coach_ui;

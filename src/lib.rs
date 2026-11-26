@@ -4,6 +4,7 @@
 pub mod analysis;
 pub mod app;
 pub mod bench;
+pub mod build_info;
 pub mod cli;
 pub mod config;
 pub mod data;

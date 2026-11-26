@@ -1,6 +1,7 @@
 //! TUI rendering. The top-level `render` function dispatches to per-screen
 //! renderers based on the current `Screen` value.
 
+pub mod about;
 pub mod analysis;
 pub mod analysis_image;
 pub mod animation;
@@ -42,6 +43,7 @@ use crate::app::{App, Screen};
 pub fn render(frame: &mut Frame, app: &App) {
     match app.screen {
         Screen::Title => title::render(frame, app),
+        Screen::About => about::render(frame, app),
         Screen::Menu => menu::render(frame, app),
         Screen::Briefing => briefing::render(frame, app),
         Screen::MenuSummary => menu_summary::render(frame, app),

@@ -9,6 +9,7 @@ use crate::i18n::Lang;
 
 #[derive(Debug, Default, Parser)]
 #[command(name = "rs-typing-trainer")]
+#[command(version = crate::build_info::long_version())]
 #[command(group = clap::ArgGroup::new("json_output").multiple(true))]
 pub struct Cli {
     /// Display language. Overrides the configuration file.

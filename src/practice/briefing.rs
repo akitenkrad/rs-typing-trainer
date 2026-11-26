@@ -62,6 +62,10 @@ pub struct BriefingCatalog {
 }
 
 impl BriefingCatalog {
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
     pub fn skills(&self) -> &[SkillBriefing] {
         &self.skills
     }

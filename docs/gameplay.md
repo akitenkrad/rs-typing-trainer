@@ -8,6 +8,8 @@ Run `rs-typing-trainer` or `cargo run --release` to open the title screen. The d
 
 When terminal images are available and the window has enough room, the title screen centres a two-row keycap logo drawn with the selected theme and large font. If images are disabled or unavailable, or the window is too narrow or short, it keeps the text logo so that every title action remains visible.
 
+The title frame shows the short application version in its upper-right corner. Choose **About** immediately above Quit, or press `?` on the title screen, to open the About screen. It lists the version, commit, build date and target, licence and repository; the internal data versions; configuration and database paths; terminal graphics and key-release support; and the principal sources and licences of the bundled data.
+
 Running the program without a subcommand is the same as `rs-typing-trainer play`. `replay FILE` plays a portable record, `stats` prints saved-session analysis, `graphics` reports terminal-image support, and `export SESSION_ID [-o FILE]` writes a v2 session as `.ttrec`, using standard output when `-o` is omitted. Replay reads only its record file; see [Replay](replay.md).
 
 ## Terminal graphics check
@@ -21,14 +23,17 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | Screen | Keys | Action |
 |---|---|---|
 | Title | `↑` / `↓` (`k` / `j`) | Move the menu selection |
-| Title | `Enter` | Run the selected item: Today's training (the practice menu, selected first), Individual training (the table of skills × prompts), Benchmark, Analysis, History, Settings or Quit |
+| Title | `Enter` | Run the selected item: Today's training (the practice menu, selected first), Individual training (the table of skills × prompts), Benchmark, Analysis, History, Settings, About or Quit |
 | Title | `Space` | Open individual training directly |
 | Title | `H` | Open history |
 | Title | `B` | Open `bench-v2` selection |
 | Title | `A` | Open analysis |
 | Title | `M` | Open today's practice menu |
 | Title | `S` | Open settings |
+| Title | `?` | Open About |
 | Title | `Q` / `Esc` | Quit |
+| About | `↑` / `↓`, `PgUp` / `PgDn` | Scroll |
+| About | `Esc` / `Enter` / `Q` / `?` | Return to the title screen |
 | Individual training | `←` `↓` `↑` `→` (`h` `j` `k` `l`) | Move over the table: rows are skills, columns what you type (see [Individual training](modes.md#individual-training)) |
 | Individual training | `Enter` / `Space` | Open the cell's briefing (through the key picker for Letters, Combos and the Words cells of the first five rows); a `—` cell does not start |
 | Individual training | `L` | Switch the practice language of every cell: English ⇄ Japanese (saved) |

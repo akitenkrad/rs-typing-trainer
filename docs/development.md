@@ -10,6 +10,8 @@ cargo run --release
 cargo run --release -- --lang ja
 ```
 
+`build.rs` embeds the short Git commit hash, the UTC build date, the compilation target and the Cargo profile. `SOURCE_DATE_EPOCH` supplies the build time when it is set. Run `rs-typing-trainer --version` (or `-V`) to check the package version together with the embedded commit and build date.
+
 rs-typing-trainer uses Rust edition 2024, [ratatui](https://ratatui.rs) 0.30 for drawing and [clap](https://docs.rs/clap) 4 for command-line parsing. Terminal access uses the `ratatui::crossterm` re-export so ratatui and the application cannot select incompatible crossterm versions.
 
 ## Source layout

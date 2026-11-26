@@ -10,6 +10,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::App;
+use crate::build_info;
 use crate::i18n::Msg;
 use crate::ui::title_image::TitleLogoSpec;
 use crate::ui::{left_inset, theme::Theme};
@@ -27,6 +28,13 @@ pub fn render(frame: &mut Frame, app: &App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(format!(" {} ", Msg::AppTitle.text(lang)))
+        .title(
+            Line::from(Span::styled(
+                format!(" {} ", build_info::short_version()),
+                Style::default().fg(theme.muted),
+            ))
+            .right_aligned(),
+        )
         .style(Style::default().fg(theme.fg));
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -41,7 +49,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             Constraint::Length(logo_height),
             Constraint::Length(1),
             Constraint::Length(1),
-            Constraint::Length(7),
+            Constraint::Length(8),
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Min(7),
@@ -70,6 +78,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             "Analysis  [A]",
             "History  [H]",
             "Settings  [S]",
+            "About  [?]",
             "Quit  [Q/Esc]",
         ],
         crate::i18n::Lang::Ja => [
@@ -79,6 +88,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             "分析  [A]",
             "履歴  [H]",
             "設定  [S]",
+            "このアプリについて  [?]",
             "終了  [Q/Esc]",
         ],
     };

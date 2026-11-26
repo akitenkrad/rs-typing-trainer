@@ -2,6 +2,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use rs_typing_trainer::app::Screen;
+use rs_typing_trainer::build_info;
 use rs_typing_trainer::config::Config;
 use rs_typing_trainer::graphics::{CellPixels, GraphicsDetection, GraphicsMode, GraphicsReason};
 use rs_typing_trainer::i18n::{Lang, Msg};
@@ -95,6 +96,13 @@ fn row_containing(terminal: &Terminal<TestBackend>, phrase: &str) -> u16 {
     panic!("phrase {phrase:?} was not rendered");
 }
 
+fn symbol_column_on_row(terminal: &Terminal<TestBackend>, row: u16, symbol: &str) -> u16 {
+    let buffer = terminal.backend().buffer();
+    (0..buffer.area.width)
+        .find(|x| buffer[(*x, row)].symbol() == symbol)
+        .unwrap_or_else(|| panic!("symbol {symbol:?} was not rendered on row {row}"))
+}
+
 fn colon_columns(terminal: &Terminal<TestBackend>, row: u16) -> Vec<u16> {
     let buffer = terminal.backend().buffer();
     (0..buffer.area.width).filter(|x| buffer[(*x, row)].symbol() == ":").collect()
@@ -118,6 +126,31 @@ fn title_uses_japanese_messages() {
         without_whitespace(&rendered).contains(&without_whitespace(Msg::TitleTagline.text(Lang::Ja))),
         "rendered buffer:\n{rendered}"
     );
+}
+
+#[test]
+fn title_frame_shows_the_short_version_at_the_right_without_overlapping_the_title() {
+    for images in [false, true] {
+        for (width, height) in [(80, 24), (120, 40)] {
+            let mut app = test_app(Config::default());
+            if images {
+                app.set_graphics_detection(GraphicsDetection {
+                    mode: GraphicsMode::Kitty,
+                    cell_pixels: Some(CellPixels::new(9, 20)),
+                    reason: GraphicsReason::Explicit(GraphicsMode::Kitty),
+                });
+            }
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| ui::title::render(frame, &app)).unwrap();
+            let buffer = terminal.backend().buffer();
+            let top = (0..width).map(|x| buffer[(x, 0)].symbol()).collect::<String>();
+            let title = Msg::AppTitle.text(Lang::En);
+            let version = build_info::short_version();
+            let title_end = top.find(title).unwrap() + title.len();
+            let version_start = top.find(version).unwrap();
+            assert!(title_end < version_start, "images={images} size={width}x{height}: {top}");
+        }
+    }
 }
 
 #[test]
@@ -275,6 +308,35 @@ fn title_menu_keeps_all_shortcuts() {
 }
 
 #[test]
+fn title_question_mark_opens_about_and_escape_returns_to_title() {
+    let mut app = test_app(Config::default());
+    app.handle_key(key(KeyCode::Char('?')));
+    assert_eq!(app.screen, Screen::About);
+    app.handle_key(key(KeyCode::Esc));
+    assert_eq!(app.screen, Screen::Title);
+}
+
+#[test]
+fn title_about_selection_opens_about_and_down_stops_on_quit() {
+    let mut app = test_app(Config::default());
+    app.title_selected = 0;
+    for _ in 0..6 {
+        app.handle_key(key(KeyCode::Down));
+    }
+    app.handle_key(key(KeyCode::Enter));
+    assert_eq!(app.screen, Screen::About);
+
+    app.screen = Screen::Title;
+    app.title_selected = 0;
+    for _ in 0..100 {
+        app.handle_key(key(KeyCode::Down));
+    }
+    assert_eq!(app.title_selected, 7);
+    app.handle_key(key(KeyCode::Enter));
+    assert!(app.should_quit);
+}
+
+#[test]
 fn title_menu_is_left_aligned_and_only_the_selection_has_an_arrow_in_both_languages() {
     for lang in [Lang::En, Lang::Ja] {
         let mut config = Config::default();
@@ -294,14 +356,20 @@ fn title_menu_is_left_aligned_and_only_the_selection_has_an_arrow_in_both_langua
                 "Analysis",
                 "History",
                 "Settings",
+                "About",
                 "Quit",
             ]
             .iter()
             .map(|phrase| phrase_column(&terminal, phrase))
             .collect::<Vec<_>>(),
-            Lang::Ja => ["今", "個", "ベ", "分", "履", "設", "終"]
+            Lang::Ja => ["今", "個", "ベ", "分", "履", "設"]
                 .iter()
                 .map(|symbol| symbol_column(&terminal, symbol))
+                .chain(std::iter::once({
+                    let row = row_containing(&terminal, "このアプリについて");
+                    symbol_column_on_row(&terminal, row, "こ")
+                }))
+                .chain(std::iter::once(symbol_column(&terminal, "終")))
                 .collect::<Vec<_>>(),
         };
         assert!(columns.windows(2).all(|pair| pair[0] == pair[1]), "{lang:?}: {columns:?}");
@@ -320,12 +388,22 @@ fn title_screen_keeps_all_actions_with_and_without_images_at_large_and_small_siz
                 "Analysis",
                 "History",
                 "Settings",
+                "About",
                 "Quit",
             ],
-            Lang::Ja => ["今日の訓練", "個別に訓練", "ベンチマーク", "分析", "履歴", "設定", "終了"],
+            Lang::Ja => [
+                "今日の訓練",
+                "個別に訓練",
+                "ベンチマーク",
+                "分析",
+                "履歴",
+                "設定",
+                "このアプリについて",
+                "終了",
+            ],
         };
         for images in [false, true] {
-            for (width, height) in [(150, 40), (80, 24)] {
+            for (width, height) in [(120, 40), (80, 24)] {
                 let mut config = Config::default();
                 config.general.lang = lang;
                 let mut app = test_app(config);
@@ -346,7 +424,7 @@ fn title_screen_keeps_all_actions_with_and_without_images_at_large_and_small_siz
                     );
                 }
                 assert!(compact.contains(&without_whitespace(Msg::TitleTagline.text(lang))));
-                let uses_image = images && (width, height) == (150, 40);
+                let uses_image = images && (width, height) == (120, 40);
                 assert_eq!(
                     compact.contains(&without_whitespace(Msg::TitleLogo.text(lang))),
                     !uses_image,

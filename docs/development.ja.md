@@ -10,6 +10,8 @@ cargo run --release
 cargo run --release -- --lang ja
 ```
 
+`build.rs` は Git の短いコミットハッシュ，UTC のビルド日，コンパイル対象，Cargo のプロファイルを埋め込みます．`SOURCE_DATE_EPOCH` が設定されている場合は，その値をビルド時刻に使います．`rs-typing-trainer --version`（または `-V`）を実行すると，パッケージのバージョンと，埋め込んだコミット・ビルド日を確認できます．
+
 rs-typing-trainer は Rust edition 2024 で，描画に [ratatui](https://ratatui.rs) 0.30，コマンドラインの解析に [clap](https://docs.rs/clap) 4 を使っています．端末へのアクセスには `ratatui::crossterm` の再エクスポートを使い，ratatui とアプリケーションが互換性のない crossterm を選ぶのを防ぎます．
 
 ## ソース構成

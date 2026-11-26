@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use chrono::Utc;
 use clap::Parser;
+use rs_typing_trainer::build_info;
 use rs_typing_trainer::cli::{Cli, Command};
 use rs_typing_trainer::config::Config;
 use rs_typing_trainer::engine::item::Item;
@@ -19,6 +20,17 @@ fn parses_japanese_language_override() {
 
     assert_eq!(cli.lang, Some(Lang::Ja));
     assert!(cli.command.is_none());
+}
+
+#[test]
+fn version_flag_prints_the_long_build_version() {
+    for flag in ["--version", "-V"] {
+        let output = ProcessCommand::new(env!("CARGO_BIN_EXE_rs-typing-trainer")).arg(flag).output().unwrap();
+
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        assert_eq!(stdout.trim(), format!("rs-typing-trainer {}", build_info::long_version()));
+    }
 }
 
 #[test]
