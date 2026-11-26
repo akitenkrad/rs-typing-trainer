@@ -11,10 +11,10 @@ use ratatui::widgets::{Axis, Block, Borders, Chart, Clear, Dataset, GraphType, P
 use ratatui_image::Image;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::analysis::bench_v3::{BenchV3Group, bench_v3_record_order, bench_v3_run_key};
+use crate::analysis::bench_v3::{BenchV3Group, BenchV3Metrics, bench_v3_record_order, bench_v3_run_key};
 use crate::analysis::growth::BenchV3GrowthTarget;
 use crate::app::{AnalysisPeriod, App};
-use crate::bench::{BENCH_SERIES_V2, BenchPart, BenchV3Part, is_preferred_bench_series, parse_bench_id, preferred_bench_series};
+use crate::bench::{BENCH_SERIES_V1, BENCH_SERIES_V2, BenchPart, BenchV3Part, is_preferred_bench_series, parse_bench_id, preferred_bench_series};
 use crate::graphics::GraphicsMode;
 use crate::i18n::{Lang, Msg};
 use crate::layout::geometry::geometry;
@@ -2313,19 +2313,54 @@ fn render_bench(frame: &mut Frame, app: &App, area: Rect) {
             Lang::En => "bench-v3 / accuracy-adjusted speed",
             Lang::Ja => "bench-v3／正確さを含む速さ",
         };
-        let (lines, charts) = bench_v3_content(app, lang);
+        let (lines, charts, axes_row) = bench_v3_content(app, lang, area.width >= 100);
         frame.render_widget(Paragraph::new(lines).block(Block::default().title(title)), area);
-        render_bench_v3_images(frame, app, area, &charts);
+        render_bench_v3_images(frame, app, area, &charts, axes_row);
         return;
     }
+    let title = legacy_bench_title(app, lang);
+    let invitation = match lang {
+        Lang::En => "No bench-v3 benchmark yet. Measure it with [B] on the title screen (about 5 minutes)",
+        Lang::Ja => "v3 のベンチはまだありません．タイトルの [B] で測れます（約 5 分）",
+    };
     let lines = bench_text_lines(app, lang);
-    if render_bench_images(frame, app, area, &lines) {
+    if render_bench_images(frame, app, area, &lines, &title, invitation) {
         return;
     }
-    frame.render_widget(Paragraph::new(lines).block(Block::default().title(Msg::BenchEightAxes.text(lang))), area);
+    let block = Block::default().title(title);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Min(1)])
+        .split(inner);
+    frame.render_widget(Paragraph::new(invitation), chunks[0]);
+    frame.render_widget(Paragraph::new(lines), chunks[1]);
 }
 
-fn bench_v3_content(app: &App, lang: Lang) -> (Vec<Line<'static>>, Vec<(usize, Vec<f64>)>) {
+fn legacy_bench_title(app: &App, lang: Lang) -> String {
+    let series = if app.analysis_records.iter().any(|record| {
+        record
+            .header
+            .bench_id
+            .as_deref()
+            .and_then(parse_bench_id)
+            .is_some_and(|(series, _, _)| series == BENCH_SERIES_V2)
+    }) {
+        BENCH_SERIES_V2
+    } else {
+        BENCH_SERIES_V1
+    };
+    match lang {
+        Lang::En => format!("{series} / 8 skill axes"),
+        Lang::Ja => format!("{series}／技能の 8 軸"),
+    }
+}
+
+type BenchV3Chart = (usize, Vec<f64>);
+type BenchV3Content = (Vec<Line<'static>>, Vec<BenchV3Chart>, usize);
+
+fn bench_v3_content(app: &App, lang: Lang, expanded: bool) -> BenchV3Content {
     let mut lines = vec![Line::from(match lang {
         Lang::En => "Parts (effective WPM, attempts in order)",
         Lang::Ja => "各パート（正確さを含む WPM，試行順）",
@@ -2346,31 +2381,53 @@ fn bench_v3_content(app: &App, lang: Lang) -> (Vec<Line<'static>>, Vec<(usize, V
     }
     lines.push(Line::from(""));
     for group in [BenchV3Group::English, BenchV3Group::Japanese, BenchV3Group::Transition] {
-        let values = bench_v3_group_values(app, group);
-        if values.is_empty() {
+        let rows = bench_v3_group_rows(app, group);
+        if rows.is_empty() {
             continue;
         }
         let label = bench_v3_group_label(group, lang);
         let reliability = crate::analysis::bench_v3::compute_bench_v3_group_reliability(&app.analysis_records, group, app.config.analysis.pause_ms);
         let complete_runs = crate::analysis::bench_v3::compute_bench_v3_group_runs(&app.analysis_records, group, app.config.analysis.pause_ms).len();
-        let speeds = values.iter().map(|(value, _)| *value).collect::<Vec<_>>();
+        let speeds = rows.iter().filter_map(|(metrics, _)| metrics.effective_wpm).collect::<Vec<_>>();
+        if speeds.is_empty() {
+            continue;
+        }
         let change = speeds
             .windows(2)
             .last()
             .map(|pair| bench_v3_change_label(pair[1] - pair[0], reliability.map(|value| value.mdc95_wpm), lang));
-        let partial = values.last().is_some_and(|(_, partial)| *partial);
+        let (latest, partial) = rows.last().expect("non-empty group rows");
+        let recent = crate::analysis::bench_v3::rolling_median_3(&speeds).last().copied();
         charts.push((lines.len(), speeds.clone()));
-        lines.push(Line::from(format!(
-            "{label}: {} WPM{}{}  {}",
-            bench_v3_first_latest(&speeds),
-            match (partial, lang) {
-                (true, Lang::En) => " (partial parts)",
-                (true, Lang::Ja) => "（一部のパートのみ）",
-                (false, _) => "",
-            },
-            change.map_or_else(String::new, |value| format!(" · {value}")),
-            bench_v3_text_figure(&speeds)
-        )));
+        let partial = match (*partial, lang) {
+            (true, Lang::En) => " (partial parts)",
+            (true, Lang::Ja) => "（一部のパートのみ）",
+            (false, _) => "",
+        };
+        let change = change.map_or_else(String::new, |value| format!(" · {value}"));
+        let tempo = latest.tempo_wpm.map_or_else(|| "—".to_owned(), |value| format!("{value:.1} WPM"));
+        if expanded {
+            lines.push(Line::from(format!(
+                "{label}: {} WPM{partial}{change}  {}",
+                bench_v3_first_latest(&speeds),
+                bench_v3_text_figure(&speeds)
+            )));
+            lines.push(Line::from(format!(
+                "  {} {tempo} · {} · {}",
+                bench_v3_tempo_label(lang),
+                bench_v3_accuracy_label(latest.accuracy, lang),
+                bench_v3_recent_median_label(recent, lang),
+            )));
+        } else {
+            lines.push(Line::from(format!(
+                "{label}: {} WPM{partial}{change} · {} {tempo} · {} · {}  {}",
+                bench_v3_first_latest(&speeds),
+                bench_v3_tempo_label(lang),
+                bench_v3_accuracy_label(latest.accuracy, lang),
+                bench_v3_recent_median_label(recent, lang),
+                bench_v3_text_figure(&speeds)
+            )));
+        }
         lines.push(Line::from(bench_v3_reliability_line(label, reliability, complete_runs, lang)));
     }
 
@@ -2383,10 +2440,18 @@ fn bench_v3_content(app: &App, lang: Lang) -> (Vec<Line<'static>>, Vec<(usize, V
         }));
         lines.extend(previous.into_iter().map(Line::from));
     }
-    (lines, charts)
+    lines.push(Line::from(""));
+    lines.push(Line::from(bench_v3_grade_line(app, lang)));
+    let axes_row = lines.len();
+    lines.push(Line::from(match lang {
+        Lang::En => "8 skill axes (bench-v3)",
+        Lang::Ja => "技能の 8 軸（bench-v3）",
+    }));
+    lines.extend(bench_v3_axis_lines(app, lang).into_iter().map(Line::from));
+    (lines, charts, axes_row)
 }
 
-fn render_bench_v3_images(frame: &mut Frame, app: &App, area: Rect, charts: &[(usize, Vec<f64>)]) {
+fn render_bench_v3_images(frame: &mut Frame, app: &App, area: Rect, charts: &[(usize, Vec<f64>)], axes_row: usize) {
     if app.graphics.mode == GraphicsMode::Off || app.graphics.cell_pixels.is_none() || area.width < 54 || charts.is_empty() {
         return;
     }
@@ -2395,7 +2460,7 @@ fn render_bench_v3_images(frame: &mut Frame, app: &App, area: Rect, charts: &[(u
         .iter()
         .enumerate()
         .filter_map(|(index, (row, values))| {
-            let y = area.y.saturating_add(*row as u16);
+            let y = area.y.saturating_add(1).saturating_add(*row as u16);
             (y < area.y.saturating_add(area.height)).then(|| {
                 let chart_area = Rect::new(area.x + area.width - chart_width, y, chart_width, 1);
                 (
@@ -2414,11 +2479,54 @@ fn render_bench_v3_images(frame: &mut Frame, app: &App, area: Rect, charts: &[(u
     if specs.iter().any(|(_, spec)| images.prepare_trial_chart(&app.graphics, spec).is_err()) {
         return;
     }
+    let radar = (area.width >= 100).then(|| {
+        let y = area.y.saturating_add(axes_row as u16 + 2);
+        let available = area.y.saturating_add(area.height).saturating_sub(y);
+        let radar_area = Rect::new(area.x + area.width.saturating_sub(42), y, 42, available.min(11));
+        let axes = crate::analysis::summary::skill_axis_values(&app.analysis_records, app.practice_layout(), &app.config);
+        let spec = RadarChartSpec {
+            axes: axes
+                .into_iter()
+                .map(|value| RadarAxis {
+                    label: value.axis.label(app.config.general.lang).to_owned(),
+                    value: value.percentile,
+                })
+                .collect(),
+            max_value: 100.0,
+            rings: [25.0, 50.0, 75.0, 100.0]
+                .into_iter()
+                .map(|value| RadarRing {
+                    value,
+                    label: matches!(value as u32, 50 | 100).then(|| format!("{value:.0}")),
+                })
+                .collect(),
+            color: Theme::from_name(&app.config.ui.theme).accent,
+            cells: radar_area.as_size(),
+            missing_label: match app.config.general.lang {
+                Lang::En => "under 3",
+                Lang::Ja => "3 回未満",
+            }
+            .to_owned(),
+        };
+        (radar_area, spec)
+    });
+    let font = app.bigtext_images.borrow_mut().resolved_font(&app.config.display.big_font, &app.home_dir);
+    if let Some((radar_area, spec)) = radar.as_ref()
+        && (radar_area.width == 0 || radar_area.height < 8 || images.prepare_radar(&app.graphics, &font, spec).is_err())
+    {
+        return;
+    }
     for (chart_area, spec) in &specs {
         let Some(protocol) = images.trial_chart_protocol(&app.graphics, spec) else {
             return;
         };
         frame.render_widget(Image::new(protocol), *chart_area);
+    }
+    if let Some((radar_area, spec)) = radar {
+        let Some(protocol) = images.radar_protocol(&app.graphics, &font, &spec) else {
+            return;
+        };
+        frame.render_widget(Image::new(protocol), radar_area);
     }
 }
 
@@ -2450,7 +2558,7 @@ fn bench_v3_part_values(app: &App, part: BenchV3Part) -> Vec<f64> {
         .collect()
 }
 
-fn bench_v3_group_values(app: &App, group: BenchV3Group) -> Vec<(f64, bool)> {
+fn bench_v3_group_rows(app: &App, group: BenchV3Group) -> Vec<(BenchV3Metrics, bool)> {
     let mut runs = BTreeMap::<(NaiveDate, u8), Vec<crate::record::SessionRecord>>::new();
     for record in &app.analysis_records {
         let Some((part, _)) = record.header.bench_id.as_deref().and_then(crate::bench::parse_v3_bench_id) else {
@@ -2469,11 +2577,123 @@ fn bench_v3_group_values(app: &App, group: BenchV3Group) -> Vec<(f64, bool)> {
         .filter_map(|records| {
             let order = records.iter().filter_map(bench_v3_record_order).max()?;
             let summary = crate::analysis::bench_v3::compute_bench_v3_group_metrics(&records, group, app.config.analysis.pause_ms)?;
-            Some((order, summary.metrics.effective_wpm?, summary.partial))
+            Some((order, summary.metrics, summary.partial))
         })
         .collect::<Vec<_>>();
     values.sort_by_key(|(order, _, _)| *order);
     values.into_iter().map(|(_, value, partial)| (value, partial)).collect()
+}
+
+fn bench_v3_tempo_label(lang: Lang) -> &'static str {
+    match lang {
+        Lang::En => "Tempo",
+        Lang::Ja => "テンポ",
+    }
+}
+
+fn bench_v3_accuracy_label(accuracy: f64, lang: Lang) -> String {
+    match lang {
+        Lang::En => format!("Accuracy {:.1}%", accuracy * 100.0),
+        Lang::Ja => format!("正確さ {:.1}%", accuracy * 100.0),
+    }
+}
+
+fn bench_v3_recent_median_label(value: Option<f64>, lang: Lang) -> String {
+    let value = value.map_or_else(|| "—".to_owned(), |value| format!("{value:.1} WPM"));
+    match lang {
+        Lang::En => format!("Recent-3 median {value}"),
+        Lang::Ja => format!("直近 3 回の中央値 {value}"),
+    }
+}
+
+pub(crate) fn bench_v3_grade_line(app: &App, lang: Lang) -> String {
+    use crate::analysis::grades::{Component, ComponentValue, GRADE_VERSION_V2, GradeSource, GradeStatus};
+
+    let labels = [("en", BenchV3Group::English), ("ja", BenchV3Group::Japanese)]
+        .into_iter()
+        .filter_map(|(language, group)| {
+            let complete = crate::analysis::bench_v3::compute_bench_v3_group_runs(&app.analysis_records, group, app.config.analysis.pause_ms);
+            let selected = complete.iter().rev().take(3).collect::<Vec<_>>();
+            if selected.is_empty() {
+                return None;
+            }
+            let fallback = || {
+                let speeds = selected.iter().filter_map(|run| run.metrics.effective_wpm).collect::<Vec<_>>();
+                let accuracies = selected.iter().map(|run| run.metrics.accuracy * 100.0).collect::<Vec<_>>();
+                crate::analysis::grades::evaluate_language_with_version(
+                    language,
+                    &[
+                        ComponentValue::new(Component::Speed, median(&speeds)),
+                        ComponentValue::new(Component::Accuracy, median(&accuracies)),
+                    ],
+                    GradeSource::Bench,
+                    if selected.len() >= 3 {
+                        GradeStatus::Official
+                    } else {
+                        GradeStatus::Interim
+                    },
+                    selected.len(),
+                    GRADE_VERSION_V2,
+                )
+                .ok()
+            };
+            let grade = app
+                .analysis_coach
+                .as_ref()
+                .and_then(|report| {
+                    report
+                        .grades
+                        .languages
+                        .iter()
+                        .find(|grade| grade.language == language && grade.version == GRADE_VERSION_V2)
+                })
+                .cloned()
+                .or_else(fallback)?;
+            let overall = grade.overall?;
+            let language = match (language, lang) {
+                ("en", Lang::En) => "English",
+                ("ja", Lang::En) => "Japanese",
+                ("en", Lang::Ja) => "英語",
+                ("ja", Lang::Ja) => "日本語",
+                _ => language,
+            };
+            Some(format!("{language} {} (n={})", overall.grade.as_str(), grade.n_sessions))
+        })
+        .collect::<Vec<_>>();
+    let heading = match lang {
+        Lang::En => "Grades (grades-v2)",
+        Lang::Ja => "段階（grades-v2）",
+    };
+    if labels.is_empty() {
+        format!("{heading}: —")
+    } else {
+        format!("{heading}: {}", labels.join(" · "))
+    }
+}
+
+fn bench_v3_axis_lines(app: &App, lang: Lang) -> Vec<String> {
+    crate::analysis::summary::skill_axis_values(&app.analysis_records, app.practice_layout(), &app.config)
+        .into_iter()
+        .map(|value| {
+            let name = pad_display(value.axis.label(lang), 16);
+            let Some(raw) = value.raw else {
+                return format!("{name}{}", Msg::NoData.text(lang));
+            };
+            let suffix = value.percentile.map_or_else(
+                || Msg::RawFewerThree.text(lang).to_owned(),
+                |position| {
+                    format!(
+                        "{position:.1} {}",
+                        match lang {
+                            Lang::En => Msg::Percentile.text(lang),
+                            Lang::Ja => "百分位",
+                        }
+                    )
+                },
+            );
+            format!("{name}{raw:>10.2}  {suffix}")
+        })
+        .collect()
 }
 
 fn bench_v3_first_latest(values: &[f64]) -> String {
@@ -2636,7 +2856,7 @@ fn bench_text_lines(app: &App, lang: Lang) -> Vec<Line<'static>> {
     lines
 }
 
-fn render_bench_images(frame: &mut Frame, app: &App, area: Rect, text_lines: &[Line<'static>]) -> bool {
+fn render_bench_images(frame: &mut Frame, app: &App, area: Rect, text_lines: &[Line<'static>], title: &str, invitation: &str) -> bool {
     if app.graphics.mode == GraphicsMode::Off || app.graphics.cell_pixels.is_none() || area.width < 54 {
         return false;
     }
@@ -2652,8 +2872,13 @@ fn render_bench_images(frame: &mut Frame, app: &App, area: Rect, text_lines: &[L
     if parts.is_empty() && axes.iter().all(|value| value.raw.is_none()) {
         return false;
     }
-    let block = Block::default().title(Msg::BenchEightAxes.text(lang));
+    let block = Block::default().title(title);
     let inner = block.inner(area);
+    let outer_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Min(1)])
+        .split(inner);
+    let inner = outer_chunks[1];
     let raw_height = text_lines.len().min(usize::from(inner.height)) as u16;
     let horizontal = inner.width >= 88;
     let visual_height = if horizontal { 14 } else { 20 };
@@ -2744,6 +2969,7 @@ fn render_bench_images(frame: &mut Frame, app: &App, area: Rect, text_lines: &[L
         return false;
     }
     frame.render_widget(block, area);
+    frame.render_widget(Paragraph::new(invitation), outer_chunks[0]);
     let Some(protocol) = images.radar_protocol(&app.graphics, &font, &radar) else {
         return false;
     };

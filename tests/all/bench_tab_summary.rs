@@ -106,6 +106,95 @@ fn seed(lang: Lang) -> (TempDir, Config) {
     (directory, config)
 }
 
+fn v3_split_record(id: i64, day: u32, part: &str, form: u8, half_a_wpm: f64, half_b_wpm: f64) -> SessionRecord {
+    let intervals_us = [(12_000_000.0 / half_a_wpm).round() as u64, (12_000_000.0 / half_b_wpm).round() as u64];
+    let mut items = Vec::new();
+    let mut keystrokes = Vec::new();
+    for item_idx in 0..4_u32 {
+        let shown_us = u64::from(item_idx) * 1_000_000;
+        items.push(rs_typing_trainer::engine::session::ItemLog {
+            idx: item_idx,
+            text: "aa".into(),
+            reading: None,
+            kind: None,
+            shown_us,
+            done_us: None,
+            outcome: rs_typing_trainer::engine::session::ItemOutcome::Completed,
+        });
+        for pos in 0..2_u32 {
+            keystrokes.push(rs_typing_trainer::engine::session::KeystrokeLog {
+                seq: item_idx * 2 + pos,
+                t_us: shown_us + 100_000 + u64::from(pos) * intervals_us[item_idx as usize % 2],
+                release_us: None,
+                item_idx,
+                pos,
+                kind: rs_typing_trainer::engine::session::KeystrokeKind::Char,
+                typed: Some("a".into()),
+                expected: Some("a".into()),
+                correct: true,
+                code: Some("KeyA".into()),
+            });
+        }
+    }
+    let mut record = SessionRecord::from_log(
+        &Config::default(),
+        rs_typing_trainer::engine::session::SessionLog {
+            duration_us: 4_000_000,
+            items,
+            keystrokes,
+            ..Default::default()
+        },
+        Utc.with_ymd_and_hms(2026, 11, day, 12, u32::from(form), 0).unwrap(),
+    );
+    record.header.id = Some(id);
+    record.header.mode = "bench".into();
+    record.header.bench_id = Some(format!("bench-v3/{part}/{form:02}"));
+    record
+}
+
+fn seed_v3(lang: Lang) -> (TempDir, Config) {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("sessions.db");
+    let mut id = 1_i64;
+    for (day, form, half_a, half_b) in [(10, 1, 60.0, 40.0), (11, 2, 120.0, 40.0), (19, 3, 62.0, 42.0)] {
+        for part in ["EW", "ES", "JW", "JS", "PW"] {
+            let mut record = v3_split_record(id, day, part, form, half_a, half_b);
+            record.header.id = None;
+            db::save(&path, &record).unwrap();
+            id += 1;
+        }
+    }
+    // Retained history must not make the v3 Summary fall back to v2.
+    save_part(&path, "bench-v2/A/01", 35.0, 0.95, 8, 0);
+    let mut config = Config::default();
+    config.general.lang = lang;
+    config.storage.db_path = Some(path);
+    (directory, config)
+}
+
+fn seed_v3_n(lang: Lang, run_count: usize) -> (TempDir, Config) {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("sessions.db");
+    let rows = [
+        (10, 1, 60.0, 40.0),
+        (11, 2, 120.0, 40.0),
+        (12, 3, 70.0, 45.0),
+        (13, 4, 90.0, 50.0),
+        (19, 5, 62.0, 42.0),
+    ];
+    for (day, form, half_a, half_b) in rows.into_iter().take(run_count) {
+        for part in ["EW", "ES", "JW", "JS", "PW"] {
+            let mut record = v3_split_record(0, day, part, form, half_a, half_b);
+            record.header.id = None;
+            db::save(&path, &record).unwrap();
+        }
+    }
+    let mut config = Config::default();
+    config.general.lang = lang;
+    config.storage.db_path = Some(path);
+    (directory, config)
+}
+
 fn open_bench(config: Config, graphics: GraphicsMode) -> common::TestApp {
     let mut app = common::test_app_at(config, chrono::NaiveDate::from_ymd_opt(2026, 11, 19).unwrap());
     app.set_graphics_detection(GraphicsDetection {
@@ -361,4 +450,155 @@ fn image_summary_draws_four_large_values() {
                 .unwrap();
         }
     }
+}
+
+#[test]
+fn v3_summary_view_has_language_cards_grades_axes_trends_and_reliability() {
+    use rs_typing_trainer::ui::bench_tab_summary::app_view;
+
+    for (lang, labels, tempo, accuracy, unchanged, best, reference) in [
+        (
+            Lang::En,
+            ["English", "Japanese", "Transitions"],
+            "tempo",
+            "accuracy",
+            "no change",
+            "best",
+            "reference",
+        ),
+        (
+            Lang::Ja,
+            ["英語", "日本語", "移り変わり"],
+            "テンポ",
+            "正確さ",
+            "変化なし",
+            "自己ベスト",
+            "参考",
+        ),
+    ] {
+        let (_directory, config) = seed_v3(lang);
+        let app = open_bench(config, GraphicsMode::Off);
+        let view = app_view(&app);
+        assert!(view.heading.contains("2026-11-19"), "{view:#?}");
+        assert!(view.subheading.contains("bench-v3") && view.subheading.contains("03"), "{view:#?}");
+        assert_eq!(view.parts.len(), 3, "{view:#?}");
+        for (card, label) in view.parts.iter().zip(labels) {
+            assert!(compact(&card.label).contains(&compact(label)), "{view:#?}");
+            assert!(compact(&card.accuracy).contains(&compact(tempo)), "{view:#?}");
+            assert!(compact(&card.accuracy).contains(&compact(accuracy)), "{view:#?}");
+            assert!(compact(&card.previous.delta_text).contains(&compact(unchanged)), "{view:#?}");
+            assert!(compact(&card.recent.delta_text).contains(&compact(best)), "{view:#?}");
+        }
+        assert_eq!(view.axes.len(), 8, "{view:#?}");
+        let supporting = compact(&view.events.join("\n"));
+        for expected in ["grades-v2", "SEM", "MDC95", reference, "EW", "ES", "JW", "JS", "PW"] {
+            assert!(supporting.contains(&compact(expected)), "missing {expected:?}: {view:#?}");
+        }
+    }
+}
+
+#[test]
+fn v3_summary_renders_in_both_languages_and_falls_back_to_text_when_small() {
+    for (lang, expected) in [
+        (
+            Lang::En,
+            ["Benchmark", "bench-v3", "English", "grades-v2", "8 skill axes", "SEM", "MDC95"],
+        ),
+        (Lang::Ja, ["ベンチ", "bench-v3", "英語", "grades-v2", "技能の 8 軸", "SEM", "MDC95"]),
+    ] {
+        for graphics in [GraphicsMode::Off, GraphicsMode::Kitty] {
+            let (_directory, config) = seed_v3(lang);
+            let mut app = open_bench(config, graphics);
+            app.handle_key(key(KeyCode::Char('s')));
+            for (width, height) in [(80, 24), (120, 40), (158, 42)] {
+                let buffer = render_buffer(&app, width, height);
+                assert_inside_frame(&buffer);
+                if graphics == GraphicsMode::Off || width < 120 || height < 29 {
+                    let output = rows(&buffer).join("\n");
+                    let normalized = compact(&output);
+                    for value in expected {
+                        assert!(
+                            normalized.contains(&compact(value)),
+                            "{graphics:?} {width}x{height}, missing {value:?}:\n{output}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn v3_summary_image_reuses_the_existing_summary_renderer() {
+    use rs_typing_trainer::ui::analysis_image::{bench_summary_value_height, render_bench_summary};
+    use rs_typing_trainer::ui::bench_tab_summary::{app_view, image_spec, uses_image};
+
+    let theme = Theme::from_name("default");
+    let font = resolve_big_font("biz-ud-gothic", std::path::Path::new("/unused"));
+    let cell_pixels = CellPixels::new(9, 20);
+    for lang in [Lang::Ja, Lang::En] {
+        let (_directory, config) = seed_v3(lang);
+        let app = open_bench(config, GraphicsMode::Kitty);
+        let view = app_view(&app);
+        assert!(uses_image(&app, &view, Rect::new(0, 0, 158, 42)));
+        assert!(!uses_image(&app, &view, Rect::new(0, 0, 80, 24)));
+        let spec = image_spec(&view, &theme, Size::new(158, 42));
+        assert_eq!(spec.parts.len(), 3);
+        assert_eq!(spec.axes.len(), 8);
+        assert_eq!(spec.radar.as_ref().unwrap().axes.len(), 8);
+        assert_eq!(spec.trends.len(), 5);
+        assert!(
+            spec.trends
+                .iter()
+                .all(|(_, chart)| chart.raw_values.len() == 3 && chart.values.len() == 3)
+        );
+        let image = render_bench_summary(&font, cell_pixels, &spec).unwrap();
+        assert_eq!((image.width(), image.height()), (158 * 9, 42 * 20));
+        assert!(bench_summary_value_height(&spec, cell_pixels) / image.height() as f32 >= 0.10);
+    }
+}
+
+#[test]
+fn v3_summary_reliability_stops_calling_five_runs_a_reference() {
+    use rs_typing_trainer::ui::bench_tab_summary::app_view;
+
+    for lang in [Lang::Ja, Lang::En] {
+        let (_directory, config) = seed_v3_n(lang, 4);
+        let four = app_view(&open_bench(config, GraphicsMode::Off));
+        assert!(
+            four.events.iter().any(|line| line.contains("reference") || line.contains("参考")),
+            "{four:#?}"
+        );
+
+        let (_directory, config) = seed_v3_n(lang, 5);
+        let five = app_view(&open_bench(config, GraphicsMode::Off));
+        assert!(
+            five.events.iter().all(|line| !line.contains("reference") && !line.contains("参考")),
+            "{five:#?}"
+        );
+    }
+}
+
+#[test]
+fn v3_summary_two_runs_keeps_raw_axes_and_text_trial_series() {
+    use rs_typing_trainer::ui::analysis_image::render_bench_summary;
+    use rs_typing_trainer::ui::bench_tab_summary::{app_view, image_spec};
+
+    let (_directory, config) = seed_v3_n(Lang::En, 2);
+    let mut app = open_bench(config, GraphicsMode::Off);
+    let view = app_view(&app);
+    assert_eq!(view.axes.len(), 8);
+    assert!(view.axes.iter().any(|axis| axis.value.ends_with('*')), "{view:#?}");
+    let spec = image_spec(&view, &Theme::from_name("default"), Size::new(158, 42));
+    let radar = spec.radar.as_ref().expect("v3 radar area");
+    assert!(radar.axes.iter().any(|axis| axis.label.contains('*') && axis.value.is_none()));
+    let font = resolve_big_font("biz-ud-gothic", std::path::Path::new("/unused"));
+    render_bench_summary(&font, CellPixels::new(9, 20), &spec).unwrap();
+
+    app.handle_key(key(KeyCode::Char('s')));
+    let output = text(&app, 80, 24);
+    for part in ["EW", "ES", "JW", "JS", "PW"] {
+        assert!(output.contains(part), "missing {part}:\n{output}");
+    }
+    assert!(output.contains('·') && output.contains('━'), "{output}");
 }

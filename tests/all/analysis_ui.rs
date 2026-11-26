@@ -397,6 +397,56 @@ fn analysis_bench_tab_combines_v1_and_v2_for_part_b() {
 }
 
 #[test]
+fn analysis_bench_tab_heading_names_the_series_being_shown() {
+    for (bench_id, expected) in [
+        ("bench-v1/A/01", "bench-v1"),
+        ("bench-v2/A/01", "bench-v2"),
+        ("bench-v3/EW/01", "bench-v3"),
+    ] {
+        let directory = TempDir::new().unwrap();
+        let path = directory.path().join("sessions.db");
+        save_record(&path, ModeKind::Words, Some(bench_id), 40.0, 2);
+        let mut config = Config::default();
+        config.storage.db_path = Some(path);
+        let mut app = test_app_at(config, as_of());
+        app.handle_key(key(KeyCode::Char('a')));
+        app.analysis_tab = rs_typing_trainer::app::ANALYSIS_BENCH_TAB;
+
+        let output = render(&app);
+        assert!(compact(&output).contains(expected), "{bench_id}:\n{output}");
+    }
+}
+
+#[test]
+fn analysis_bench_tab_without_v3_keeps_v2_content_below_the_v3_invitation() {
+    for (lang, invitation) in [
+        (
+            Lang::En,
+            "No bench-v3 benchmark yet. Measure it with [B] on the title screen (about 5 minutes)",
+        ),
+        (Lang::Ja, "v3 のベンチはまだありません．タイトルの [B] で測れます（約 5 分）"),
+    ] {
+        let directory = TempDir::new().unwrap();
+        let path = directory.path().join("sessions.db");
+        save_record(&path, ModeKind::Words, Some("bench-v2/A/01"), 40.0, 1);
+        save_record(&path, ModeKind::Words, Some("bench-v2/A/02"), 52.0, 2);
+        let mut config = Config::default();
+        config.general.lang = lang;
+        config.storage.db_path = Some(path);
+        let mut app = test_app_at(config, as_of());
+        app.handle_key(key(KeyCode::Char('a')));
+        app.analysis_tab = rs_typing_trainer::app::ANALYSIS_BENCH_TAB;
+
+        let output = render(&app);
+        let normalized = compact(&output);
+        assert!(normalized.contains(&compact(invitation)), "{lang:?}:\n{output}");
+        assert!(normalized.contains("bench-v2"), "{lang:?}:\n{output}");
+        assert!(normalized.contains("52.0WPM"), "{lang:?}:\n{output}");
+        assert!(normalized.contains("+12.0WPM"), "{lang:?}:\n{output}");
+    }
+}
+
+#[test]
 fn analysis_bench_tab_shows_v3_trajectories_reliability_and_previous_v2_series() {
     for (lang, parts, english, japanese, transition, no_change, previous, reference) in [
         (
@@ -468,9 +518,86 @@ fn analysis_bench_tab_shows_v3_trajectories_reliability_and_previous_v2_series()
                 normalized.contains(&compact("A: 35.0 → 42.0 WPM")),
                 "{width}x{height}, {lang:?}:\n{output}"
             );
-            assert!(!output.contains("Sustained speed"), "{width}x{height}, {lang:?}:\n{output}");
-            assert!(!output.contains("持続速度"), "{width}x{height}, {lang:?}:\n{output}");
         }
+    }
+}
+
+#[test]
+fn analysis_bench_tab_v3_wide_view_includes_group_details_grades_and_raw_axes() {
+    for (lang, expected) in [
+        (
+            Lang::En,
+            [
+                "Tempo",
+                "Accuracy",
+                "Recent-3 median",
+                "Grades (grades-v2)",
+                "English",
+                "Japanese",
+                "8 skill axes (bench-v3)",
+                "raw (fewer than 3 results)",
+            ],
+        ),
+        (
+            Lang::Ja,
+            [
+                "テンポ",
+                "正確さ",
+                "直近 3 回の中央値",
+                "段階（grades-v2）",
+                "英語",
+                "日本語",
+                "技能の 8 軸（bench-v3）",
+                "生値（結果が 3 回未満）",
+            ],
+        ),
+    ] {
+        let app = v3_bench_analysis_app(lang);
+        let output = render_size(&app, 160, 50);
+        let normalized = compact(&output);
+        for text in expected {
+            assert!(normalized.contains(&compact(text)), "{lang:?}, missing {text:?}:\n{output}");
+        }
+    }
+}
+
+#[test]
+fn analysis_bench_tab_and_summary_share_the_same_v3_grades() {
+    use rs_typing_trainer::ui::bench_tab_summary::app_view;
+
+    for (lang, expected) in [
+        (Lang::En, "Grades (grades-v2): English B (n=2) · Japanese B (n=2)"),
+        (Lang::Ja, "段階（grades-v2）: 英語 B (n=2) · 日本語 B (n=2)"),
+    ] {
+        let app = v3_bench_analysis_app(lang);
+        let tab = compact(&render_size(&app, 160, 50));
+        let summary = compact(&app_view(&app).events.join("\n"));
+
+        assert!(tab.contains(&compact(expected)), "tab, {lang:?}, missing {expected:?}:\n{tab}");
+        assert!(
+            summary.contains(&compact(expected)),
+            "summary, {lang:?}, missing {expected:?}:\n{summary}"
+        );
+    }
+}
+
+#[test]
+fn analysis_bench_tab_v3_axes_switch_to_percentiles_at_three_complete_runs() {
+    for lang in [Lang::En, Lang::Ja] {
+        let mut app = v3_bench_analysis_app(lang);
+        for (id, part) in (100_i64..).zip(["EW", "ES", "JW", "JS", "PW"]) {
+            app.analysis_records.push(v3_split_record(id, 12, part, 3, 90.0, 45.0));
+        }
+
+        let output = render_size(&app, 160, 50);
+        let normalized = compact(&output);
+        let percentile = match lang {
+            Lang::En => "percentile",
+            Lang::Ja => "百分位",
+        };
+        assert!(normalized.contains(percentile), "{lang:?}:\n{output}");
+        assert!(!normalized.contains(&compact("raw (fewer than 3 results)")), "{lang:?}:\n{output}");
+        assert!(!normalized.contains(&compact("生値（結果が 3 回未満）")), "{lang:?}:\n{output}");
     }
 }
 

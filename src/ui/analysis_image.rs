@@ -3779,6 +3779,10 @@ pub struct BenchSummarySpec {
     /// One or two lines; the first is highlighted when `highlight` is set.
     pub events: Vec<String>,
     pub highlight: bool,
+    /// bench-v3 uses the eight axes as a radar instead of the legacy list.
+    pub radar: Option<RadarChartSpec>,
+    /// Part label and trial-order chart (raw dots plus rolling-three line).
+    pub trends: Vec<(String, TrialChartSpec)>,
     pub cells: Size,
     pub colors: crate::ui::result_image::ResultImageColors,
 }
@@ -3810,7 +3814,11 @@ fn fitted_text_size(text: &str, size: f32, room: f32, cell_pixels: CellPixels) -
 
 /// Pixel height of the parts' net WPM glyphs (see [`render_bench_summary`]).
 pub fn bench_summary_value_height(spec: &BenchSummarySpec, cell_pixels: CellPixels) -> f32 {
-    bench_summary_layout(spec, cell_pixels).value_size
+    if spec.radar.is_some() {
+        f32::from(spec.cells.height) * f32::from(cell_pixels.height) * 0.12
+    } else {
+        bench_summary_layout(spec, cell_pixels).value_size
+    }
 }
 
 struct BenchSummaryLayout {
@@ -3862,7 +3870,224 @@ fn bench_summary_layout(spec: &BenchSummarySpec, cell_pixels: CellPixels) -> Ben
     }
 }
 
+/// bench-v3 keeps the established Summary frame and cards, then uses the
+/// existing radar and trial-order renderers in the lower half.
+fn render_bench_v3_summary(font: &ResolvedBigFont, cell_pixels: CellPixels, spec: &BenchSummarySpec) -> Result<RgbaImage, String> {
+    let width = u32::from(spec.cells.width) * u32::from(cell_pixels.width);
+    let height = u32::from(spec.cells.height) * u32::from(cell_pixels.height);
+    let mut pixmap = Pixmap::new(width.max(1), height.max(1)).ok_or_else(|| "summary dimensions are too large".to_owned())?;
+    let (w, h) = (width as f32, height as f32);
+    let colors = spec.colors;
+    let foreground = color_rgb(colors.foreground, [230, 230, 230]);
+    let muted = color_rgb(colors.muted, GRID_COLOR);
+    let accent = color_rgb(colors.accent, [41, 184, 219]);
+    let mut glyphs = HashMap::new();
+
+    let heading_band = draw_summary_heading(
+        &mut pixmap,
+        font,
+        &spec.heading,
+        &spec.subheading,
+        (w, h),
+        accent,
+        cell_pixels,
+        &mut glyphs,
+    )?;
+    let decorated = draw_summary_frame(&mut pixmap, (w, h), heading_band, colors);
+    let frame = decorated.bounds;
+
+    // The same three-card vocabulary as the text fallback: adjusted speed,
+    // tempo/accuracy, MDC-aware previous change and personal best.
+    let columns = spec.parts.len().max(1);
+    let column_width = (frame[2] - frame[0]) / columns as f32;
+    let room = column_width * 0.86;
+    let label_size = (h * 0.032).max(8.0);
+    let value_size = bench_summary_value_height(spec, cell_pixels);
+    let line_size = (h * 0.022).max(8.0);
+    let label_y = frame[1] + h * 0.018;
+    let value_y = label_y + label_size * 1.25;
+    let detail_y = value_y + value_size + h * 0.006;
+    let line_height = line_size * 1.18;
+    for (index, part) in spec.parts.iter().enumerate() {
+        let center = frame[0] + column_width * (index as f32 + 0.5);
+        draw_small_text(
+            &mut pixmap,
+            font,
+            &part.label,
+            center,
+            label_y,
+            fitted_text_size(&part.label, label_size, room, cell_pixels) as u32,
+            muted,
+            true,
+            TextAlign::Center,
+            cell_pixels,
+            &mut glyphs,
+        )?;
+        draw_summary_value(
+            &mut pixmap,
+            font,
+            &part.value,
+            &spec.unit,
+            center,
+            value_y,
+            value_size,
+            (accent, foreground),
+            cell_pixels,
+            &mut glyphs,
+        )?;
+        draw_small_text(
+            &mut pixmap,
+            font,
+            &part.accuracy,
+            center,
+            detail_y,
+            fitted_text_size(&part.accuracy, line_size, room, cell_pixels) as u32,
+            foreground,
+            false,
+            TextAlign::Center,
+            cell_pixels,
+            &mut glyphs,
+        )?;
+        for (row, figure) in [&part.previous, &part.recent].into_iter().enumerate() {
+            let size = fitted_text_size(&figure.delta_text, line_size, room - line_size, cell_pixels);
+            draw_delta_centered(
+                &mut pixmap,
+                font,
+                figure,
+                center,
+                detail_y + line_height * (row as f32 + 1.0),
+                size,
+                colors,
+                cell_pixels,
+                &mut glyphs,
+            )?;
+        }
+        if index > 0 {
+            let x = frame[0] + column_width * index as f32;
+            stroke_line(&mut pixmap, (x, label_y), (x, detail_y + line_height * 3.0), GRID_COLOR, 80, 1.0, None);
+        }
+    }
+
+    // Five compact support lines fit in the bottom band without hiding a
+    // language's reliability estimate on wide screenshot-sized terminals.
+    let event_size = (h * 0.021).max(8.0);
+    let event_pitch = event_size * 1.25;
+    let event_height = event_pitch * spec.events.len() as f32 + event_size * 0.6;
+    let event_bottom = frame[3] - decorated.inset * 1.5;
+    let event_top = event_bottom - event_height;
+    let event_left = frame[0] + decorated.cut * 0.8;
+    let event_right = frame[2] - decorated.cut * 0.8;
+    fill_round_rect(
+        &mut pixmap,
+        [event_left, event_top, event_right, event_bottom],
+        event_size * 0.3,
+        [6, 8, 12],
+        245,
+    );
+    stroke_line(&mut pixmap, (event_left, event_top), (event_right, event_top), accent, 200, 1.5, None);
+    for (index, event) in spec.events.iter().enumerate() {
+        draw_small_text(
+            &mut pixmap,
+            font,
+            event,
+            w / 2.0,
+            event_top + event_size * 0.3 + event_pitch * index as f32,
+            fitted_text_size(event, event_size, (event_right - event_left) * 0.94, cell_pixels) as u32,
+            foreground,
+            index == 0,
+            TextAlign::Center,
+            cell_pixels,
+            &mut glyphs,
+        )?;
+    }
+
+    let cards_bottom = detail_y + line_height * 3.0;
+    let figures_top = cards_bottom + h * 0.015;
+    let figures_bottom = event_top - h * 0.012;
+    let radar_width = (frame[2] - frame[0]) * 0.43;
+    let divider = frame[0] + radar_width;
+    draw_small_text(
+        &mut pixmap,
+        font,
+        &spec.axes_caption,
+        (frame[0] + divider) / 2.0,
+        figures_top,
+        fitted_text_size(&spec.axes_caption, line_size, radar_width * 0.9, cell_pixels) as u32,
+        muted,
+        false,
+        TextAlign::Center,
+        cell_pixels,
+        &mut glyphs,
+    )?;
+    let trends_caption = if spec.subheading.contains("フォーム") {
+        "パートの推移（点: 各回，本線: 直近 3 回の中央値）"
+    } else {
+        "Part trends (dots: attempts; line: recent-3 median)"
+    };
+    draw_small_text(
+        &mut pixmap,
+        font,
+        trends_caption,
+        (divider + frame[2]) / 2.0,
+        figures_top,
+        fitted_text_size(trends_caption, line_size, (frame[2] - divider) * 0.9, cell_pixels) as u32,
+        muted,
+        false,
+        TextAlign::Center,
+        cell_pixels,
+        &mut glyphs,
+    )?;
+
+    let mut image = rgba_image(pixmap)?;
+    let chart_top = figures_top + line_size * 1.3;
+    if let Some(radar) = &spec.radar {
+        let mut radar = radar.clone();
+        radar.cells = Size::new(
+            (radar_width / f32::from(cell_pixels.width)).floor().max(1.0) as u16,
+            ((figures_bottom - chart_top) / f32::from(cell_pixels.height)).floor().max(1.0) as u16,
+        );
+        let rendered = render_radar_chart(font, cell_pixels, &radar)?;
+        image::imageops::overlay(&mut image, &rendered, frame[0].round() as i64, chart_top.round() as i64);
+    }
+    if !spec.trends.is_empty() {
+        let trend_left = divider + f32::from(cell_pixels.width);
+        let label_width = f32::from(cell_pixels.width) * 4.0;
+        let row_height = ((figures_bottom - chart_top) / spec.trends.len() as f32).max(f32::from(cell_pixels.height));
+        for (index, (label, trend)) in spec.trends.iter().enumerate() {
+            let y = chart_top + row_height * index as f32;
+            let mut label_pixmap =
+                Pixmap::new(label_width as u32, row_height.max(1.0) as u32).ok_or_else(|| "trend label dimensions are too large".to_owned())?;
+            let mut label_glyphs = HashMap::new();
+            draw_small_text(
+                &mut label_pixmap,
+                font,
+                label,
+                label_width / 2.0,
+                (row_height - line_size) / 2.0,
+                line_size as u32,
+                muted,
+                true,
+                TextAlign::Center,
+                cell_pixels,
+                &mut label_glyphs,
+            )?;
+            image::imageops::overlay(&mut image, &rgba_image(label_pixmap)?, trend_left.round() as i64, y.round() as i64);
+            let mut trend = trend.clone();
+            trend.cells = Size::new(
+                ((frame[2] - trend_left - label_width) / f32::from(cell_pixels.width)).floor().max(1.0) as u16,
+                (row_height / f32::from(cell_pixels.height)).floor().max(1.0) as u16,
+            );
+            let rendered = render_trial_chart(cell_pixels, &trend)?;
+            image::imageops::overlay(&mut image, &rendered, (trend_left + label_width).round() as i64, y.round() as i64);
+        }
+    }
+    Ok(image)
+}
+
 pub fn render_bench_summary(font: &ResolvedBigFont, cell_pixels: CellPixels, spec: &BenchSummarySpec) -> Result<RgbaImage, String> {
+    if spec.radar.is_some() {
+        return render_bench_v3_summary(font, cell_pixels, spec);
+    }
     let width = u32::from(spec.cells.width) * u32::from(cell_pixels.width);
     let height = u32::from(spec.cells.height) * u32::from(cell_pixels.height);
     let mut pixmap = Pixmap::new(width.max(1), height.max(1)).ok_or_else(|| "summary dimensions are too large".to_owned())?;
