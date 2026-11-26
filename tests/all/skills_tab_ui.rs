@@ -174,14 +174,15 @@ fn open_skills(app: &mut rs_typing_trainer::app::App) {
     app.handle_key(key(KeyCode::Char('a')));
     assert_eq!(app.screen, Screen::Analysis);
     // The screen opens on the coach tab; ← reaches «today» (the first tab)
-    // and wraps from there to the last tab, the skills tab.
+    // and wraps from there to Growth, then Skills.
+    app.handle_key(key(KeyCode::Left));
     app.handle_key(key(KeyCode::Left));
     app.handle_key(key(KeyCode::Left));
     assert_eq!(app.analysis_tab, ANALYSIS_SKILLS_TAB);
 }
 
 #[test]
-fn skills_tab_is_the_last_tab_and_tab_cycles_through_it() {
+fn skills_tab_precedes_growth_and_tab_cycles_through_it() {
     let (_directory, mut app) = seeded(Lang::Ja, GraphicsMode::Off);
     app.handle_key(key(KeyCode::Char('a')));
     for _ in rs_typing_trainer::app::ANALYSIS_COACH_TAB..ANALYSIS_SKILLS_TAB {
@@ -234,10 +235,10 @@ fn l_switches_the_series_language() {
     assert!(japanese.contains("[L] language: Japanese"), "{japanese}");
     app.handle_key(key(KeyCode::Char('L')));
     assert!(text(&render_buffer(&app, 80, 24)).contains("[L] language: English"));
-    // `L` on another tab keeps its meaning there (nothing on the «today» tab,
-    // which follows the skills tab when Tab wraps).
+    // `L` on another tab keeps its meaning there (nothing on Growth, which
+    // follows Skills).
     app.handle_key(key(KeyCode::Tab));
-    assert_eq!(app.analysis_tab, rs_typing_trainer::app::ANALYSIS_TODAY_TAB);
+    assert_eq!(app.analysis_tab, rs_typing_trainer::app::ANALYSIS_GROWTH_TAB);
     app.handle_key(key(KeyCode::Char('l')));
     assert_eq!(app.screen, Screen::Analysis);
 }

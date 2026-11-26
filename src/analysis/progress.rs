@@ -61,11 +61,21 @@ pub struct DailyPoint {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DailyTrend {
     pub target: String,
+    #[serde(default)]
+    pub source: DailyTrendSource,
     pub speed: Vec<DailyPoint>,
     pub accuracy: Vec<DailyPoint>,
     pub speed_slope_per_week: Option<f64>,
     pub accuracy_slope_per_week: Option<f64>,
     pub retest_correlation: Option<f64>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DailyTrendSource {
+    Bench,
+    #[default]
+    CorrectedWpm,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -504,6 +514,11 @@ fn daily_trend(target: &str, records: &[SessionRecord], forms: &[SessionForm], a
     let retest_correlation = (benches.len() >= 6).then(|| serial_correlation(&benches)).flatten();
     Some(DailyTrend {
         target: target.to_owned(),
+        source: if bench_series.is_some() {
+            DailyTrendSource::Bench
+        } else {
+            DailyTrendSource::CorrectedWpm
+        },
         speed,
         accuracy,
         speed_slope_per_week,

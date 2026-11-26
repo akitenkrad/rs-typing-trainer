@@ -34,7 +34,8 @@ use crate::practice::adaptive::{AdaptiveHistory, AdaptiveOptions, TransitionCost
 use crate::practice::deck::{DeckOptions, KeySelection, WeeklyTheme, build_daily_deck, weekly_theme};
 use crate::practice::ghost::{GhostCondition, GhostTrack, select_ghost};
 use crate::practice::reading_report::{
-    ReadingReportEntry, ReadingReportKind, append_reading_report, load_reading_exclusions, load_reading_reports, remove_reading_report,
+    ReadingCorrectionValidationError, ReadingReportEntry, ReadingReportKind, append_reading_report, apply_reading_reports_to_catalog,
+    load_reading_reports, remove_reading_report_and_correction, save_reading_correction, validate_reading_correction,
 };
 use crate::practice::recovery::RecoveryMetrics;
 use crate::practice::review::update_review;
@@ -54,7 +55,7 @@ use unicode_segmentation::UnicodeSegmentation;
 pub const WORD_ENTER_DURATION: Duration = Duration::from_millis(200);
 pub const WORD_EXIT_DURATION: Duration = Duration::from_millis(200);
 /// Tabs of the analysis screen, in display order: «today» first, the
-/// «skills» tab (§8.4) last. The screen opens on the coach tab.
+/// «growth» tab last. The screen opens on the coach tab.
 pub const ANALYSIS_TODAY_TAB: usize = 0;
 pub const ANALYSIS_COACH_TAB: usize = 1;
 pub const ANALYSIS_TREND_TAB: usize = 2;
@@ -63,7 +64,8 @@ pub const ANALYSIS_TRANSITIONS_TAB: usize = 4;
 pub const ANALYSIS_FINGERS_TAB: usize = 5;
 pub const ANALYSIS_BENCH_TAB: usize = 6;
 pub const ANALYSIS_SKILLS_TAB: usize = 7;
-pub const ANALYSIS_TAB_COUNT: usize = 8;
+pub const ANALYSIS_GROWTH_TAB: usize = 8;
+pub const ANALYSIS_TAB_COUNT: usize = 9;
 
 pub const COUNTDOWN_DURATION: Duration = Duration::from_millis(3000);
 const ABORT_CONFIRMATION_DURATION: Duration = Duration::from_secs(2);
@@ -261,6 +263,9 @@ pub struct App {
     pub reading_reports_selected: usize,
     pub reading_reports_error: Option<String>,
     pub reading_reports_confirming: bool,
+    pub reading_reports_editing: bool,
+    pub reading_reports_input: String,
+    pub reading_reports_input_error: Option<String>,
     pub reading_reports_notice: Option<String>,
     pub history_detail: Option<HistoryDetailData>,
     pub history_replay: Option<Box<crate::replay::Replay>>,
@@ -325,6 +330,11 @@ pub struct App {
     /// The benchmark tab shows its Summary (MYTASK-3644), toggled with `S`;
     /// moving to another tab turns it off.
     pub analysis_bench_summary: bool,
+    /// All-time growth data, cached when the analysis screen opens. Period
+    /// and mode filter changes deliberately leave this value alone.
+    pub analysis_growth: crate::analysis::growth::GrowthReport,
+    pub analysis_growth_scroll: u16,
+    analysis_growth_scroll_max: Cell<u16>,
     pub adaptive_focus: Vec<TransitionCost>,
     adaptive_candidates: Vec<TransitionCost>,
     pub adaptive_result: Vec<AdaptiveResultRow>,
@@ -499,6 +509,9 @@ impl App {
             reading_reports_selected: 0,
             reading_reports_error: None,
             reading_reports_confirming: false,
+            reading_reports_editing: false,
+            reading_reports_input: String::new(),
+            reading_reports_input_error: None,
             reading_reports_notice: None,
             history_detail: None,
             history_replay: None,
@@ -551,6 +564,9 @@ impl App {
             analysis_today_scroll: 0,
             analysis_today_summary: false,
             analysis_bench_summary: false,
+            analysis_growth: Default::default(),
+            analysis_growth_scroll: 0,
+            analysis_growth_scroll_max: Cell::new(0),
             adaptive_focus: Vec::new(),
             adaptive_candidates: Vec::new(),
             adaptive_result: Vec::new(),
@@ -1602,6 +1618,18 @@ impl App {
             KeyCode::Down | KeyCode::Char('j') if self.analysis_tab == ANALYSIS_TODAY_TAB => {
                 self.analysis_today_scroll = self.analysis_today_scroll.saturating_add(1).min(200);
             }
+            KeyCode::Up | KeyCode::Char('k') if self.analysis_tab == ANALYSIS_GROWTH_TAB => {
+                self.analysis_growth_scroll = self.analysis_growth_scroll.saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') if self.analysis_tab == ANALYSIS_GROWTH_TAB => {
+                self.analysis_growth_scroll = self.analysis_growth_scroll.saturating_add(1).min(self.analysis_growth_scroll_max.get());
+            }
+            KeyCode::PageUp if self.analysis_tab == ANALYSIS_GROWTH_TAB => {
+                self.analysis_growth_scroll = self.analysis_growth_scroll.saturating_sub(10);
+            }
+            KeyCode::PageDown if self.analysis_tab == ANALYSIS_GROWTH_TAB => {
+                self.analysis_growth_scroll = self.analysis_growth_scroll.saturating_add(10).min(self.analysis_growth_scroll_max.get());
+            }
             KeyCode::Up | KeyCode::Char('k') if self.analysis_tab == ANALYSIS_TRANSITIONS_TAB => {
                 self.analysis_transition_selected = self.analysis_transition_selected.saturating_sub(1);
             }
@@ -1675,8 +1703,45 @@ impl App {
         self.analysis_goal_selected = 0;
         self.analysis_summary_scroll = 0;
         self.analysis_skills_lang = None;
+        self.analysis_growth_scroll = 0;
         self.reload_analysis();
+        self.reload_growth();
         self.screen = Screen::Analysis;
+    }
+
+    fn reload_growth(&mut self) {
+        let records = db::load_records_filtered(&self.db_path(), None, None).unwrap_or_default();
+        let prescriptions = db::load_prescriptions(&self.db_path()).unwrap_or_default();
+        let selected_goal = db::load_selected_goal(&self.db_path()).unwrap_or_default();
+        let progress = crate::analysis::coach::build(
+            &records,
+            &self.config,
+            &self.home_dir,
+            &prescriptions,
+            selected_goal,
+            self.analysis_as_of,
+            self.config.general.lang,
+        )
+        .map(|report| report.progress)
+        .unwrap_or_default();
+        self.analysis_growth = crate::analysis::growth::build_growth(&records, &progress, self.analysis_as_of);
+        let snapshots = db::load_skill_snapshots(&self.db_path()).unwrap_or_default();
+        self.analysis_growth.promotions = crate::analysis::growth::skill_promotions(&snapshots);
+        let summaries = db::load_all_menu_runs(&self.db_path())
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|run| {
+                crate::practice::menu::progress::run_steps_summary(&self.db_path(), &self.config.keyboard.layout, run.id, self.config.general.lang)
+                    .ok()
+                    .flatten()
+            })
+            .collect::<Vec<_>>();
+        self.analysis_growth.graduations = crate::analysis::growth::menu_graduations(&summaries);
+        self.analysis_growth_scroll = 0;
+    }
+
+    pub(crate) fn set_analysis_growth_scroll_max(&self, maximum: u16) {
+        self.analysis_growth_scroll_max.set(maximum);
     }
 
     fn reload_analysis(&mut self) {
@@ -2351,6 +2416,9 @@ impl App {
     fn open_reading_reports(&mut self) {
         self.reading_reports_selected = 0;
         self.reading_reports_confirming = false;
+        self.reading_reports_editing = false;
+        self.reading_reports_input.clear();
+        self.reading_reports_input_error = None;
         self.reading_reports_notice = None;
         self.reload_reading_reports();
         self.screen = Screen::ReadingReports;
@@ -2377,6 +2445,10 @@ impl App {
     }
 
     fn handle_reading_reports_key(&mut self, key: KeyEvent, action: InputAction) {
+        if self.reading_reports_editing {
+            self.handle_reading_correction_key(key);
+            return;
+        }
         if self.reading_reports_confirming {
             match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => self.remove_selected_reading_report(),
@@ -2407,11 +2479,90 @@ impl App {
             KeyCode::Char('d') | KeyCode::Char('D') | KeyCode::Delete if !self.reading_reports.is_empty() => {
                 self.reading_reports_confirming = true;
             }
+            KeyCode::Char('e') | KeyCode::Char('E') | KeyCode::Enter if !self.reading_reports.is_empty() => {
+                self.begin_reading_correction();
+            }
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => self.screen = Screen::History,
             _ => {}
         }
         if matches!(action, InputAction::Abort) && !matches!(key.code, KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q')) {
             self.screen = Screen::History;
+        }
+    }
+
+    fn begin_reading_correction(&mut self) {
+        let Some(report) = self.reading_reports.get(self.reading_reports_selected) else {
+            return;
+        };
+        self.reading_reports_input = report.correct_reading.as_deref().unwrap_or(&report.reading).to_owned();
+        self.reading_reports_input_error = None;
+        self.reading_reports_editing = true;
+    }
+
+    fn handle_reading_correction_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.reading_reports_editing = false;
+                self.reading_reports_input.clear();
+                self.reading_reports_input_error = None;
+            }
+            KeyCode::Backspace => {
+                self.reading_reports_input.pop();
+                self.reading_reports_input_error = None;
+            }
+            KeyCode::Enter => self.save_selected_reading_correction(),
+            KeyCode::Char(character) => {
+                self.reading_reports_input.push(character);
+                self.reading_reports_input_error = None;
+            }
+            _ => {}
+        }
+    }
+
+    fn save_selected_reading_correction(&mut self) {
+        let Some(report) = self.reading_reports.get(self.reading_reports_selected).cloned() else {
+            return;
+        };
+        let current = report.correct_reading.as_deref().unwrap_or(&report.reading);
+        if let Err(error) = validate_reading_correction(&report.reading, current, &self.reading_reports_input) {
+            self.reading_reports_input_error = Some(match (self.config.general.lang, error) {
+                (Lang::Ja, ReadingCorrectionValidationError::Empty) => "正しい読みを入力してください".to_owned(),
+                (Lang::En, ReadingCorrectionValidationError::Empty) => "Enter the correct reading".to_owned(),
+                (Lang::Ja, ReadingCorrectionValidationError::Unchanged) => "今の読みと同じです".to_owned(),
+                (Lang::En, ReadingCorrectionValidationError::Unchanged) => "The reading has not changed".to_owned(),
+                (Lang::Ja, ReadingCorrectionValidationError::NonHiragana) => "ひらがなで入力してください".to_owned(),
+                (Lang::En, ReadingCorrectionValidationError::NonHiragana) => "Enter hiragana".to_owned(),
+                (Lang::Ja, ReadingCorrectionValidationError::Untypable(characters)) => {
+                    format!("打てない文字が含まれています: {characters}")
+                }
+                (Lang::En, ReadingCorrectionValidationError::Untypable(characters)) => {
+                    format!("Contains characters that cannot be typed: {characters}")
+                }
+            });
+            return;
+        }
+        let correction = self.reading_reports_input.clone();
+        let db_path = self.db_path();
+        let directory = db_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+        match save_reading_correction(directory, chrono::Utc::now(), report.kind, &report.text, &report.reading, &correction) {
+            Ok(()) => {
+                self.reading_reports_editing = false;
+                self.reading_reports_input.clear();
+                self.reading_reports_input_error = None;
+                self.reload_reading_reports();
+                if self.reading_reports_error.is_none() {
+                    self.reading_reports_notice = Some(match self.config.general.lang {
+                        Lang::En => format!("Saved. It will use the reading \"{correction}\" the next time you start practicing."),
+                        Lang::Ja => format!("保存しました．次に練習を始めたときから «{correction}» で出題されます．"),
+                    });
+                }
+            }
+            Err(error) => {
+                self.reading_reports_input_error = Some(match self.config.general.lang {
+                    Lang::En => format!("Could not save the correct reading: {error}"),
+                    Lang::Ja => format!("正しい読みを保存できませんでした: {error}"),
+                });
+            }
         }
     }
 
@@ -2422,7 +2573,7 @@ impl App {
         };
         let db_path = self.db_path();
         let directory = db_path.parent().unwrap_or_else(|| std::path::Path::new("."));
-        match remove_reading_report(directory, report.kind, &report.text, &report.reading) {
+        match remove_reading_report_and_correction(directory, report.kind, &report.text, &report.reading) {
             Ok(_) => {
                 self.reload_reading_reports();
                 if self.reading_reports_error.is_none() {
@@ -3028,12 +3179,8 @@ impl App {
         // every unit (MYTASK-3638, MYTASK-3640: a Japanese word cell runs
         // `romaji`); elsewhere only the modes that always offered it.
         self.prepare_pacer_target(&records, is_bench);
-        if !is_bench
-            && let Some(directory) = db_path.parent()
-            && let Ok(exclusions) = load_reading_exclusions(directory)
-        {
-            let excluded = exclusions.into_iter().map(|(_, text, reading)| (text, reading)).collect::<HashSet<_>>();
-            catalog.exclude_readings(&excluded);
+        if let Some(directory) = db_path.parent() {
+            let _ = apply_reading_reports_to_catalog(&mut catalog, directory, is_bench);
         }
         if !is_bench && let Some(kind) = daily_data_kind(&self.config) {
             let kind_name = daily_kind_name(kind);

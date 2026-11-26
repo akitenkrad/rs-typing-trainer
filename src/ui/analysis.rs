@@ -60,12 +60,21 @@ pub fn render(frame: &mut Frame, app: &App) {
         crate::app::ANALYSIS_TRANSITIONS_TAB => render_transitions(frame, app, &theme, chunks[1]),
         crate::app::ANALYSIS_FINGERS_TAB => render_fingers(frame, app, chunks[1]),
         crate::app::ANALYSIS_BENCH_TAB => render_bench(frame, app, chunks[1]),
-        _ => render_skills(frame, app, &theme, chunks[1]),
+        crate::app::ANALYSIS_SKILLS_TAB => render_skills(frame, app, &theme, chunks[1]),
+        _ => render_growth(frame, app, chunks[1]),
     }
     if app.analysis_tab == crate::app::ANALYSIS_TODAY_TAB {
         // The «today» tab reads today's records directly; the period and mode
         // filters do not apply, so they are not shown.
         let hint = crate::ui::today::hint(lang).map(Line::from).to_vec();
+        frame.render_widget(Paragraph::new(hint).alignment(Alignment::Center), chunks[2]);
+        return;
+    }
+    if app.analysis_tab == crate::app::ANALYSIS_GROWTH_TAB {
+        let hint = match lang {
+            Lang::En => "[↑/↓ PgUp/PgDn] Scroll   Compares all time   [Esc] Back",
+            Lang::Ja => "[↑/↓ PgUp/PgDn] スクロール   全期間で比べます   [Esc] 戻る",
+        };
         frame.render_widget(Paragraph::new(hint).alignment(Alignment::Center), chunks[2]);
         return;
     }
@@ -113,12 +122,30 @@ fn render_tabs(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         },
         Msg::AnalysisTrend.text(lang),
         Msg::AnalysisKeyboard.text(lang),
-        Msg::AnalysisTransitions.text(lang),
-        Msg::AnalysisFingersHands.text(lang),
+        if area.width < 90 {
+            match lang {
+                Lang::En => "Trans.",
+                Lang::Ja => "遷移",
+            }
+        } else {
+            Msg::AnalysisTransitions.text(lang)
+        },
+        if area.width < 90 {
+            match lang {
+                Lang::En => "Fingers",
+                Lang::Ja => "指・手",
+            }
+        } else {
+            Msg::AnalysisFingersHands.text(lang)
+        },
         Msg::AnalysisBench.text(lang),
         match lang {
             Lang::En => "Skills",
             Lang::Ja => "スキル",
+        },
+        match lang {
+            Lang::En => "Growth",
+            Lang::Ja => "成長",
         },
     ];
     let spans = labels
@@ -140,6 +167,428 @@ fn render_tabs(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         })
         .collect::<Vec<_>>();
     frame.render_widget(Paragraph::new(Line::from(spans)).alignment(Alignment::Center), area);
+}
+
+fn render_growth(frame: &mut Frame, app: &App, area: Rect) {
+    use crate::analysis::growth::{comparison_guidance, format_duration, headline};
+    use crate::analysis::progress::DailyTrendSource;
+
+    let lang = app.config.general.lang;
+    let width = usize::from(area.width).max(1);
+    let image_enabled = app.graphics.mode != GraphicsMode::Off && app.graphics.cell_pixels.is_some();
+    let mut lines = vec![headline(&app.analysis_growth, lang).text, String::new()];
+    for (growth_index, growth) in app.analysis_growth.languages.iter().enumerate() {
+        let language = language_label(&growth.language, lang);
+        let source = match (growth.source, lang) {
+            (DailyTrendSource::Bench, Lang::En) => "benchmark",
+            (DailyTrendSource::Bench, Lang::Ja) => "ベンチ",
+            (DailyTrendSource::CorrectedWpm, Lang::En) => "adjusted WPM",
+            (DailyTrendSource::CorrectedWpm, Lang::Ja) => "補正 WPM",
+        };
+        lines.push(format!("■ {language}"));
+        lines.push(match lang {
+            Lang::En => format!("  Since you started (daily speed: {source})"),
+            Lang::Ja => format!("  はじめの頃と今（日ごとの速さ: {source}）"),
+        });
+        if growth.recorded_days < 7 {
+            lines.push(format!("    {}", comparison_guidance(growth.source, growth.recorded_days, lang, true)));
+        } else {
+            lines.push(period_line(growth.first.as_ref(), true, lang));
+            lines.push(period_line(growth.recent.as_ref(), false, lang));
+            if let Some(change) = growth.change {
+                let speed = format_growth_delta(change.speed, " WPM");
+                let accuracy = change
+                    .accuracy_points
+                    .map_or(String::new(), |value| format!("   {}", format_growth_delta(value, "pt")));
+                lines.push(match lang {
+                    Lang::En => format!("    Change        {speed} ({:+.0}%){accuracy}", change.speed_percent.unwrap_or_default(),),
+                    Lang::Ja => format!("    変化          {speed}（{:+.0}%）{accuracy}", change.speed_percent.unwrap_or_default(),),
+                });
+            }
+        }
+        lines.push(String::new());
+        lines.push(match lang {
+            Lang::En => "  One and three months ago".to_owned(),
+            Lang::Ja => "  1 か月前・3 か月前の自分".to_owned(),
+        });
+        lines.push(anchor_line(growth.month_ago.as_ref(), 30, growth.recent.as_ref(), lang));
+        lines.push(anchor_line(growth.quarter_ago.as_ref(), 90, growth.recent.as_ref(), lang));
+        lines.push(String::new());
+        lines.push(match lang {
+            Lang::En => "  Benchmarks (first → latest, personal best)".to_owned(),
+            Lang::Ja => "  ベンチマーク（初回 → 最新，自己ベスト）".to_owned(),
+        });
+        if growth.benches.is_empty() {
+            lines.push(format!("    {}", if lang == Lang::Ja { "記録なし" } else { "no records" }));
+        } else {
+            for bench in &growth.benches {
+                let delta = bench.latest.wpm - bench.first.wpm;
+                lines.push(format!(
+                    "    {}   {:.1} → {:.1} WPM   {}   {} {:.1} ({})",
+                    bench.part.as_str(),
+                    bench.first.wpm,
+                    bench.latest.wpm,
+                    format_growth_delta(delta, ""),
+                    if lang == Lang::Ja { "ベスト" } else { "best" },
+                    bench.best.wpm,
+                    bench.best.date.format("%m/%d")
+                ));
+            }
+        }
+        lines.push(String::new());
+        let (chart_points, granularity) = growth_chart_points(&growth.points);
+        lines.push(match (lang, granularity) {
+            (Lang::En, GrowthChartGranularity::Weekly) => "  Speed over time (all time, weekly medians)".to_owned(),
+            (Lang::Ja, GrowthChartGranularity::Weekly) => "  速さの推移（全期間，週ごとの中央値）".to_owned(),
+            (Lang::En, GrowthChartGranularity::Daily) => "  Speed over time (all time, daily values)".to_owned(),
+            (Lang::Ja, GrowthChartGranularity::Daily) => "  速さの推移（全期間，日ごとの値）".to_owned(),
+        });
+        if chart_points.len() >= 2 {
+            lines.push(growth_endpoint_line(&chart_points, lang));
+            lines.push(format!("__GROWTH_CHART_{growth_index}__"));
+        } else {
+            lines.push(match lang {
+                Lang::En => format!(
+                    "    The chart will be available after 2 days of records ({} day{} so far)",
+                    chart_points.len(),
+                    if chart_points.len() == 1 { "" } else { "s" }
+                ),
+                Lang::Ja => format!("    記録が 2 日分たまると図を描けます（今 {} 日分）", chart_points.len()),
+            });
+        }
+        lines.push(String::new());
+    }
+    let totals = app.analysis_growth.accumulation;
+    lines.push(match lang {
+        Lang::En => "■ Accumulation".to_owned(),
+        Lang::Ja => "■ 積み重ね".to_owned(),
+    });
+    lines.push(match lang {
+        Lang::En => format!(
+            "  Practice time   {} (this month {})",
+            format_duration(totals.duration_seconds, lang),
+            format_duration(totals.month_duration_seconds, lang)
+        ),
+        Lang::Ja => format!(
+            "  練習時間   {}（今月 {}）",
+            format_duration(totals.duration_seconds, lang),
+            format_duration(totals.month_duration_seconds, lang)
+        ),
+    });
+    lines.push(match lang {
+        Lang::En => format!(
+            "  Practice days {}   current streak {}   longest streak {}",
+            crate::ui::today::grouped(totals.practice_days),
+            crate::ui::today::grouped(totals.current_streak),
+            crate::ui::today::grouped(totals.longest_streak)
+        ),
+        Lang::Ja => format!(
+            "  練習した日 {} 日   いまの連続 {} 日   最長の連続 {} 日",
+            crate::ui::today::grouped(totals.practice_days),
+            crate::ui::today::grouped(totals.current_streak),
+            crate::ui::today::grouped(totals.longest_streak)
+        ),
+    });
+    lines.push(match lang {
+        Lang::En => format!("  Keystrokes   {}", crate::ui::today::grouped(totals.keystrokes)),
+        Lang::Ja => format!("  打鍵数     {}", crate::ui::today::grouped(totals.keystrokes)),
+    });
+    if !app.analysis_growth.personal_bests.is_empty() {
+        let values = app
+            .analysis_growth
+            .personal_bests
+            .iter()
+            .map(|best| {
+                format!(
+                    "{} {} {} {:.1} WPM",
+                    best.date.format("%m/%d"),
+                    language_label(&best.language, lang),
+                    best.part.as_str(),
+                    best.wpm
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("，");
+        let label = match lang {
+            Lang::En => "  Recent personal bests",
+            Lang::Ja => "  最近の自己ベスト",
+        };
+        let label_width = UnicodeWidthStr::width(label);
+        lines.extend(
+            crate::ui::wrap_field(label, &values, label_width, width)
+                .into_iter()
+                .map(|line| format!("{}{}", line.label, line.value)),
+        );
+    }
+    if !app.analysis_growth.promotions.is_empty() {
+        let values = app
+            .analysis_growth
+            .promotions
+            .iter()
+            .map(|promotion| {
+                format!(
+                    "{} {} {} → {}",
+                    promotion.date.format("%m/%d"),
+                    language_label(&promotion.language, lang),
+                    promotion.from.as_str(),
+                    promotion.to.as_str()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("，");
+        lines.push(match lang {
+            Lang::En => format!("  Grade promotions   {values}"),
+            Lang::Ja => format!("  段階の昇格         {values}"),
+        });
+    }
+    if let Some(recent) = app.analysis_growth.graduations.first() {
+        let destination = recent.level.map_or_else(
+            || {
+                if lang == Lang::Ja {
+                    "維持".to_owned()
+                } else {
+                    "maintenance".to_owned()
+                }
+            },
+            |level| {
+                if lang == Lang::Ja {
+                    format!("レベル {level}")
+                } else {
+                    format!("level {level}")
+                }
+            },
+        );
+        lines.push(match lang {
+            Lang::En => format!(
+                "  Graduated prescriptions   {} (latest: {} {} → {destination})",
+                app.analysis_growth.graduations.len(),
+                recent.date.format("%m/%d"),
+                recent.title
+            ),
+            Lang::Ja => format!(
+                "  卒業した処方       {} 件（最近: {} {} → {destination}）",
+                app.analysis_growth.graduations.len(),
+                recent.date.format("%m/%d"),
+                recent.title
+            ),
+        });
+    }
+
+    let mut chart_rows = Vec::new();
+    let mut wrapped = Vec::<String>::new();
+    for line in &lines {
+        if let Some(index) = line
+            .strip_prefix("__GROWTH_CHART_")
+            .and_then(|value| value.strip_suffix("__"))
+            .and_then(|value| value.parse::<usize>().ok())
+        {
+            chart_rows.push((wrapped.len(), index));
+            wrapped.extend((0..7).map(|_| String::new()));
+        } else {
+            wrapped.extend(wrap_coach_line(line, width));
+        }
+    }
+    let maximum = wrapped.len().saturating_sub(usize::from(area.height)).min(u16::MAX as usize) as u16;
+    app.set_analysis_growth_scroll_max(maximum);
+    let scroll = app.analysis_growth_scroll.min(maximum);
+    frame.render_widget(
+        Paragraph::new(wrapped.into_iter().map(Line::from).collect::<Vec<_>>()).scroll((scroll, 0)),
+        area,
+    );
+    for (row, index) in chart_rows {
+        let visible = row as i32 - i32::from(scroll);
+        if visible < 0 || visible + 7 > i32::from(area.height) {
+            continue;
+        }
+        let Some(growth) = app.analysis_growth.languages.get(index) else {
+            continue;
+        };
+        let (points, _) = growth_chart_points(&growth.points);
+        let Some(axis) = TrendAxis::from_dates(points.iter().map(|point| point.date)) else {
+            continue;
+        };
+        let chart_area = Rect::new(area.x.saturating_add(4), area.y + visible as u16, area.width.saturating_sub(4), 7);
+        let color = if growth.language == "ja" { SERIES_COLORS[1] } else { SERIES_COLORS[0] };
+        let mut spec = TrendChartSpec {
+            kind: MetricKind::NetWpm,
+            cells: chart_area.as_size(),
+            series: vec![crate::ui::analysis_image::TrendSeries {
+                name: language_label(&growth.language, lang).to_owned(),
+                color,
+                points: points
+                    .iter()
+                    .map(|point| TrendPoint {
+                        date: point.date,
+                        value: point.value,
+                    })
+                    .collect(),
+            }],
+            forecasts: Vec::new(),
+            x_ticks: trend_tick_candidates(&axis, f64::from(chart_area.width.saturating_sub(8)) / axis.span().max(1.0)),
+        };
+        if !image_enabled || !render_metric_chart_image(frame, app, chart_area, lang, &mut spec, &axis) {
+            render_growth_chart_text(frame, chart_area, &points, &axis, color);
+        }
+    }
+}
+
+fn growth_endpoint_line(points: &[crate::analysis::progress::DailyPoint], lang: Lang) -> String {
+    let (Some(first), Some(latest)) = (points.first(), points.last()) else {
+        return String::new();
+    };
+    match lang {
+        Lang::En => format!(
+            "    first {} {:.1} WPM   latest {} {:.1} WPM",
+            first.date.format("%Y-%m-%d"),
+            first.value,
+            latest.date.format("%Y-%m-%d"),
+            latest.value
+        ),
+        Lang::Ja => format!(
+            "    最初 {} {:.1} WPM   最新 {} {:.1} WPM",
+            first.date.format("%Y-%m-%d"),
+            first.value,
+            latest.date.format("%Y-%m-%d"),
+            latest.value
+        ),
+    }
+}
+
+fn render_growth_chart_text(frame: &mut Frame, area: Rect, points: &[crate::analysis::progress::DailyPoint], axis: &TrendAxis, color: Color) {
+    let mut runs = Vec::<Vec<(f64, f64)>>::new();
+    let mut previous = None;
+    for point in points {
+        match (runs.last_mut(), previous) {
+            (Some(run), Some(previous)) if !axis.crosses_break(previous, point.date) => {
+                run.push((axis.position(point.date), point.value));
+            }
+            _ => runs.push(vec![(axis.position(point.date), point.value)]),
+        }
+        previous = Some(point.date);
+    }
+    let datasets = runs
+        .iter()
+        .map(|run| {
+            Dataset::default()
+                .marker(symbols::Marker::Braille)
+                .graph_type(GraphType::Line)
+                .style(Style::default().fg(color))
+                .data(run)
+        })
+        .collect::<Vec<_>>();
+    let minimum = points.iter().map(|point| point.value).fold(f64::INFINITY, f64::min);
+    let maximum = points.iter().map(|point| point.value).fold(f64::NEG_INFINITY, f64::max);
+    let padding = if (maximum - minimum).abs() < f64::EPSILON {
+        (maximum.abs() * 0.05).max(1.0)
+    } else {
+        0.0
+    };
+    let chart = Chart::new(datasets)
+        .x_axis(Axis::default().bounds([0.0, axis.span().max(1.0)]).labels(vec![
+            Span::raw(trend_date_label(axis.start(), true)),
+            Span::raw(trend_date_label(axis.end(), axis.end().year() != axis.start().year())),
+        ]))
+        .y_axis(
+            Axis::default()
+                .bounds([minimum - padding, maximum + padding])
+                .labels(vec![Span::raw(format!("{minimum:.1}")), Span::raw(format!("{maximum:.1}"))]),
+        );
+    frame.render_widget(chart, area);
+}
+
+fn period_line(period: Option<&crate::analysis::growth::TrendPeriod>, first: bool, lang: Lang) -> String {
+    let label = match (first, lang) {
+        (true, Lang::En) => "First 7 days ",
+        (false, Lang::En) => "Latest 7 days",
+        (true, Lang::Ja) => "最初の 7 日 ",
+        (false, Lang::Ja) => "直近の 7 日 ",
+    };
+    let Some(period) = period else {
+        return format!("    {label}   {}", if lang == Lang::Ja { "記録なし" } else { "no records" });
+    };
+    let speed = period.speed.map_or_else(|| "—".to_owned(), |value| format!("{value:.1} WPM"));
+    let accuracy = period.accuracy.map_or_else(|| "—".to_owned(), |value| format!("{:.1}%", value * 100.0));
+    format!(
+        "    {label}   {speed}   {} {accuracy}   ({}–{})",
+        if lang == Lang::Ja { "正確さ" } else { "accuracy" },
+        period.start.format("%Y-%m-%d"),
+        period.end.format("%m-%d")
+    )
+}
+
+fn anchor_line(
+    anchor: Option<&crate::analysis::growth::TrendPeriod>,
+    days: i64,
+    recent: Option<&crate::analysis::growth::TrendPeriod>,
+    lang: Lang,
+) -> String {
+    let label = match (days, lang) {
+        (30, Lang::En) => "1 month ago",
+        (30, Lang::Ja) => "1 か月前",
+        (_, Lang::En) => "3 months ago",
+        (_, Lang::Ja) => "3 か月前",
+    };
+    let Some(old) = anchor.and_then(|period| period.speed) else {
+        return format!("    {label}   {}", if lang == Lang::Ja { "記録なし" } else { "no records" });
+    };
+    let Some(now) = recent.and_then(|period| period.speed) else {
+        return format!("    {label}   {old:.1} WPM");
+    };
+    let delta = now - old;
+    format!("    {label}   {old:.1} WPM → {now:.1} WPM   {}", format_growth_delta(delta, ""))
+}
+
+fn format_growth_delta(value: f64, suffix: &str) -> String {
+    let rounded = (value * 10.0).round() / 10.0;
+    if rounded == 0.0 {
+        format!("±0.0{suffix}")
+    } else if rounded > 0.0 {
+        format!("▲ {value:+.1}{suffix}")
+    } else {
+        format!("▼ {value:+.1}{suffix}")
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GrowthChartGranularity {
+    Weekly,
+    Daily,
+}
+
+fn growth_chart_points(points: &[crate::analysis::progress::DailyPoint]) -> (Vec<crate::analysis::progress::DailyPoint>, GrowthChartGranularity) {
+    let weekly = weekly_medians(points);
+    if weekly.len() >= 2 {
+        return (weekly, GrowthChartGranularity::Weekly);
+    }
+    let mut daily = points.to_vec();
+    daily.sort_by_key(|point| point.date);
+    (daily, GrowthChartGranularity::Daily)
+}
+
+fn weekly_medians(points: &[crate::analysis::progress::DailyPoint]) -> Vec<crate::analysis::progress::DailyPoint> {
+    use std::collections::BTreeMap;
+
+    let mut weeks = BTreeMap::<(i32, u32), Vec<&crate::analysis::progress::DailyPoint>>::new();
+    for point in points {
+        let week = point.date.iso_week();
+        weeks.entry((week.year(), week.week())).or_default().push(point);
+    }
+    weeks
+        .into_values()
+        .filter_map(|mut week| {
+            week.sort_by(|left, right| left.value.total_cmp(&right.value));
+            let middle = week.len() / 2;
+            let value = if week.len().is_multiple_of(2) {
+                (week[middle - 1].value + week[middle].value) / 2.0
+            } else {
+                week[middle].value
+            };
+            Some(crate::analysis::progress::DailyPoint {
+                date: week.iter().map(|point| point.date).min()?,
+                value,
+            })
+        })
+        .collect()
 }
 
 fn render_summary(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {

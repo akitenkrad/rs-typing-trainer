@@ -259,6 +259,59 @@ impl DataCatalog {
                 .is_none_or(|reading| !excluded.contains(&(item.text.clone(), reading.clone())))
         });
     }
+
+    /// Replace locally corrected Japanese readings before exclusions and
+    /// daily-deck selection are applied. Each row is looked up exactly once,
+    /// so a correction whose old reading is another correction's new reading
+    /// does not create a replacement chain.
+    pub fn apply_reading_corrections(
+        &mut self,
+        word_corrections: &HashMap<(String, String), String>,
+        sentence_corrections: &HashMap<(String, String), String>,
+    ) {
+        apply_corrections_to_texts(&mut self.words_ja, word_corrections);
+        apply_corrections_to_texts(&mut self.phrases_ja, word_corrections);
+        apply_corrections_to_texts(&mut self.sentences_ja, sentence_corrections);
+        for passage in &mut self.passages_ja {
+            if let Some(correct) = sentence_corrections.get(&(passage.text.clone(), passage.reading.clone())) {
+                passage.reading.clone_from(correct);
+            }
+        }
+
+        let mut source_rekeys = Vec::new();
+        for item in &mut self.fixed {
+            let corrections = match item.kind {
+                DataKind::JapaneseWord | DataKind::JapanesePhrase => word_corrections,
+                DataKind::JapaneseSentence => sentence_corrections,
+                _ => continue,
+            };
+            let Some(wrong_reading) = item.reading.as_ref() else {
+                continue;
+            };
+            let Some(correct_reading) = corrections.get(&(item.text.clone(), wrong_reading.clone())) else {
+                continue;
+            };
+            let old_key = item.key.clone();
+            item.reading = Some(correct_reading.clone());
+            item.key = format!("{}:{}\t{}", kind_key(item.kind), item.text, correct_reading);
+            if item.kind == DataKind::JapaneseSentence {
+                source_rekeys.push((old_key, item.key.clone()));
+            }
+        }
+        for (old_key, new_key) in source_rekeys {
+            if let Some(source) = self.sources.remove(&old_key) {
+                self.sources.insert(new_key, source);
+            }
+        }
+    }
+}
+
+fn apply_corrections_to_texts(rows: &mut [JapaneseText], corrections: &HashMap<(String, String), String>) {
+    for row in rows {
+        if let Some(correct) = corrections.get(&(row.text.clone(), row.reading.clone())) {
+            row.reading.clone_from(correct);
+        }
+    }
 }
 
 impl TrainingDataSource for DataCatalog {

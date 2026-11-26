@@ -286,9 +286,9 @@ fn every_analysis_tab_renders_and_bench_shows_previous_delta() {
     assert_eq!(app.screen, Screen::Analysis);
 
     // MYTASK-3631 puts «今日» first; the screen still opens on «コーチ».
-    // M6 adds the «スキル» tab (§8.4) after «ベンチ»: eight tabs in all.
+    // Growth follows Skills; the screen still opens on Coach.
     assert_eq!(app.analysis_tab, rs_typing_trainer::app::ANALYSIS_COACH_TAB);
-    for expected in ["コーチ", "推移", "キーボード", "遷移", "指・手", "ベンチ", "スキル", "今日"] {
+    for expected in ["コーチ", "推移", "キーボード", "遷移", "指・手", "ベンチ", "スキル", "成長", "今日"] {
         let output = render(&app);
         let compact = output.chars().filter(|character| !character.is_whitespace()).collect::<String>();
         assert!(compact.contains(expected), "tab {expected}: {output}");

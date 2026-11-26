@@ -12,7 +12,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use crate::app::App;
 use crate::i18n::Lang;
 use crate::practice::reading_report::{ReadingReportEntry, ReadingReportKind};
-use crate::ui::{left_inset, theme::Theme, wrap_field};
+use crate::ui::{left_inset, theme::Theme, wrap_display, wrap_field};
 
 pub fn render(frame: &mut Frame, app: &App) {
     let theme = Theme::from_name(&app.config.ui.theme);
@@ -29,10 +29,12 @@ pub fn render(frame: &mut Frame, app: &App) {
     if inner.height < 2 {
         return;
     }
-    let body = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(2));
+    let body = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(3));
+    let local_note_area = Rect::new(inner.x, inner.bottom().saturating_sub(3), inner.width, 1);
     let path_area = Rect::new(inner.x, inner.bottom().saturating_sub(2), inner.width, 1);
     let hint_area = Rect::new(inner.x, inner.bottom().saturating_sub(1), inner.width, 1);
     render_body(frame, app, &theme, left_inset(body));
+    render_local_note(frame, app, &theme, left_inset(local_note_area));
     render_path(frame, app, &theme, left_inset(path_area));
     render_hint(frame, app, &theme, left_inset(hint_area));
 }
@@ -41,27 +43,42 @@ fn render_body(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let lang = app.config.general.lang;
     let detail_lines = selected_report_lines(app, usize::from(area.width));
     let status = status_text(app, lang);
-    let status_height = u16::from(status.is_some()) * 2;
+    let status_lines = status
+        .as_deref()
+        .map(|text| wrap_display(text, usize::from(area.width)))
+        .unwrap_or_default();
+    let status_height = u16::try_from(status_lines.len()).unwrap_or(u16::MAX);
     let minimum_list_height = 4;
+    let corrected = app.reading_reports.iter().filter(|report| report.correct_reading.is_some()).count();
+    let summary = match lang {
+        Lang::En => format!(
+            "{} reports ({} corrected). Uncorrected items are left out of future prompts. Corrected items use the saved reading.",
+            app.reading_reports.len(),
+            corrected
+        ),
+        Lang::Ja => format!(
+            "報告 {} 件（うち修正済み {} 件）．未修正の項目は次回から出題しません．修正済みの項目は正しい読みで出題します．",
+            app.reading_reports.len(),
+            corrected
+        ),
+    };
+    let summary_lines = wrap_display(&summary, usize::from(area.width));
+    let summary_height = u16::try_from(summary_lines.len()).unwrap_or(u16::MAX);
     let detail_height = u16::try_from(detail_lines.len())
         .unwrap_or(u16::MAX)
-        .min(area.height.saturating_sub(1 + status_height + minimum_list_height));
+        .min(area.height.saturating_sub(summary_height + status_height + minimum_list_height));
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),
+            Constraint::Length(summary_height),
             Constraint::Min(minimum_list_height),
             Constraint::Length(detail_height),
             Constraint::Length(status_height),
         ])
         .split(area);
 
-    let summary = match lang {
-        Lang::En => format!("{} reports. These items are left out of future prompts.", app.reading_reports.len()),
-        Lang::Ja => format!("報告 {} 件．これらは次回から出題しません", app.reading_reports.len()),
-    };
     frame.render_widget(
-        Paragraph::new(summary).style(Style::default().fg(theme.accent).add_modifier(Modifier::BOLD)),
+        Paragraph::new(summary_lines.join("\n")).style(Style::default().fg(theme.accent).add_modifier(Modifier::BOLD)),
         chunks[0],
     );
 
@@ -89,12 +106,10 @@ fn render_body(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         frame.render_widget(Paragraph::new(detail_lines).style(Style::default().fg(theme.fg)), chunks[2]);
     }
 
-    if let Some(status) = status {
+    if !status_lines.is_empty() {
         let color = if app.reading_reports_confirming { theme.warning } else { theme.correct };
         frame.render_widget(
-            Paragraph::new(status)
-                .style(Style::default().fg(color).add_modifier(Modifier::BOLD))
-                .wrap(ratatui::widgets::Wrap { trim: true }),
+            Paragraph::new(status_lines.join("\n")).style(Style::default().fg(color).add_modifier(Modifier::BOLD)),
             chunks[3],
         );
     }
@@ -190,17 +205,34 @@ fn render_path(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     };
     let path = display_report_path(app);
     frame.render_widget(
-        Paragraph::new(truncate_display(&format!("{label}: {path}"), usize::from(area.width))).style(Style::default().fg(theme.muted)),
+        Paragraph::new(truncate_display(
+            &format!("{label}: {path} / reading_corrections.tsv"),
+            usize::from(area.width),
+        ))
+        .style(Style::default().fg(theme.muted)),
+        area,
+    );
+}
+
+fn render_local_note(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    let text = match app.config.general.lang {
+        Lang::En => "Corrected readings are saved only on this device (bundled data is unchanged).",
+        Lang::Ja => "直した読みは手元にだけ保存されます（同梱データは変わりません）．",
+    };
+    frame.render_widget(
+        Paragraph::new(truncate_display(text, usize::from(area.width))).style(Style::default().fg(theme.muted)),
         area,
     );
 }
 
 fn render_hint(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
-    let hint = match (app.reading_reports_confirming, app.config.general.lang) {
-        (true, Lang::En) => "[Y] Remove    [N] Cancel",
-        (true, Lang::Ja) => "[Y] 取り消す    [N] やめる",
-        (false, Lang::En) => "[↑/↓] Select    [D] Remove    [Esc] Back",
-        (false, Lang::Ja) => "[↑/↓] 選ぶ    [D] 取り消す    [Esc] 戻る",
+    let hint = match (app.reading_reports_editing, app.reading_reports_confirming, app.config.general.lang) {
+        (true, _, Lang::En) => "[Enter] Save    [Esc] Cancel",
+        (true, _, Lang::Ja) => "[Enter] 保存    [Esc] やめる",
+        (false, true, Lang::En) => "[Y] Remove    [N] Cancel",
+        (false, true, Lang::Ja) => "[Y] 取り消す    [N] やめる",
+        (false, false, Lang::En) => "[↑/↓] Select    [E/Enter] Edit    [D] Remove    [Esc] Back",
+        (false, false, Lang::Ja) => "[↑/↓] 選ぶ    [E/Enter] 修正    [D] 取り消す    [Esc] 戻る",
     };
     frame.render_widget(Paragraph::new(hint).style(Style::default().fg(theme.accent)), area);
 }
@@ -209,19 +241,35 @@ fn selected_report_lines(app: &App, width: usize) -> Vec<String> {
     let Some(report) = app.reading_reports.get(app.reading_reports_selected) else {
         return Vec::new();
     };
-    let (text_label, reading_label) = match app.config.general.lang {
-        Lang::En => ("Text:", "Reading:"),
-        Lang::Ja => ("表記:", "読み:"),
+    let (text_label, reading_label, corrected_label, input_label) = match app.config.general.lang {
+        Lang::En => ("Text:", "Reading:", "Corrected →", "Correct reading:"),
+        Lang::Ja => ("表記:", "読み:", "修正済み →", "正しい読み:"),
     };
-    let label_width = UnicodeWidthStr::width(text_label).max(UnicodeWidthStr::width(reading_label));
-    [
-        wrap_field(text_label, &report.text, label_width, width),
-        wrap_field(reading_label, &report.reading, label_width, width),
-    ]
-    .into_iter()
-    .flatten()
-    .map(|line| format!("{}{}", line.label, line.value))
-    .collect()
+    let base_label_width = [text_label, reading_label].into_iter().map(UnicodeWidthStr::width).max().unwrap_or(0);
+    let mut lines = [(text_label, report.text.as_str()), (reading_label, report.reading.as_str())]
+        .into_iter()
+        .flat_map(|(label, value)| wrap_field(label, value, base_label_width, width))
+        .map(|line| format!("{}{}", line.label, line.value))
+        .collect::<Vec<_>>();
+    if let Some(correct) = &report.correct_reading {
+        lines.extend(
+            wrap_field(corrected_label, correct, UnicodeWidthStr::width(corrected_label), width)
+                .into_iter()
+                .map(|line| format!("{}{}", line.label, line.value)),
+        );
+    }
+    if app.reading_reports_editing {
+        let input = format!("[{}▏]", app.reading_reports_input);
+        lines.extend(
+            wrap_field(input_label, &input, UnicodeWidthStr::width(input_label), width)
+                .into_iter()
+                .map(|line| format!("{}{}", line.label, line.value)),
+        );
+    }
+    if let Some(error) = &app.reading_reports_input_error {
+        lines.extend(wrap_display(error, width).into_iter().map(|line| format!("→ {line}")));
+    }
+    lines
 }
 
 fn fit_lines(mut lines: Vec<String>, height: usize, width: usize) -> Vec<Line<'static>> {
@@ -255,13 +303,26 @@ fn force_ellipsis(value: &str, width: usize) -> String {
 
 fn status_text(app: &App, lang: Lang) -> Option<String> {
     if app.reading_reports_confirming {
-        Some(
-            match lang {
-                Lang::En => "Remove this report? It will appear in prompts again the next time you start practicing.",
-                Lang::Ja => "この報告を取り消しますか？取り消すと，次に練習を始めたときから再び出題されます．",
+        let corrected = app
+            .reading_reports
+            .get(app.reading_reports_selected)
+            .is_some_and(|report| report.correct_reading.is_some());
+        Some(match (lang, corrected) {
+            (Lang::En, true) => {
+                "Remove this report? The saved correct reading will also be removed. It will appear in prompts again the next time you start practicing."
+                    .to_owned()
             }
-            .to_owned(),
-        )
+            (Lang::Ja, true) => {
+                "この報告を取り消しますか？正しい読みの登録も消えます．取り消すと，次に練習を始めたときから再び出題されます．"
+                    .to_owned()
+            }
+            (Lang::En, false) => {
+                "Remove this report? It will appear in prompts again the next time you start practicing.".to_owned()
+            }
+            (Lang::Ja, false) => {
+                "この報告を取り消しますか？取り消すと，次に練習を始めたときから再び出題されます．".to_owned()
+            }
+        })
     } else {
         app.reading_reports_notice.clone()
     }

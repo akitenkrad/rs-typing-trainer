@@ -135,7 +135,7 @@ The benchmark tab reports sustained speed, accuracy, rhythm, transitions, reach,
 
 ## Analysis screen
 
-Press `A` on the title screen. `Tab` or `←/→` changes tabs. The tabs are Today, Coach, Trend, Keyboard, Transitions, Fingers/Hands, Bench and Skills; the screen opens on Coach, and `←` from Coach reaches Today. The screen opens on the last 30 days (ending today); `P` steps to 7 days, then all time, then back to 30 days. `M` cycles the mode filter. Every tab, including Coach, uses the records left by these filters, except that the Today tab reads today's records and those of the past 7 days directly (see [Today tab](#today-tab)) and the Skills tab reads only menu check steps (see below). The expensive player model, diagnosis, progress, habits and grade calculations run once when the screen opens and again only when either filter changes; redraws use the cached report.
+Press `A` on the title screen. `Tab` or `←/→` changes tabs. The tabs are Today, Coach, Trend, Keyboard, Transitions, Fingers/Hands, Bench, Skills and Growth; the screen opens on Coach, and `←` from Coach reaches Today. The screen opens on the last 30 days (ending today); `P` steps to 7 days, then all time, then back to 30 days. `M` cycles the mode filter. Every tab, including Coach, uses the records left by these filters, except that Today reads the database directly, Skills reads menu check steps, and Growth compares all-time records independently of `P` and `M`. The expensive reports are cached when the screen opens; changing `P` or `M` does not rebuild or alter Growth.
 
 - Today: today's menu steps, individual sessions and totals against the average of the past 7 days (see [Today tab](#today-tab)).
 - Coach: a scrollable four-part report. With terminal images, each language starts with a G-to-S ladder: the darker, outlined step is the current grade and the triangle locates the continuous 0–8 score. The radar chart below uses the same scale on every component axis; the outer rings are higher grades, the axis suffix is that component's grade, and a labelled axis without a vertex has no data. The radar is omitted in short areas, and the existing prose continues below all graphics. “Where you are now” combines the S-to-G grade, component values and next-grade gaps, promotion/demotion, four-week speed/accuracy slopes, difficulty-adjusted form and the selected goal. “Last prescription” reports the target and matched-control changes in milliseconds with the R3 verdict. “Best opportunities” starts with the component that most raises overall and adds up to two concrete diagnoses, evidence counts, assumptions and a practice mode. Error advice is specific to anticipation, repeated-previous, adjacent-key, same-finger and opposite-hand errors; a total below 20 first errors is marked as a reference. Transition evidence is an effective count and is therefore shown as a rounded `n≈`, while observed counts use `n=`. Only `suggested` spelling rows appear. “Habits” includes only supported H1–H3/H5 findings; H4 is marked exploratory. Data coverage and benchmark reminders remain at the end. `T` opens goal candidates; `↑`/`↓` and `Enter` save one.
@@ -145,6 +145,7 @@ Press `A` on the title screen. `Tab` or `←/→` changes tabs. The tabs are Tod
 - Fingers/Hands: finger accuracy/IKI and same-finger versus alternating-hand timing. With terminal images, the finger chart orders left pinky through left index, one shared thumb, then right index through right pinky; the thumb splits into two bars only when separate left/right thumb data is available. IKI bars rise and error-rate bars fall; their colours match the keyboard finger guide, and samples below 30 are translucent. The adjacent four bars compare left hand, right hand, different keys on one finger, and alternating hands on one millisecond scale. Missing fingers are marked `—`, and all original numeric rows continue below the figures.
 - Bench: latest part results, comparisons and the eight axes. With terminal images, the radar radius is the personal-history percentile; the 50 and 100 labels sit between axes. An axis marked “under 3” has no percentile vertex. The part A–D sparklines keep attempt order from left to right, emphasize the latest point, and repeat its WPM and change from the previous result. B/D place v1 and v2 in one sequence; A/C use only the preferred version here. The original WPM and raw/percentile rows remain below the graphics. `S` switches to the [benchmark Summary](#benchmark-summary) and back; the footer adds `[S] Summary`.
 - Skills: the seven components measured by the practice menu's check steps, one small chart per component, stacked vertically (see [Skill trends](#skill-trends)).
+- Growth: an all-time comparison with the beginning, one and three months ago, benchmark milestones and accumulated practice (see [Growth tab](#growth-tab)).
 
 The four-week slope uses benchmark A when it is available, then another available benchmark part. A/C select v2 when present and otherwise v1; B/D combine both versions. Without a benchmark it uses practice records and explicitly warns that practice WPM is not evidence of improvement. Slopes above `+0.5 WPM/week` are upward, below `-0.5 WPM/week` are downward, and values in between are flat. Recommendations follow fixed rules: low accuracy selects a 95% accuracy gate with the pacer off; a slow transition selects `adaptive` and names the pair; weak reach selects `unlock` or `ngram`; weak reaction increases look-ahead; weak rhythm selects `rhythm`; second-half endurance deterioration selects `endurance` plus a break; and weak Japanese selects `romaji`.
 
@@ -325,6 +326,47 @@ A three-minute check varies a lot from day to day, so a single previous differen
 
 Missing values are shown as `— (no data)` on screen, `null` in JSON and an empty cell in CSV. The thresholds (7 and 5 runs, 20 differences, 28 days, one quarter) are initial values. Because the check step rotates daily between two practice languages, each language's series then gains a point only every other day.
 
+### Growth tab
+
+Growth always uses all records and shows `Compares all time` in its footer; the period and mode filters do not apply. `↑`/`↓` scroll one row and `PgUp`/`PgDn` scroll ten rows, with both directions bounded by the content.
+
+For each language, speed reuses the existing daily-speed series without mixing definitions: the preferred benchmark series (A for English, C for Japanese), or difficulty-adjusted WPM when that language has no such benchmark. The source is printed beside the section title. The first value is the median from the first recorded date through the following six calendar days; the current value is the median from the analysis date and the preceding six days. A comparison starts after seven distinct dates in that speed series, not after seven practice days in general. Until then, a benchmark series says how many benchmark dates exist and points to `[B]` in the title; an adjusted-WPM series calls them comparable-speed records. The headline uses the same source-specific explanation. Accuracy is the median of that language's session accuracies in the same calendar window. The 30- and 90-day comparisons use a ±3-day window around each target date. Missing windows say `no records`.
+
+An upward triangle means a higher speed or accuracy and a downward triangle means a lower value. A difference that rounds to zero at the displayed one-decimal precision has no triangle and is written `±0.0`. The headline first chooses the language with the largest positive first-to-current speed change. If none is available, it chooses the positive first-to-latest benchmark change with the largest percentage gain; changes that display as zero do not qualify. If neither improved, it shows accumulated time and days, adding the source-specific seven-date explanation when appropriate. When comparable speed declined, it states the speed difference without blame and also names an accuracy improvement when one exists; an accuracy change that displays as zero is not described as an improvement.
+
+Benchmark rows use the existing preferred-version rule, and show first, latest and all-time best. For recent personal-best events, benchmark results are first reduced to the highest value for each date, language and part; that daily high is listed only when it strictly exceeds every earlier daily high for the same language and part. Thus several improvements on one day produce one event, while a result below an earlier best produces none. Overall-grade promotions from stored skill snapshots and prescription graduations from recorded menu results are also listed newest first when present. Accumulation sums saved session duration and character keystrokes, distinct practice dates, duration in the analysis date's calendar month, and current/longest consecutive-date streaks; large integer counts use thousands separators. The current streak may end on the analysis date or the preceding day. The speed chart normally groups the reused daily series by ISO week and draws the weekly median. If that produces fewer than two points, it draws the daily values instead and changes the heading accordingly. With fewer than two daily points it shows how many dates have accumulated rather than drawing a chart. The chart labels its first and latest values; terminals without image support use a Braille line chart.
+
+Text version at 80×24 (the middle is scrollable):
+
+```text
+┌ ANALYSIS ────────────────────────────────────────────────────────────────────┐
+│ Today Coach Trend Keyboard Trans. Fingers Bench Skills Growth                │
+│You are +9.4 WPM (+29%) faster than when you started. Practice 12 h 30 min…   │
+│■ English                                                                    │
+│  Since you started (daily speed: benchmark)                                 │
+│    First 7 days    32.1 WPM   accuracy 94.2%   (2026-09-01–09-07)           │
+│    Latest 7 days   41.5 WPM   accuracy 97.0%   (2026-11-20–11-26)           │
+│    Change          ▲ +9.4 WPM (+29%)   ▲ +2.8pt                             │
+│                                                                              │
+│  One and three months ago                                                   │
+│    1 month ago   37.0 WPM → 41.5 WPM   ▲ +4.5                               │
+│    3 months ago  no records                                                 │
+│                                                                              │
+│  Benchmarks (first → latest, personal best)                                 │
+│    A   30.2 → 41.0 WPM   ▲ +10.8   best 43.0 (11/20)                        │
+│                                                                              │
+│  Speed over time (all time, weekly medians)                                 │
+│    first 2026-09-01 32.1 WPM   latest 2026-11-24 41.5 WPM                  │
+│    ⡀⡄⡆⡇⣇⣧⣷⣿                                                                   │
+│                                                                              │
+│■ Accumulation                                                               │
+│  Practice time 12 h 30 min (this month 4 h 10 min)                          │
+│  Practice days 42   current streak 5   longest streak 9                     │
+│  Keystrokes 183,402                                                         │
+│            [↑/↓ PgUp/PgDn] Scroll   Compares all time   [Esc] Back          │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
 ### Skills tab
 
 The text version of the Skills tab at 80×24 (sample data; with terminal images each chart is drawn as an image, with the current grade's band tinted and a faint vertical line at each date tick):
@@ -356,7 +398,7 @@ The text version of the Skills tab at 80×24 (sample data; with terminal images 
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-The analysis screen's last tab, Skills, draws the series of one language. Its header reads `English — ● each run  ━ median of last 7 runs  ◆ bench  bands G–S` (`•` and `█` in the text chart).
+The Skills tab, immediately before Growth, draws the series of one language. Its header reads `English — ● each run  ━ median of last 7 runs  ◆ bench  bands G–S` (`•` and `█` in the text chart).
 
 - Each component with records has a label column and a chart. The label column gives the name, the grade and the latest value with its unit (`Speed D 58.0 WPM`), then how far the next grade is (`+2.0 WPM to C`; `top grade` at S), then the median of the latest runs (`median 55.0 WPM`) when the row is tall enough. A component without any record takes a single row (`Rhythm  no records`), and the rows left over go to the charts.
 - In each chart, every run is a point and the median of the latest 7 runs is a bold line. The line starts at the first run: until there are 7 runs it is the median of all runs so far (the stored moving median of `stats --skills` still needs 5 runs; from the fifth run on the two agree).

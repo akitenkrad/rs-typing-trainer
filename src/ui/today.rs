@@ -345,7 +345,7 @@ pub(crate) fn minutes(duration_ms: i64) -> f64 {
     duration_ms as f64 / 60_000.0
 }
 
-pub(crate) fn grouped(value: usize) -> String {
+pub(crate) fn grouped(value: impl std::fmt::Display) -> String {
     let digits = value.to_string();
     let mut output = String::new();
     for (index, character) in digits.chars().enumerate() {

@@ -338,7 +338,7 @@ fn text_version_shows_the_three_sections_unplayed_steps_and_the_7_day_average() 
             compact(&rows[1]).starts_with("今日") || compact(&rows[1]).contains("今日コーチ"),
             "{text}"
         );
-        assert!(compact(&rows[1]).contains("スキル"), "{text}");
+        assert!(compact(&rows[1]).contains("成長"), "{text}");
         // Today's training: played steps with their values, the level-up and
         // the steps not played yet marked «未».
         assert!(compact(row_containing(&rows, "1ウォームアップ")).contains("62WPM▲+3"), "{text}");

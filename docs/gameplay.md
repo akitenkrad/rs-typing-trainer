@@ -84,7 +84,8 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | History | `R` | Open reading reports |
 | History | `Esc` / `Q` | Return to the screen that opened history |
 | Reading reports | `↑` / `↓` (`k` / `j`), `PgUp` / `PgDn` / `Home` / `End` | Move the selection |
-| Reading reports | `D` / `Delete` | Remove the selected report after confirmation; the item returns to prompts the next time practice starts |
+| Reading reports | `E` / `Enter` | Edit and save the correct hiragana reading |
+| Reading reports | `D` / `Delete` | Remove the selected report and any saved correction after confirmation; the item returns to prompts with its original reading the next time practice starts |
 | Reading reports | `Esc` / `Q` | Return to history |
 | History detail | `Space` / `Enter` / `Esc` | Return to history |
 | History detail | `R` | Replay a v2 session inside the application; `Esc` returns to the detail |
@@ -104,6 +105,8 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | Menu step result | `Esc` | Leave the run: the summary when a step has finished, otherwise the menu |
 | Menu summary | `Enter` / `Space` / `Esc` | Return to the menu |
 | Analysis skills | `L` | Switch the language of the skill series |
+
+Correct readings entered on the reading-reports screen are stored in `reading_corrections.tsv` beside the database. Practice applies a matching correction before reading-report exclusions, so a corrected item remains available under its new reading; an exclusion that matches the new pair still removes it. Neither corrections nor exclusions affect benchmarks. These corrections are local and do not modify the bundled data.
 
 While a word is sliding in or out, for about 200 ms on each side, keystrokes are dropped. This prevents the key that completed one word from being credited to the next word.
 

@@ -6,7 +6,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use rs_typing_trainer::app::Screen;
 use rs_typing_trainer::config::Config;
 use rs_typing_trainer::i18n::Lang;
-use rs_typing_trainer::practice::reading_report::{ReadingReportKind, append_reading_report};
+use rs_typing_trainer::practice::reading_report::{ReadingReportKind, append_reading_report, save_reading_correction};
 use rs_typing_trainer::ui;
 
 use crate::common;
@@ -23,6 +23,20 @@ fn report(app: &TestApp, hour: u32, kind: ReadingReportKind, text: &str, reading
     let db_path = app.db_path();
     let directory = db_path.parent().unwrap();
     append_reading_report(directory, Utc.with_ymd_and_hms(2026, 11, 14, hour, 30, 0).unwrap(), kind, text, reading).unwrap();
+}
+
+fn correction(app: &TestApp, kind: ReadingReportKind, text: &str, wrong: &str, correct: &str) {
+    let db_path = app.db_path();
+    let directory = db_path.parent().unwrap();
+    save_reading_correction(
+        directory,
+        Utc.with_ymd_and_hms(2026, 11, 14, 12, 30, 0).unwrap(),
+        kind,
+        text,
+        wrong,
+        correct,
+    )
+    .unwrap();
 }
 
 fn open_reading_reports(app: &mut TestApp) {
@@ -255,4 +269,108 @@ fn reading_report_load_errors_are_rendered_without_panicking() {
 
     let output = render(&app, 80, 24);
     assert!(contains_display(&output, "読みの報告を読み込めませんでした"), "{output}");
+}
+
+#[test]
+fn e_edits_and_saves_a_correct_reading_then_marks_the_report_corrected() {
+    let mut config = Config::default();
+    config.general.lang = Lang::Ja;
+    let mut app = common::test_app(config);
+    report(&app, 9, ReadingReportKind::Romaji, "十分", "じゅうふん");
+    open_reading_reports(&mut app);
+
+    app.handle_key(key(KeyCode::Char('e')));
+    let editing = render(&app, 80, 24);
+    assert!(contains_display(&editing, "正しい読み: [じゅうふん▏]"), "{editing}");
+    app.handle_key(key(KeyCode::Backspace));
+    app.handle_key(key(KeyCode::Backspace));
+    app.handle_key(key(KeyCode::Char('ぶ')));
+    app.handle_key(key(KeyCode::Char('ん')));
+    app.handle_key(key(KeyCode::Enter));
+
+    let source = std::fs::read_to_string(app.db_path().parent().unwrap().join("reading_corrections.tsv")).unwrap();
+    assert!(source.contains("\tromaji\t十分\tじゅうふん\tじゅうぶん\n"), "{source:?}");
+    let output = render(&app, 80, 24);
+    assert!(contains_display(&output, "修正済み → じゅうぶん"), "{output}");
+    assert!(contains_display(&output, "うち修正済み 1 件"), "{output}");
+    assert!(
+        contains_display(&output, "保存しました．次に練習を始めたときから")
+            && contains_display(&output, "じゅうぶん")
+            && contains_display(&output, "で出題されます．"),
+        "{output}"
+    );
+}
+
+#[test]
+fn enter_opens_editing_escape_cancels_and_d_is_input_while_editing() {
+    let mut app = common::test_app(Config::default());
+    report(&app, 9, ReadingReportKind::Romaji, "十分", "じゅうふん");
+    open_reading_reports(&mut app);
+    let path = app.db_path().parent().unwrap().join("reading_corrections.tsv");
+
+    app.handle_key(key(KeyCode::Enter));
+    app.handle_key(key(KeyCode::Char('D')));
+    let output = render(&app, 80, 24);
+    assert!(contains_display(&output, "Correct reading: [じゅうふんD▏]"), "{output}");
+    assert!(!app.reading_reports_confirming);
+    app.handle_key(key(KeyCode::Esc));
+
+    assert!(!path.exists());
+    assert!(!contains_display(&render(&app, 80, 24), "Correct reading:"));
+}
+
+#[test]
+fn editing_hint_stays_on_the_bottom_row_and_invalid_input_shows_a_reason_in_both_languages() {
+    for (lang, save, cancel, reason) in [
+        (Lang::Ja, "[Enter] 保存", "[Esc] やめる", "ひらがなで入力してください"),
+        (Lang::En, "[Enter] Save", "[Esc] Cancel", "Enter hiragana"),
+    ] {
+        let mut config = Config::default();
+        config.general.lang = lang;
+        let mut app = common::test_app(config);
+        report(&app, 9, ReadingReportKind::Romaji, "十分", "じゅうふん");
+        open_reading_reports(&mut app);
+        app.handle_key(key(KeyCode::Char('e')));
+        app.handle_key(key(KeyCode::Char('D')));
+        app.handle_key(key(KeyCode::Enter));
+
+        let buffer = render_buffer(&app, 80, 24);
+        let output = buffer_text(&buffer);
+        let hint = row(&buffer, 22);
+        assert!(contains_display(&hint, save), "bottom hint row was {hint:?}");
+        assert!(contains_display(&hint, cancel), "bottom hint row was {hint:?}");
+        assert!(contains_display(&output, reason), "{output}");
+        assert!(
+            contains_display(
+                &output,
+                if lang == Lang::Ja {
+                    "直した読みは手元にだけ保存されます"
+                } else {
+                    "Corrected readings are saved only on this device"
+                }
+            ),
+            "{output}"
+        );
+    }
+}
+
+#[test]
+fn corrected_report_confirmation_mentions_and_removes_the_saved_correction() {
+    let mut config = Config::default();
+    config.general.lang = Lang::Ja;
+    let mut app = common::test_app(config);
+    report(&app, 9, ReadingReportKind::Romaji, "十分", "じゅうふん");
+    correction(&app, ReadingReportKind::Romaji, "十分", "じゅうふん", "じゅうぶん");
+    open_reading_reports(&mut app);
+
+    app.handle_key(key(KeyCode::Char('d')));
+    let confirmation = render(&app, 80, 24);
+    assert!(contains_display(&confirmation, "正しい読みの登録も消えます"), "{confirmation}");
+    app.handle_key(key(KeyCode::Char('y')));
+
+    assert!(
+        std::fs::read_to_string(app.db_path().parent().unwrap().join("reading_corrections.tsv"))
+            .unwrap()
+            .is_empty()
+    );
 }

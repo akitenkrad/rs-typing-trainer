@@ -1299,6 +1299,7 @@ mod tests {
     fn four_week_trend_labels_are_localized_and_missing_trends_have_no_line() {
         let trend = DailyTrend {
             target: "ja".to_owned(),
+            source: crate::analysis::progress::DailyTrendSource::Bench,
             speed: Vec::new(),
             accuracy: Vec::new(),
             speed_slope_per_week: Some(0.5),

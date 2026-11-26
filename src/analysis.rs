@@ -21,6 +21,7 @@ pub mod bench_summary;
 pub mod coach;
 pub mod errors;
 pub mod grades;
+pub mod growth;
 pub mod habits;
 pub mod japanese;
 pub mod metrics;
