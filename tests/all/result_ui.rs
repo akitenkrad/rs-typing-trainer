@@ -4,6 +4,7 @@ use chrono::{TimeZone, Utc};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
+use rs_typing_trainer::analysis::bench_v3::BenchV3Reliability;
 use rs_typing_trainer::app::{ResultComparison, Screen};
 use rs_typing_trainer::config::Config;
 use rs_typing_trainer::engine::item::Item;
@@ -50,6 +51,7 @@ fn result_app(graphics: GraphicsMode) -> common::TestApp {
     app.result_comparison = ResultComparison {
         previous_wpm_delta: Some(3.0),
         previous_effective_wpm_delta: None,
+        previous_effective_wpm_reliability: None,
         previous_cps_delta: Some(-0.2),
         previous_accuracy_delta: Some(0.01),
         best_wpm: Some(60.0),
@@ -83,6 +85,39 @@ fn rows(buffer: &Buffer) -> Vec<String> {
     (0..buffer.area.height)
         .map(|y| (0..buffer.area.width).map(|x| buffer[(x, y)].symbol()).collect::<String>())
         .collect()
+}
+
+fn compact(buffer: &Buffer) -> String {
+    rows(buffer).join("\n").chars().filter(|character| !character.is_whitespace()).collect()
+}
+
+#[test]
+fn v3_result_uses_mdc_for_the_previous_difference_in_both_languages() {
+    for (lang, within) in [(Lang::En, "Nochange(withinmeasurementerror)"), (Lang::Ja, "変化なし（誤差の範囲）")] {
+        let mut app = result_app(GraphicsMode::Off);
+        app.config.general.lang = lang;
+        app.result_record.as_mut().unwrap().header.bench_id = Some("bench-v3/EW/01".into());
+        app.result_comparison.previous_effective_wpm_delta = Some(1.0);
+        app.result_comparison.previous_effective_wpm_reliability = Some(BenchV3Reliability {
+            sample_count: 3,
+            sem_wpm: 0.9,
+            mdc95_wpm: 2.5,
+            reference_only: true,
+        });
+        let within_text = compact(&render(&app, 80, 24));
+        assert!(within_text.contains(within), "{lang:?}: {within_text}");
+
+        app.result_comparison.previous_effective_wpm_delta = Some(2.5);
+        let changed = compact(&render(&app, 80, 24));
+        assert!(changed.contains("▲+2.5WPM"), "{lang:?}: {changed}");
+
+        app.result_comparison.previous_effective_wpm_reliability = None;
+        let unavailable = compact(&render(&app, 80, 24));
+        assert!(
+            unavailable.contains("+2.5WPM") && !unavailable.contains("▲+2.5WPM"),
+            "{lang:?}: {unavailable}"
+        );
+    }
 }
 
 #[test]

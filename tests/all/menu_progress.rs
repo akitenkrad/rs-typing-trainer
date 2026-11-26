@@ -972,6 +972,23 @@ fn seed_practice(store: &Store, today: NaiveDate, languages: &[&str]) {
     }
 }
 
+#[test]
+fn bench_v3_records_do_not_change_practice_menu_generation() {
+    let today = day(10);
+    let baseline = Store::new();
+    let with_v3 = Store::new();
+    seed_practice(&baseline, today, &["en"]);
+    seed_practice(&with_v3, today, &["en"]);
+    let mut v3 = session(today - chrono::Duration::days(1), 18, "en", 200.0, 500);
+    v3.header.mode = "bench".into();
+    v3.header.bench_id = Some("bench-v3/EW/01".into());
+    saved(&with_v3.path, v3);
+
+    let baseline_menu = build_from_storage(&baseline.path, baseline.directory.path(), &baseline.config, Lang::En, today).unwrap();
+    let v3_menu = build_from_storage(&with_v3.path, with_v3.directory.path(), &with_v3.config, Lang::En, today).unwrap();
+    assert_eq!(serde_json::to_value(v3_menu).unwrap(), serde_json::to_value(baseline_menu).unwrap());
+}
+
 fn store_past_run(store: &Store, menu: &DailyMenu, date: NaiveDate, key: &str, edit: impl FnOnce(&mut DailyMenu)) {
     let mut past = menu.clone();
     past.date = date;

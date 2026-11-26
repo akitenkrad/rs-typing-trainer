@@ -1,7 +1,10 @@
 use std::time::Duration;
 
 use rs_typing_trainer::analysis::analyze_with_pause;
-use rs_typing_trainer::analysis::bench_v3::{BenchV3Group, compute_bench_v3_group_metrics, compute_bench_v3_metrics, previous_effective_wpm_delta};
+use rs_typing_trainer::analysis::bench_v3::{
+    BenchV3Group, compute_bench_v3_group_metrics, compute_bench_v3_group_reliability, compute_bench_v3_metrics, compute_bench_v3_part_reliability,
+    previous_effective_wpm_delta,
+};
 use rs_typing_trainer::bench::BenchV3Part;
 use rs_typing_trainer::config::ErrorMode;
 use rs_typing_trainer::engine::session::{ItemLog, ItemOutcome, KeystrokeKind, KeystrokeLog, SessionLog};
@@ -221,4 +224,53 @@ fn previous_delta_compares_effective_wpm_for_the_same_v3_part() {
         previous_effective_wpm_delta(&[previous, other_part, current.clone()], &current, 2_000),
         Some(60.0)
     );
+}
+
+fn split_record(bench_id: &str, finished_at: &str, half_a_wpm: f64, half_b_wpm: f64) -> SessionRecord {
+    let a_ms = (12_000.0 / half_a_wpm).round() as u64;
+    let b_ms = (12_000.0 / half_b_wpm).round() as u64;
+    let mut sample = record(
+        bench_id,
+        vec![item(0, 0), item(1, 1_000), item(2, 2_000), item(3, 3_000)],
+        vec![
+            key(0, 0, 0, true),
+            key(1, 0, a_ms, true),
+            key(2, 1, 1_000, true),
+            key(3, 1, 1_000 + b_ms, true),
+            key(4, 2, 2_000, true),
+            key(5, 2, 2_000 + a_ms, true),
+            key(6, 3, 3_000, true),
+            key(7, 3, 3_000 + b_ms, true),
+        ],
+    );
+    sample.header.finished_at = finished_at.into();
+    sample
+}
+
+#[test]
+fn part_reliability_uses_split_half_differences_from_matching_runs_only() {
+    let first = split_record("bench-v3/EW/01", "2026-11-13T00:01:00Z", 60.0, 40.0);
+    let second = split_record("bench-v3/EW/02", "2026-11-14T00:01:00Z", 60.0, 120.0);
+    let other = split_record("bench-v3/ES/02", "2026-11-14T00:02:00Z", 120.0, 40.0);
+
+    let reliability = compute_bench_v3_part_reliability(&[first, second, other], BenchV3Part::EW, 2_000).unwrap();
+
+    assert_eq!(reliability.sample_count, 2);
+    assert!((reliability.sem_wpm - 2.0_f64.sqrt() * 20.0).abs() < 1e-12, "{reliability:?}");
+    assert!(reliability.reference_only);
+}
+
+#[test]
+fn language_reliability_uses_pooled_complete_runs() {
+    let records = [
+        split_record("bench-v3/EW/01", "2026-11-13T00:01:00Z", 60.0, 40.0),
+        split_record("bench-v3/ES/01", "2026-11-13T00:02:00Z", 60.0, 40.0),
+        split_record("bench-v3/EW/02", "2026-11-14T00:01:00Z", 60.0, 120.0),
+        split_record("bench-v3/ES/02", "2026-11-14T00:02:00Z", 60.0, 120.0),
+    ];
+
+    let reliability = compute_bench_v3_group_reliability(&records, BenchV3Group::English, 2_000).unwrap();
+
+    assert_eq!(reliability.sample_count, 2);
+    assert!((reliability.sem_wpm - 2.0_f64.sqrt() * 20.0).abs() < 1e-12, "{reliability:?}");
 }

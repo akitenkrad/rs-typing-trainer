@@ -5,13 +5,14 @@ use std::collections::{BTreeMap, HashMap};
 use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::analysis::bench_v3::{BenchV3Group, compute_bench_v3_group_runs, rolling_median_3};
 use crate::analysis::metrics::AnalysisSettings;
 use crate::analysis::model::{
     ExpectedPrompt, MODEL_VERSION, ModelView, PlayerModel, SufficientStatistics, TransitionEstimate, TransitionStatistic,
     append_sufficient_statistics, build_player_model, build_player_model_from_statistics, build_player_model_from_statistics_with_layout,
     build_sufficient_statistics, expected_performance, session_language,
 };
-use crate::bench::{BenchPart, is_preferred_bench_series, parse_bench_id, preferred_bench_series};
+use crate::bench::{BenchPart, is_preferred_bench_series, parse_bench_id, parse_v3_bench_id, preferred_bench_series};
 use crate::engine::romaji::RomajiJudge;
 use crate::engine::session::KeystrokeKind;
 use crate::layout::KeyboardLayout;
@@ -70,10 +71,28 @@ pub struct DailyTrend {
     pub retest_correlation: Option<f64>,
 }
 
+/// One raw bench-v3 language result. Multiple points can share a date when a
+/// user runs the benchmark more than once on that date.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BenchV3TrendPoint {
+    pub date: NaiveDate,
+    pub value: f64,
+    pub accuracy: f64,
+}
+
+/// Raw results and the rolling-three main line for one bench-v3 language.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BenchV3Trend {
+    pub target: String,
+    pub runs: Vec<BenchV3TrendPoint>,
+    pub mainline: Vec<DailyPoint>,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum DailyTrendSource {
     Bench,
+    BenchV3,
     #[default]
     CorrectedWpm,
 }
@@ -165,6 +184,8 @@ pub struct TransitionRegression {
 pub struct Progress {
     pub forms: Vec<SessionForm>,
     pub trends: Vec<DailyTrend>,
+    #[serde(default)]
+    pub bench_v3_trends: Vec<BenchV3Trend>,
     pub operating_point: Option<OperatingPoint>,
     pub curves: Vec<LearningCurve>,
     pub changepoints: Vec<ChangePoint>,
@@ -180,12 +201,9 @@ pub fn analyze_progress(
     as_of: DateTime<Utc>,
     references: &ReferencePrompts,
 ) -> Progress {
-    let filtered = records
-        .iter()
-        .filter(|record| !record.header.bench_id.as_deref().is_some_and(crate::bench::is_v3_bench_id))
-        .cloned()
-        .collect::<Vec<_>>();
-    let records = filtered.as_slice();
+    // Benchmarks participate in the player model for every series. This keeps
+    // v3 consistent with the existing v1/v2 treatment; downstream grades,
+    // skill axes, and practice-menu generation still receive legacy-only data.
     let mut ordered = records
         .iter()
         .filter(|record| record.header.metrics_version > 0)
@@ -212,6 +230,7 @@ pub fn analyze_progress(
             && expected.coverage >= MIN_FORM_COVERAGE
             && expected.wpm > 0.0
             && reference.wpm > 0.0
+            && !record.header.bench_id.as_deref().is_some_and(crate::bench::is_v3_bench_id)
         {
             let form = record.header.net_wpm / expected.wpm;
             forms.push(SessionForm {
@@ -239,10 +258,12 @@ pub fn analyze_progress(
         prior_keystrokes += record.log.keystrokes.iter().filter(|key| key.kind == KeystrokeKind::Char).count();
     }
 
-    let trends = ["en", "ja"]
+    let trend_rows = ["en", "ja"]
         .into_iter()
-        .filter_map(|target| daily_trend(target, records, &forms, as_of.date_naive()))
+        .filter_map(|target| daily_trend(target, records, &forms, as_of.date_naive(), options.model.pause_ms))
         .collect::<Vec<_>>();
+    let trends = trend_rows.iter().map(|row| row.0.clone()).collect::<Vec<_>>();
+    let bench_v3_trends = trend_rows.into_iter().filter_map(|row| row.1).collect::<Vec<_>>();
     let operating_samples = recent_operating_samples(records, &forms, as_of.date_naive());
     let operating_point = classify_operating_point(&operating_samples);
     let mut curves = Vec::new();
@@ -262,6 +283,7 @@ pub fn analyze_progress(
     Progress {
         forms,
         trends,
+        bench_v3_trends,
         operating_point,
         curves,
         changepoints,
@@ -459,11 +481,59 @@ fn aggregate_expected(model: &PlayerModel, prompts: &[ExpectedPrompt], min_n: u6
     })
 }
 
-fn daily_trend(target: &str, records: &[SessionRecord], forms: &[SessionForm], as_of: NaiveDate) -> Option<DailyTrend> {
+fn daily_trend(
+    target: &str,
+    records: &[SessionRecord],
+    forms: &[SessionForm],
+    as_of: NaiveDate,
+    pause_ms: u64,
+) -> Option<(DailyTrend, Option<BenchV3Trend>)> {
+    let v3_group = match target {
+        "en" => BenchV3Group::English,
+        "ja" => BenchV3Group::Japanese,
+        _ => return None,
+    };
+    let has_v3 = records.iter().any(|record| {
+        record
+            .header
+            .bench_id
+            .as_deref()
+            .and_then(parse_v3_bench_id)
+            .is_some_and(|(part, _)| v3_group.parts().contains(&part))
+    });
+    if has_v3 {
+        let v3 = bench_v3_language_trend(target, records, v3_group, pause_ms);
+        let speed = daily_v3_points(&v3.runs, |point| point.value);
+        let accuracy = daily_v3_points(&v3.runs, |point| point.accuracy);
+        if speed.is_empty() && accuracy.is_empty() {
+            return None;
+        }
+        let speed_slope_per_week = four_week_slope(&v3.mainline, as_of);
+        let accuracy_slope_per_week = four_week_slope(&accuracy, as_of);
+        let values = v3.runs.iter().map(|point| point.value).collect::<Vec<_>>();
+        let retest_correlation = (values.len() >= 6).then(|| serial_correlation(&values)).flatten();
+        return Some((
+            DailyTrend {
+                target: target.to_owned(),
+                source: DailyTrendSource::BenchV3,
+                speed,
+                accuracy,
+                speed_slope_per_week,
+                accuracy_slope_per_week,
+                retest_correlation,
+            },
+            Some(v3),
+        ));
+    }
+
     let bench_part = if target == "ja" { BenchPart::C } else { BenchPart::A };
     let bench_series = preferred_bench_series(records.iter().filter_map(|record| record.header.bench_id.as_deref()), bench_part);
     let mut by_day = BTreeMap::<NaiveDate, Vec<&SessionRecord>>::new();
-    for record in records.iter().filter(|record| session_language(record) == target) {
+    for record in records
+        .iter()
+        .filter(|record| !record.header.bench_id.as_deref().is_some_and(crate::bench::is_v3_bench_id))
+        .filter(|record| session_language(record) == target)
+    {
         if let Some(date) = parse_time(&record.header.started_at).map(|time| time.date_naive()) {
             by_day.entry(date).or_default().push(record);
         }
@@ -518,19 +588,59 @@ fn daily_trend(target: &str, records: &[SessionRecord], forms: &[SessionForm], a
     let speed_slope_per_week = four_week_slope(&speed, as_of);
     let accuracy_slope_per_week = four_week_slope(&accuracy, as_of);
     let retest_correlation = (benches.len() >= 6).then(|| serial_correlation(&benches)).flatten();
-    Some(DailyTrend {
-        target: target.to_owned(),
-        source: if bench_series.is_some() {
-            DailyTrendSource::Bench
-        } else {
-            DailyTrendSource::CorrectedWpm
+    Some((
+        DailyTrend {
+            target: target.to_owned(),
+            source: if bench_series.is_some() {
+                DailyTrendSource::Bench
+            } else {
+                DailyTrendSource::CorrectedWpm
+            },
+            speed,
+            accuracy,
+            speed_slope_per_week,
+            accuracy_slope_per_week,
+            retest_correlation,
         },
-        speed,
-        accuracy,
-        speed_slope_per_week,
-        accuracy_slope_per_week,
-        retest_correlation,
-    })
+        None,
+    ))
+}
+
+fn bench_v3_language_trend(target: &str, records: &[SessionRecord], group: BenchV3Group, pause_ms: u64) -> BenchV3Trend {
+    let runs = compute_bench_v3_group_runs(records, group, pause_ms)
+        .into_iter()
+        .filter_map(|run| {
+            Some(BenchV3TrendPoint {
+                date: run.date,
+                value: run.metrics.effective_wpm?,
+                accuracy: run.metrics.accuracy,
+            })
+        })
+        .collect::<Vec<_>>();
+    let medians = rolling_median_3(&runs.iter().map(|point| point.value).collect::<Vec<_>>());
+    let mut mainline_days = BTreeMap::<NaiveDate, Vec<f64>>::new();
+    for (point, value) in runs.iter().zip(medians) {
+        mainline_days.entry(point.date).or_default().push(value);
+    }
+    let mainline = mainline_days
+        .into_iter()
+        .filter_map(|(date, values)| median(&values).map(|value| DailyPoint { date, value }))
+        .collect();
+    BenchV3Trend {
+        target: target.to_owned(),
+        runs,
+        mainline,
+    }
+}
+
+fn daily_v3_points(rows: &[BenchV3TrendPoint], value: impl Fn(&BenchV3TrendPoint) -> f64) -> Vec<DailyPoint> {
+    let mut days = BTreeMap::<NaiveDate, Vec<f64>>::new();
+    for row in rows {
+        days.entry(row.date).or_default().push(value(row));
+    }
+    days.into_iter()
+        .filter_map(|(date, values)| median(&values).map(|value| DailyPoint { date, value }))
+        .collect()
 }
 
 fn four_week_slope(points: &[DailyPoint], as_of: NaiveDate) -> Option<f64> {

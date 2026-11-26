@@ -1586,7 +1586,6 @@ pub fn update_transition_model_cache(
         } else {
             let records = load_records_filtered(path, None, None)?
                 .into_iter()
-                .filter(|candidate| !candidate.header.bench_id.as_deref().is_some_and(crate::bench::is_v3_bench_id))
                 .filter(|candidate| candidate.header.layout == layout.name() && session_language(candidate) == language)
                 .collect::<Vec<_>>();
             let rebuild_as_of = records

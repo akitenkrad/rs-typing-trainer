@@ -45,6 +45,14 @@ fn record(date: NaiveDate, wpm: f64, bench_id: Option<&str>) -> SessionRecord {
     record
 }
 
+fn v3_record(date: NaiveDate, part: &str, form: u8, wpm: f64) -> SessionRecord {
+    let mut row = record(date, wpm, Some(&format!("bench-v3/{part}/{form:02}")));
+    let interval_us = (12_000_000.0 / wpm) as u64;
+    row.log.keystrokes[0].t_us = 100_000;
+    row.log.keystrokes[1].t_us = 100_000 + interval_us;
+    row
+}
+
 /// Benchmark runs on three days across both versions and all four parts,
 /// plus ordinary practice.
 fn bench_records() -> Vec<SessionRecord> {
@@ -221,6 +229,29 @@ fn bench_runs_of_every_version_and_part_form_one_series_of_daily_medians() {
         assert!(!text.contains("bench-v"), "image={image}:\n{text}");
         let first_chart = text.split("accuracy %").next().unwrap();
         assert_eq!(compact(first_chart).matches("bench").count(), 1, "image={image}:\n{text}");
+    }
+}
+
+#[test]
+fn v3_trend_screen_renders_the_separate_mainline_and_raw_run_series_at_reference_sizes() {
+    let mut records = Vec::new();
+    for (day, wpm) in [(1, 60.0), (2, 120.0), (3, 90.0), (4, 150.0)] {
+        records.push(v3_record(ymd(2026, 11, day), "EW", day as u8, wpm));
+        records.push(v3_record(ymd(2026, 11, day), "ES", day as u8, wpm));
+    }
+    for lang in [Lang::En, Lang::Ja] {
+        for image in [false, true] {
+            for (width, height) in [(80, 24), (120, 40)] {
+                let mut app = trend_app(records.clone(), image);
+                app.config.general.lang = lang;
+                let text = rows(&render_buffer(&app, width, height)).join("\n");
+                assert!(text.contains("WPM"), "lang={lang:?} image={image} {width}x{height}:\n{text}");
+                assert!(
+                    text.lines().last().is_some_and(|line| line.ends_with('┘')),
+                    "lang={lang:?} image={image} {width}x{height}:\n{text}"
+                );
+            }
+        }
     }
 }
 

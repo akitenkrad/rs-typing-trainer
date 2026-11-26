@@ -288,5 +288,25 @@ Half the difference between accuracy-adjusted speeds for the odd- and even-numbe
 
 Tempo and accuracy are calculated separately for each half and multiplied. Half of the absolute difference is shown as a split-half estimate of the run's error.
 
+### SEM
+
+Aliases: Standard error of measurement, 測定の標準誤差
+
+The benchmark's estimated measurement error, calculated from recent split-half differences.
+
+For up to the latest 10 runs, let d be half_a minus half_b. SEM is the sample standard deviation of d divided by 2. It requires at least 2 runs and is marked as a reference with fewer than 5.
+
+### Minimal detectable change (MDC)
+
+The smallest change that exceeds the benchmark's estimated measurement error.
+
+MDC95 is 1.96 × sqrt(2) × SEM. A smaller absolute change is shown as no change within measurement error; a change at least as large is shown with an up or down marker.
+
+### Median of the latest 3 runs
+
+The median of the current benchmark run and up to the two preceding runs.
+
+This smoothed line is used for bench-v3 trends, growth comparisons and the four-week slope. Until three runs exist, it uses all available runs; individual run values remain as faint points.
+
 ## Records
 

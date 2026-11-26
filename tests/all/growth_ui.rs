@@ -1,10 +1,13 @@
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use rs_typing_trainer::analysis::growth::{Accumulation, BenchGrowth, BenchPoint, GrowthReport, LanguageGrowth, PersonalBest, TrendPeriod};
+use rs_typing_trainer::analysis::bench_v3::{BenchV3Change, BenchV3Group, BenchV3Reliability};
+use rs_typing_trainer::analysis::growth::{
+    Accumulation, BenchGrowth, BenchPoint, BenchV3Growth, BenchV3GrowthTarget, GrowthReport, LanguageGrowth, PersonalBest, TrendPeriod,
+};
 use rs_typing_trainer::analysis::progress::{DailyPoint, DailyTrendSource};
 use rs_typing_trainer::app::{ANALYSIS_GROWTH_TAB, Screen};
-use rs_typing_trainer::bench::BenchPart;
+use rs_typing_trainer::bench::{BenchPart, BenchV3Part};
 use rs_typing_trainer::config::Config;
 use rs_typing_trainer::i18n::Lang;
 use rs_typing_trainer::ui;
@@ -67,9 +70,53 @@ fn fixture(lang: Lang) -> crate::common::TestApp {
             keystrokes: 183_402,
         },
         personal_bests: vec![],
+        bench_v3: vec![],
         promotions: vec![],
         graduations: vec![],
     };
+    app
+}
+
+fn v3_fixture(lang: Lang) -> crate::common::TestApp {
+    let mut app = fixture(lang);
+    let language = &mut app.analysis_growth.languages[0];
+    language.source = DailyTrendSource::BenchV3;
+    language.points = [(1, 40.0), (2, 45.0), (3, 50.0), (4, 55.0)]
+        .into_iter()
+        .map(|(date, value)| DailyPoint { date: day(date), value })
+        .collect();
+    language.benches = vec![BenchGrowth {
+        part: BenchPart::A,
+        first: BenchPoint { date: day(1), wpm: 34.0 },
+        latest: BenchPoint { date: day(4), wpm: 34.6 },
+        best: BenchPoint { date: day(4), wpm: 34.6 },
+    }];
+    let reliability = Some(BenchV3Reliability {
+        sample_count: 3,
+        sem_wpm: 0.9,
+        mdc95_wpm: 2.5,
+        reference_only: true,
+    });
+    let row = |target| BenchV3Growth {
+        target,
+        first: BenchPoint { date: day(1), wpm: 40.0 },
+        latest: BenchPoint { date: day(4), wpm: 55.0 },
+        best: BenchPoint { date: day(4), wpm: 55.0 },
+        raw: [(1, 40.0), (2, 50.0), (3, 45.0), (4, 60.0)]
+            .into_iter()
+            .map(|(date, wpm)| BenchPoint { date: day(date), wpm })
+            .collect(),
+        mainline: [(1, 40.0), (2, 45.0), (3, 45.0), (4, 50.0)]
+            .into_iter()
+            .map(|(date, wpm)| BenchPoint { date: day(date), wpm })
+            .collect(),
+        reliability,
+        change: BenchV3Change::Increase,
+    };
+    app.analysis_growth.bench_v3 = vec![
+        row(BenchV3GrowthTarget::Group(BenchV3Group::English)),
+        row(BenchV3GrowthTarget::Part(BenchV3Part::EW)),
+    ];
     app
 }
 
@@ -127,6 +174,42 @@ fn growth_renders_at_both_sizes_and_localizes_the_all_time_footer() {
             assert!(
                 compact.contains(&section.chars().filter(|character| !character.is_whitespace()).collect::<String>()),
                 "{width}x{height}: {text}"
+            );
+        }
+    }
+}
+
+#[test]
+fn v3_growth_renders_rolling_mainline_raw_points_mdc_and_previous_v2_at_reference_sizes() {
+    for (lang, source, rolling, previous) in [
+        (
+            Lang::En,
+            "benchmark v3 (accuracy-adjusted speed)",
+            "rolling median of the latest 3 runs",
+            "Previous series: v2",
+        ),
+        (Lang::Ja, "ベンチ v3（正確さを含む速さ）", "直近 3 回の中央値", "以前の系列: v2"),
+    ] {
+        for (width, height) in [(80, 24), (120, 40)] {
+            let mut app = v3_fixture(lang);
+            let mut pages = render(&app, width, height);
+            for _ in 0..8 {
+                app.handle_key(key(KeyCode::PageDown));
+                pages.push_str(&render(&app, width, height));
+            }
+            let compact = pages.chars().filter(|character| !character.is_whitespace()).collect::<String>();
+            let contains_compact =
+                |needle: &str| compact.contains(&needle.chars().filter(|character| !character.is_whitespace()).collect::<String>());
+            assert!(contains_compact(source), "{width}x{height}: {pages}");
+            assert!(contains_compact(rolling), "{width}x{height}: {pages}");
+            assert!(contains_compact(previous), "{width}x{height}: {pages}");
+            assert!(
+                contains_compact("English summary") || contains_compact("英語まとめ"),
+                "{width}x{height}: {pages}"
+            );
+            assert!(
+                pages.chars().any(|character| ('\u{2800}'..='\u{28ff}').contains(&character)),
+                "{width}x{height}: {pages}"
             );
         }
     }

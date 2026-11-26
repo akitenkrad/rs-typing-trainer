@@ -113,6 +113,7 @@ pub enum ResultOrigin {
 pub struct ResultComparison {
     pub previous_wpm_delta: Option<f64>,
     pub previous_effective_wpm_delta: Option<f64>,
+    pub previous_effective_wpm_reliability: Option<crate::analysis::bench_v3::BenchV3Reliability>,
     pub previous_cps_delta: Option<f64>,
     pub previous_accuracy_delta: Option<f64>,
     pub best_wpm: Option<f64>,
@@ -1882,11 +1883,7 @@ impl App {
     }
 
     fn reload_growth(&mut self) {
-        let records = db::load_records_filtered(&self.db_path(), None, None)
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|record| !record.header.bench_id.as_deref().is_some_and(is_v3_bench_id))
-            .collect::<Vec<_>>();
+        let records = db::load_records_filtered(&self.db_path(), None, None).unwrap_or_default();
         let prescriptions = db::load_prescriptions(&self.db_path()).unwrap_or_default();
         let selected_goal = db::load_selected_goal(&self.db_path()).unwrap_or_default();
         let progress = crate::analysis::coach::build(
@@ -1923,16 +1920,18 @@ impl App {
     fn reload_analysis(&mut self) {
         let today = self.analysis_as_of;
         let since = self.analysis_period.start_date(today);
-        self.analysis_records = db::load_records_filtered(&self.db_path(), since, self.analysis_mode_filter.as_deref())
-            .unwrap_or_default()
-            .into_iter()
+        self.analysis_records = db::load_records_filtered(&self.db_path(), since, self.analysis_mode_filter.as_deref()).unwrap_or_default();
+        let legacy_records = self
+            .analysis_records
+            .iter()
             .filter(|record| !record.header.bench_id.as_deref().is_some_and(is_v3_bench_id))
-            .collect();
+            .cloned()
+            .collect::<Vec<_>>();
         let geometry = crate::layout::geometry::geometry(&self.config.keyboard.geometry)
             .or_else(|| crate::layout::geometry::geometry("ansi"))
             .expect("bundled ansi geometry");
         self.analysis_details = analyze_records(
-            &self.analysis_records,
+            &legacy_records,
             self.practice_layout(),
             &geometry,
             AnalysisSettings {
@@ -1942,7 +1941,7 @@ impl App {
             },
         );
         self.analysis_summary = crate::analysis::summary::generate_with_metrics(
-            &self.analysis_records,
+            &legacy_records,
             &self.config,
             self.practice_layout(),
             &self.analysis_details,
@@ -1950,7 +1949,7 @@ impl App {
             self.config.general.lang,
         );
         let bench_records = if matches!(self.analysis_mode_filter.as_deref(), None | Some("bench")) {
-            self.analysis_records.clone()
+            legacy_records.clone()
         } else {
             db::load_records_filtered(&self.db_path(), since, Some("bench"))
                 .unwrap_or_default()
@@ -3353,6 +3352,10 @@ impl App {
                 let mut result_comparison = build_result_comparison(&records, &record);
                 result_comparison.previous_effective_wpm_delta =
                     crate::analysis::bench_v3::previous_effective_wpm_delta(&records, &record, self.config.analysis.pause_ms);
+                result_comparison.previous_effective_wpm_reliability =
+                    record.header.bench_id.as_deref().and_then(parse_v3_bench_id).and_then(|(part, _)| {
+                        crate::analysis::bench_v3::compute_bench_v3_part_reliability(&records, part, self.config.analysis.pause_ms)
+                    });
                 let personal_best_wpm = result_comparison.best_wpm;
                 let previous_wpm_delta = result_comparison.previous_wpm_delta;
                 self.last_result = Some(result);
@@ -4385,9 +4388,7 @@ impl App {
                 record.header.id = Some(id);
                 self.last_save_id = Some(id);
                 self.last_save_error = None;
-                if !record.header.bench_id.as_deref().is_some_and(is_v3_bench_id)
-                    && let Some(geometry) = crate::layout::geometry::geometry(&record.header.geometry)
-                {
+                if let Some(geometry) = crate::layout::geometry::geometry(&record.header.geometry) {
                     let layout = self.practice_layout().clone();
                     let _ = db::update_transition_model_cache(
                         &db_path,
@@ -4445,6 +4446,10 @@ impl App {
         self.result_comparison = build_result_comparison(&result_records, &record);
         self.result_comparison.previous_effective_wpm_delta =
             crate::analysis::bench_v3::previous_effective_wpm_delta(&result_records, &record, self.config.analysis.pause_ms);
+        self.result_comparison.previous_effective_wpm_reliability =
+            record.header.bench_id.as_deref().and_then(parse_v3_bench_id).and_then(|(part, _)| {
+                crate::analysis::bench_v3::compute_bench_v3_part_reliability(&result_records, part, self.config.analysis.pause_ms)
+            });
         self.result_record = Some(record);
         self.last_result = Some(result);
         self.legacy_wpm = None;
@@ -4975,6 +4980,7 @@ pub fn build_result_comparison(records: &[SessionRecord], current: &SessionRecor
     ResultComparison {
         previous_wpm_delta: previous.map(|record| current.header.net_wpm - record.header.net_wpm),
         previous_effective_wpm_delta: None,
+        previous_effective_wpm_reliability: None,
         previous_cps_delta: previous.map(|record| current.header.cps - record.header.cps),
         previous_accuracy_delta: previous.map(|record| current.header.accuracy - record.header.accuracy),
         best_wpm,

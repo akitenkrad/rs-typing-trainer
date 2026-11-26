@@ -1346,10 +1346,18 @@ fn render_v3_benchmark_result(frame: &mut Frame, app: &App, record: &SessionReco
     let margin = metrics
         .error_margin_wpm
         .map_or_else(|| "—".to_owned(), |value| format!("±{value:.1} WPM"));
-    let previous = app
-        .result_comparison
-        .previous_effective_wpm_delta
-        .map_or_else(|| Msg::InitialResult.text(lang).to_owned(), |value| format!("{value:+.1} WPM"));
+    let previous = app.result_comparison.previous_effective_wpm_delta.map_or_else(
+        || Msg::InitialResult.text(lang).to_owned(),
+        |value| {
+            format_v3_change(
+                value,
+                app.result_comparison
+                    .previous_effective_wpm_reliability
+                    .map(|reliability| reliability.mdc95_wpm),
+                lang,
+            )
+        },
+    );
     let labels = match lang {
         Lang::En => ("Accuracy-adjusted speed", "Tempo", "Accuracy", "This run's error margin", "Previous"),
         Lang::Ja => ("正確さを含む速さ", "テンポ", "正確さ", "この回の誤差の目安", "前回"),
@@ -1404,6 +1412,20 @@ fn render_v3_benchmark_result(frame: &mut Frame, app: &App, record: &SessionReco
 
 fn metric_wpm(value: Option<f64>) -> String {
     value.map_or_else(|| "—".to_owned(), |value| format!("{value:.1} WPM"))
+}
+
+pub(crate) fn format_v3_change(value: f64, mdc95_wpm: Option<f64>, lang: Lang) -> String {
+    use crate::analysis::bench_v3::{BenchV3Change, classify_bench_v3_change};
+
+    match classify_bench_v3_change(value, mdc95_wpm) {
+        BenchV3Change::DifferenceOnly => format!("{value:+.1} WPM"),
+        BenchV3Change::WithinError => match lang {
+            Lang::En => "No change (within measurement error)".to_owned(),
+            Lang::Ja => "変化なし（誤差の範囲）".to_owned(),
+        },
+        BenchV3Change::Increase => format!("▲ {value:+.1} WPM"),
+        BenchV3Change::Decrease => format!("▼ {value:+.1} WPM"),
+    }
 }
 
 fn render_benchmark_result(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, lang: Lang) {

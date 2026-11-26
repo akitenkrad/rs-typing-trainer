@@ -2,7 +2,7 @@ use chrono::{NaiveDate, TimeZone, Utc};
 use rs_typing_trainer::analysis::metrics::AnalysisSettings;
 use rs_typing_trainer::analysis::model::{ExpectedPrompt, TransitionEstimate, session_language};
 use rs_typing_trainer::analysis::progress::{
-    ChangePointKind, CurveKind, OperatingPointKind, ProgressOptions, ReferencePrompts, analyze_progress, classify_operating_point,
+    ChangePointKind, CurveKind, DailyTrendSource, OperatingPointKind, ProgressOptions, ReferencePrompts, analyze_progress, classify_operating_point,
     detect_changepoints, find_transition_regressions, fit_learning_curve,
 };
 use rs_typing_trainer::config::ErrorMode;
@@ -392,4 +392,120 @@ fn synthetic_record(id: i64, at: chrono::DateTime<Utc>, text: &str, speed_scale:
             keystrokes: keys,
         },
     }
+}
+
+fn v3_record(id: i64, at: chrono::DateTime<Utc>, part: &str, form: u8, effective_wpm: f64) -> SessionRecord {
+    let speed_scale = 100.0 / effective_wpm;
+    let mut record = synthetic_record(id, at, "aaaa", speed_scale);
+    record.header.mode = "bench".to_owned();
+    record.header.bench_id = Some(format!("bench-v3/{part}/{form:02}"));
+    record
+}
+
+#[test]
+fn v3_daily_trend_has_language_priority_and_uses_same_day_run_median() {
+    let as_of = Utc.with_ymd_and_hms(2026, 11, 20, 12, 0, 0).unwrap();
+    let at = |day, hour| Utc.with_ymd_and_hms(2026, 11, day, hour, 0, 0).unwrap();
+    let mut old_en = synthetic_record(100, at(1, 12), "aaaa", 1.0);
+    old_en.header.mode = "bench".into();
+    old_en.header.bench_id = Some("bench-v2/A/01".into());
+    old_en.header.net_wpm = 999.0;
+    let mut old_ja = synthetic_record(101, at(1, 13), "aaaa", 1.0);
+    old_ja.header.mode = "bench".into();
+    old_ja.header.mode_params = serde_json::json!({"lang": "ja"}).to_string();
+    old_ja.header.bench_id = Some("bench-v2/C/01".into());
+    old_ja.header.net_wpm = 42.0;
+    let records = vec![
+        old_en,
+        old_ja,
+        v3_record(110, at(8, 9), "EW", 1, 60.0),
+        v3_record(111, at(8, 9), "ES", 1, 60.0),
+        v3_record(112, at(8, 18), "EW", 2, 90.0),
+        v3_record(113, at(8, 18), "ES", 2, 90.0),
+    ];
+    let result = analyze_progress(
+        &records,
+        &builtin_layout("qwerty").unwrap(),
+        &geometry("ansi").unwrap(),
+        ProgressOptions {
+            model: AnalysisSettings::default(),
+            min_transition_n: 5,
+        },
+        as_of,
+        &ReferencePrompts::default(),
+    );
+
+    let en = result.trends.iter().find(|trend| trend.target == "en").unwrap();
+    assert_eq!(en.source, DailyTrendSource::BenchV3);
+    assert_eq!(en.speed.len(), 1);
+    assert!((en.speed[0].value - 75.0).abs() < 0.01, "{en:?}");
+    let v3 = result.bench_v3_trends.iter().find(|trend| trend.target == "en").unwrap();
+    assert_eq!(v3.runs.len(), 2);
+    assert!((v3.runs[0].accuracy - 1.0).abs() < 1e-12);
+    assert_eq!(v3.mainline.len(), 1);
+    assert!((v3.mainline[0].value - 67.5).abs() < 0.01, "{v3:?}");
+    assert!(en.speed.iter().all(|point| point.value != 999.0));
+
+    let ja = result.trends.iter().find(|trend| trend.target == "ja").unwrap();
+    assert_eq!(ja.source, DailyTrendSource::Bench);
+    assert_eq!(ja.speed.iter().map(|point| point.value).collect::<Vec<_>>(), [42.0]);
+}
+
+#[test]
+fn v3_rolling_three_mainline_covers_one_two_three_and_four_runs_and_drives_slope() {
+    let as_of = Utc.with_ymd_and_hms(2026, 11, 22, 12, 0, 0).unwrap();
+    let mut records = Vec::new();
+    for (run, (day, wpm)) in [(1, (1, 10.0)), (2, (8, 20.0)), (3, (15, 100.0)), (4, (22, 40.0))] {
+        let at = Utc.with_ymd_and_hms(2026, 11, day, 12, 0, 0).unwrap();
+        records.push(v3_record(200 + run * 2, at, "EW", run as u8, wpm));
+        records.push(v3_record(201 + run * 2, at, "ES", run as u8, wpm));
+    }
+    let result = analyze_progress(
+        &records,
+        &builtin_layout("qwerty").unwrap(),
+        &geometry("ansi").unwrap(),
+        ProgressOptions {
+            model: AnalysisSettings::default(),
+            min_transition_n: 5,
+        },
+        as_of,
+        &ReferencePrompts::default(),
+    );
+    let trend = result.trends.iter().find(|trend| trend.target == "en").unwrap();
+    let v3 = result.bench_v3_trends.iter().find(|trend| trend.target == "en").unwrap();
+    let raw = v3.runs.iter().map(|point| point.value).collect::<Vec<_>>();
+    let mainline = v3.mainline.iter().map(|point| point.value).collect::<Vec<_>>();
+    assert_eq!(raw.len(), 4);
+    for (actual, expected) in raw.iter().zip([10.0, 20.0, 100.0, 40.0]) {
+        assert!((*actual - expected).abs() < 0.01, "{raw:?}");
+    }
+    for (actual, expected) in mainline.iter().zip([10.0, 15.0, 20.0, 40.0]) {
+        assert!((*actual - expected).abs() < 0.01, "{mainline:?}");
+    }
+    assert!(trend.speed_slope_per_week.is_some_and(|slope| slope > 0.0), "{trend:?}");
+}
+
+#[test]
+fn v3_transition_part_neither_selects_the_english_v3_series_nor_leaks_into_fallback_accuracy() {
+    let as_of = Utc.with_ymd_and_hms(2026, 11, 10, 12, 0, 0).unwrap();
+    let mut practice = synthetic_record(300, Utc.with_ymd_and_hms(2026, 11, 1, 12, 0, 0).unwrap(), "aaaa", 1.0);
+    practice.header.accuracy = 0.8;
+    let mut transition = v3_record(301, Utc.with_ymd_and_hms(2026, 11, 2, 12, 0, 0).unwrap(), "PW", 1, 50.0);
+    transition.header.accuracy = 0.1;
+    let result = analyze_progress(
+        &[practice, transition],
+        &builtin_layout("qwerty").unwrap(),
+        &geometry("ansi").unwrap(),
+        ProgressOptions {
+            model: AnalysisSettings::default(),
+            min_transition_n: 5,
+        },
+        as_of,
+        &ReferencePrompts::default(),
+    );
+    let en = result.trends.iter().find(|trend| trend.target == "en").unwrap();
+    assert_eq!(en.source, DailyTrendSource::CorrectedWpm);
+    assert_eq!(en.accuracy.len(), 1, "{en:?}");
+    assert!((en.accuracy[0].value - 0.8).abs() < 1e-12, "{en:?}");
+    assert!(result.bench_v3_trends.is_empty());
 }

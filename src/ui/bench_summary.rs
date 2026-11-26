@@ -9,7 +9,10 @@ use ratatui_image::Image;
 use unicode_width::UnicodeWidthStr;
 
 use crate::analysis::bench_summary::{BenchChange, BenchMetric, BenchmarkRunAnalysis, PracticeSuggestion, WeakFingerReason};
-use crate::analysis::bench_v3::{BenchV3Group, compute_bench_v3_group_metrics, compute_bench_v3_metrics, previous_effective_wpm_delta};
+use crate::analysis::bench_v3::{
+    BenchV3Group, compute_bench_v3_group_metrics, compute_bench_v3_group_reliability, compute_bench_v3_group_runs, compute_bench_v3_metrics,
+    compute_bench_v3_part_reliability, previous_effective_wpm_delta,
+};
 use crate::analysis::grades::{Component, Level};
 use crate::app::App;
 use crate::bench::{BenchPart, parse_bench_id};
@@ -78,6 +81,8 @@ fn render_v3_text(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         };
         let metrics = compute_bench_v3_metrics(std::slice::from_ref(record), app.config.analysis.pause_ms);
         let previous = previous_effective_wpm_delta(&app.bench_summary_records, record, app.config.analysis.pause_ms);
+        let reliability = compute_bench_v3_part_reliability(&app.bench_summary_records, part, app.config.analysis.pause_ms);
+        let previous = previous.map(|value| crate::ui::result::format_v3_change(value, reliability.map(|estimate| estimate.mdc95_wpm), lang));
         lines.push(Line::from(row(
             v3_part_label(part, lang),
             [
@@ -85,28 +90,47 @@ fn render_v3_text(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 &number(metrics.tempo_wpm),
                 &percent(metrics.accuracy),
                 &signed_margin(metrics.error_margin_wpm),
-                &signed(previous),
+                previous.as_deref().unwrap_or("—"),
             ],
         )));
     }
     lines.push(Line::from(""));
     for group in [BenchV3Group::English, BenchV3Group::Japanese, BenchV3Group::Transition] {
         if let Some(summary) = compute_bench_v3_group_metrics(&app.bench_summary_current, group, app.config.analysis.pause_ms) {
-            lines.push(Line::from(group_line(&summary, lang)));
+            let reliability = compute_bench_v3_group_reliability(&app.bench_summary_records, group, app.config.analysis.pause_ms);
+            let previous = group_previous_delta(
+                &app.bench_summary_records,
+                &app.bench_summary_current,
+                group,
+                app.config.analysis.pause_ms,
+            );
+            lines.push(Line::from(group_line(
+                &summary,
+                previous,
+                reliability.map(|estimate| estimate.mdc95_wpm),
+                lang,
+            )));
         }
     }
     lines.push(Line::from(""));
+    for group in [BenchV3Group::English, BenchV3Group::Japanese] {
+        lines.push(Line::from(yardstick_error_line(
+            group,
+            compute_bench_v3_group_reliability(&app.bench_summary_records, group, app.config.analysis.pause_ms),
+            lang,
+        )));
+    }
     lines.push(Line::from(Span::styled(
         match lang {
-            Lang::En => "v3 analysis is coming soon",
-            Lang::Ja => "v3 の分析は準備中",
+            Lang::En => "Grades will appear in the next update",
+            Lang::Ja => "段階は次の更新で表示",
         },
         Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
     )));
     frame.render_widget(Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: true }), left_inset(area));
 }
 
-fn group_line(summary: &crate::analysis::bench_v3::BenchV3GroupMetrics, lang: Lang) -> String {
+fn group_line(summary: &crate::analysis::bench_v3::BenchV3GroupMetrics, previous: Option<f64>, mdc95_wpm: Option<f64>, lang: Lang) -> String {
     let label = match (summary.group, lang) {
         (BenchV3Group::English, Lang::En) => "English total",
         (BenchV3Group::Japanese, Lang::En) => "Japanese total",
@@ -124,21 +148,77 @@ fn group_line(summary: &crate::analysis::bench_v3::BenchV3GroupMetrics, lang: La
     } else {
         ""
     };
+    let previous = previous.map(|value| crate::ui::result::format_v3_change(value, mdc95_wpm, lang));
+    let previous = previous.as_deref().unwrap_or_else(|| Msg::InitialResult.text(lang));
     match lang {
         Lang::En => format!(
-            "{label} {} (tempo {} · accuracy {}) {}{partial}",
+            "{label} {} (tempo {} · accuracy {}) {} · previous {previous}{partial}",
             metric_wpm(metrics.effective_wpm),
             number(metrics.tempo_wpm),
             percent(metrics.accuracy),
             signed_margin_with_unit(metrics.error_margin_wpm),
         ),
         Lang::Ja => format!(
-            "{label} {}（テンポ {}・正確さ {}） {}{partial}",
+            "{label} {}（テンポ {}・正確さ {}） {}・前回 {previous}{partial}",
             metric_wpm(metrics.effective_wpm),
             number(metrics.tempo_wpm),
             percent(metrics.accuracy),
             signed_margin_with_unit(metrics.error_margin_wpm),
         ),
+    }
+}
+
+fn group_previous_delta(records: &[SessionRecord], current: &[SessionRecord], group: BenchV3Group, pause_ms: u64) -> Option<f64> {
+    let current_record = current.iter().find(|record| {
+        record
+            .header
+            .bench_id
+            .as_deref()
+            .and_then(crate::bench::parse_v3_bench_id)
+            .is_some_and(|(part, _)| group.parts().contains(&part))
+    })?;
+    let (_, form) = current_record.header.bench_id.as_deref().and_then(crate::bench::parse_v3_bench_id)?;
+    let date = chrono::DateTime::parse_from_rfc3339(&current_record.header.finished_at)
+        .ok()?
+        .date_naive();
+    let runs = compute_bench_v3_group_runs(records, group, pause_ms);
+    let index = runs.iter().position(|run| run.date == date && run.form == form)?;
+    let current = runs.get(index)?.metrics.effective_wpm?;
+    let previous = runs.get(index.checked_sub(1)?)?.metrics.effective_wpm?;
+    Some(current - previous)
+}
+
+fn yardstick_error_line(group: BenchV3Group, reliability: Option<crate::analysis::bench_v3::BenchV3Reliability>, lang: Lang) -> String {
+    let label = match (group, lang) {
+        (BenchV3Group::English, Lang::En) => "English",
+        (BenchV3Group::Japanese, Lang::En) => "Japanese",
+        (BenchV3Group::English, Lang::Ja) => "英語",
+        (BenchV3Group::Japanese, Lang::Ja) => "日本語",
+        (BenchV3Group::Transition, _) => unreachable!("the summary shows language reliability only"),
+    };
+    match (reliability, lang) {
+        (Some(value), Lang::En) => format!(
+            "{label} measurement error: SEM {:.1} WPM · meaningful change {:.1} WPM{}",
+            value.sem_wpm,
+            value.mdc95_wpm,
+            if value.reference_only {
+                format!(" (reference: {} runs)", value.sample_count)
+            } else {
+                String::new()
+            }
+        ),
+        (Some(value), Lang::Ja) => format!(
+            "{label}のこの物差しの誤差: SEM {:.1} WPM・意味のある変化 {:.1} WPM{}",
+            value.sem_wpm,
+            value.mdc95_wpm,
+            if value.reference_only {
+                format!("（参考: {} 回分）", value.sample_count)
+            } else {
+                String::new()
+            }
+        ),
+        (None, Lang::En) => format!("{label} measurement error: available after 2 runs"),
+        (None, Lang::Ja) => format!("{label}のこの物差しの誤差: 2 回分で表示"),
     }
 }
 
@@ -163,10 +243,6 @@ fn metric_wpm(value: Option<f64>) -> String {
 
 fn percent(value: f64) -> String {
     format!("{:.1}%", value * 100.0)
-}
-
-fn signed(value: Option<f64>) -> String {
-    value.map_or_else(|| "—".to_owned(), |value| format!("{value:+.1}"))
 }
 
 fn signed_margin(value: Option<f64>) -> String {

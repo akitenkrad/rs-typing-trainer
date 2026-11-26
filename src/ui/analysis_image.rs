@@ -9,7 +9,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use tiny_skia::{FillRule, LineCap, LineJoin, Paint, PathBuilder, Pixmap, PixmapPaint, Stroke, StrokeDash, Transform};
 use unicode_width::UnicodeWidthChar;
 
+use crate::analysis::bench_v3::{BenchV3Group, compute_bench_v3_group_runs, rolling_median_3};
 use crate::analysis::grades::Level;
+use crate::analysis::metrics::AnalysisSettings;
 use crate::analysis::metrics::GroupMetric;
 use crate::bench::parse_bench_id;
 use crate::graphics::{CellPixels, GraphicsDetection};
@@ -244,6 +246,8 @@ pub struct TrendSeries {
     pub name: String,
     pub color: Color,
     pub points: Vec<TrendPoint>,
+    /// Individual v3 runs, drawn as faint points behind the rolling median.
+    pub raw_points: Vec<TrendPoint>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -513,6 +517,7 @@ pub(crate) struct TextTrendSeries {
     pub(crate) color: Color,
     /// `None` is the bucket of records whose timestamp could not be read.
     pub(crate) points: Vec<(Option<NaiveDate>, f64)>,
+    pub(crate) raw_points: Vec<(Option<NaiveDate>, f64)>,
 }
 
 pub(crate) struct TextTrendData {
@@ -529,7 +534,7 @@ impl TrendChartSpec {
         let values = self
             .series
             .iter()
-            .flat_map(|series| series.points.iter().map(|point| point.value))
+            .flat_map(|series| series.points.iter().chain(&series.raw_points).map(|point| point.value))
             .chain(
                 self.forecasts
                     .iter()
@@ -558,9 +563,11 @@ pub fn shared_trend_date_range<'a>(specs: impl IntoIterator<Item = &'a TrendChar
 /// forecast.
 pub fn shared_trend_axis<'a>(specs: impl IntoIterator<Item = &'a TrendChartSpec>) -> Option<TrendAxis> {
     let specs = specs.into_iter().collect::<Vec<_>>();
-    let dates = specs
-        .iter()
-        .flat_map(|spec| spec.series.iter().flat_map(|series| series.points.iter().map(|point| point.date)));
+    let dates = specs.iter().flat_map(|spec| {
+        spec.series
+            .iter()
+            .flat_map(|series| series.points.iter().chain(&series.raw_points).map(|point| point.date))
+    });
     let mut axis = TrendAxis::from_dates(dates)?;
     for forecast in specs.iter().flat_map(|spec| &spec.forecasts) {
         axis.extend_to(forecast.end_date);
@@ -579,6 +586,7 @@ struct SeriesKey {
     name: String,
     color: [u8; 3],
     points: Vec<PointKey>,
+    raw_points: Vec<PointKey>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -977,6 +985,7 @@ fn chart_key(spec: &TrendChartSpec, x_range: Option<TrendAxis>) -> AnalysisImage
                 name: series.name.clone(),
                 color: color_rgb(series.color, [255, 255, 255]),
                 points: series.points.iter().map(&point_key).collect(),
+                raw_points: series.raw_points.iter().map(&point_key).collect(),
             })
             .collect(),
         forecasts: spec
@@ -1871,6 +1880,11 @@ fn render_trend_chart_with_optional_range(cell_pixels: CellPixels, spec: &TrendC
 
     for series in &spec.series {
         let color = color_rgb(series.color, [255, 255, 255]);
+        for point in &series.raw_points {
+            if let Some(circle) = PathBuilder::from_circle(x(point.date), y(point.value), 1.8) {
+                fill_path(&mut pixmap, &circle, color, 90);
+            }
+        }
         if series.points.len() >= 2 {
             let mut path = PathBuilder::new();
             if let Some(first) = series.points.first() {
@@ -1908,7 +1922,7 @@ fn render_trend_chart_with_optional_range(cell_pixels: CellPixels, spec: &TrendC
 
 pub fn build_trend_data(records: &[SessionRecord], kind: MetricKind, lang: Lang) -> Option<TrendChartSpec> {
     let groups = aggregate_trend(records, kind, lang);
-    let dates = groups
+    let mut dates = groups
         .values()
         .flat_map(|days| days.keys())
         .filter_map(|date| match date {
@@ -1916,10 +1930,12 @@ pub fn build_trend_data(records: &[SessionRecord], kind: MetricKind, lang: Lang)
             AggregatedDate::Unknown => None,
         })
         .collect::<BTreeSet<_>>();
+    let v3 = bench_v3_trend_series(records, kind, lang);
+    dates.extend(v3.iter().flat_map(|series| series.raw_points.iter().map(|point| point.date)));
     if dates.len() < 2 {
         return None;
     }
-    let series = groups
+    let mut series = groups
         .into_iter()
         .enumerate()
         .filter_map(|(index, (name, days))| {
@@ -1936,10 +1952,16 @@ pub fn build_trend_data(records: &[SessionRecord], kind: MetricKind, lang: Lang)
             (!points.is_empty()).then_some(TrendSeries {
                 name,
                 color: SERIES_COLORS[index % SERIES_COLORS.len()],
+                raw_points: Vec::new(),
                 points,
             })
         })
-        .collect();
+        .collect::<Vec<_>>();
+    let offset = series.len();
+    series.extend(v3.into_iter().enumerate().map(|(index, mut row)| {
+        row.color = SERIES_COLORS[(offset + index) % SERIES_COLORS.len()];
+        row
+    }));
     Some(TrendChartSpec {
         kind,
         cells: Size::new(1, 1),
@@ -1951,16 +1973,22 @@ pub fn build_trend_data(records: &[SessionRecord], kind: MetricKind, lang: Lang)
 
 pub(crate) fn build_text_trend_data(records: &[SessionRecord], kind: MetricKind, lang: Lang) -> Option<TextTrendData> {
     let groups = aggregate_trend(records, kind, lang);
-    let dates = groups.values().flat_map(|days| days.keys()).collect::<BTreeSet<_>>();
+    let v3 = bench_v3_trend_series(records, kind, lang);
+    let mut dates = groups.values().flat_map(|days| days.keys().cloned()).collect::<BTreeSet<_>>();
+    dates.extend(
+        v3.iter()
+            .flat_map(|series| series.raw_points.iter().map(|point| AggregatedDate::Known(point.date))),
+    );
     if dates.len() < 2 {
         return None;
     }
-    let series = groups
+    let mut series = groups
         .into_iter()
         .enumerate()
         .map(|(index, (name, days))| TextTrendSeries {
             name,
             color: SERIES_COLORS[index % SERIES_COLORS.len()],
+            raw_points: Vec::new(),
             points: days
                 .into_iter()
                 .map(|(date, values)| {
@@ -1972,12 +2000,78 @@ pub(crate) fn build_text_trend_data(records: &[SessionRecord], kind: MetricKind,
                 })
                 .collect(),
         })
-        .collect();
+        .collect::<Vec<_>>();
+    let offset = series.len();
+    series.extend(v3.into_iter().enumerate().map(|(index, row)| TextTrendSeries {
+        name: row.name,
+        color: SERIES_COLORS[(offset + index) % SERIES_COLORS.len()],
+        points: row.points.into_iter().map(|point| (Some(point.date), point.value)).collect(),
+        raw_points: row.raw_points.into_iter().map(|point| (Some(point.date), point.value)).collect(),
+    }));
     Some(TextTrendData { series })
+}
+
+fn bench_v3_trend_series(records: &[SessionRecord], kind: MetricKind, lang: Lang) -> Vec<TrendSeries> {
+    if kind == MetricKind::Iki {
+        return Vec::new();
+    }
+    let settings = AnalysisSettings::default();
+    [BenchV3Group::English, BenchV3Group::Japanese, BenchV3Group::Transition]
+        .into_iter()
+        .filter_map(|group| {
+            let raw_points = compute_bench_v3_group_runs(records, group, settings.pause_ms)
+                .into_iter()
+                .filter_map(|run| {
+                    let value = match kind {
+                        MetricKind::NetWpm => run.metrics.effective_wpm?,
+                        MetricKind::Accuracy => run.metrics.accuracy * 100.0,
+                        MetricKind::Iki => return None,
+                    };
+                    Some(TrendPoint { date: run.date, value })
+                })
+                .collect::<Vec<_>>();
+            if raw_points.is_empty() {
+                return None;
+            }
+            let rolling = rolling_median_3(&raw_points.iter().map(|point| point.value).collect::<Vec<_>>());
+            let mut days = BTreeMap::<NaiveDate, Vec<f64>>::new();
+            for (point, value) in raw_points.iter().zip(rolling) {
+                days.entry(point.date).or_default().push(value);
+            }
+            let points = days
+                .into_iter()
+                .map(|(date, values)| TrendPoint {
+                    date,
+                    value: median(&values),
+                })
+                .collect();
+            Some(TrendSeries {
+                name: bench_v3_group_label(group, lang),
+                color: Color::Cyan,
+                points,
+                raw_points,
+            })
+        })
+        .collect()
+}
+
+fn bench_v3_group_label(group: BenchV3Group, lang: Lang) -> String {
+    match (group, lang) {
+        (BenchV3Group::English, Lang::En) => "bench v3 English",
+        (BenchV3Group::Japanese, Lang::En) => "bench v3 Japanese",
+        (BenchV3Group::Transition, Lang::En) => "bench v3 transitions",
+        (BenchV3Group::English, Lang::Ja) => "ベンチ v3 英語",
+        (BenchV3Group::Japanese, Lang::Ja) => "ベンチ v3 日本語",
+        (BenchV3Group::Transition, Lang::Ja) => "ベンチ v3 移り変わり",
+    }
+    .to_owned()
 }
 
 fn aggregate_trend(records: &[SessionRecord], kind: MetricKind, lang: Lang) -> BTreeMap<String, BTreeMap<AggregatedDate, Vec<f64>>> {
     let mut groups = BTreeMap::<String, BTreeMap<AggregatedDate, Vec<f64>>>::new();
+    let has_v3 = records
+        .iter()
+        .any(|record| record.header.bench_id.as_deref().is_some_and(crate::bench::is_v3_bench_id));
     for record in records
         .iter()
         .filter(|record| kind != MetricKind::Iki || record.header.metrics_version != 0)
@@ -1990,7 +2084,14 @@ fn aggregate_trend(records: &[SessionRecord], kind: MetricKind, lang: Lang) -> B
         // the day's point is the median over all of that day's parts.
         let is_bench = record.header.bench_id.as_deref().and_then(parse_bench_id).is_some();
         let series = if is_bench {
-            mode_label("bench", lang)
+            if has_v3 {
+                match lang {
+                    Lang::En => "bench v2 (previous series)".to_owned(),
+                    Lang::Ja => "以前の系列（v2）".to_owned(),
+                }
+            } else {
+                mode_label("bench", lang)
+            }
         } else {
             mode_label(&record.header.mode, lang)
         };

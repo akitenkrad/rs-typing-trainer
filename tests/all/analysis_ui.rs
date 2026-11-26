@@ -50,6 +50,80 @@ fn save_record(path: &std::path::Path, mode: ModeKind, bench_id: Option<&str>, w
     db::save(path, &record).unwrap();
 }
 
+fn v3_split_record(id: i64, day: u32, part: &str, form: u8, half_a_wpm: f64, half_b_wpm: f64) -> SessionRecord {
+    let intervals_us = [(12_000_000.0 / half_a_wpm).round() as u64, (12_000_000.0 / half_b_wpm).round() as u64];
+    let mut items = Vec::new();
+    let mut keystrokes = Vec::new();
+    for item_idx in 0..4_u32 {
+        let shown_us = u64::from(item_idx) * 1_000_000;
+        items.push(rs_typing_trainer::engine::session::ItemLog {
+            idx: item_idx,
+            text: "aa".into(),
+            reading: None,
+            kind: None,
+            shown_us,
+            done_us: None,
+            outcome: rs_typing_trainer::engine::session::ItemOutcome::Completed,
+        });
+        for pos in 0..2_u32 {
+            keystrokes.push(rs_typing_trainer::engine::session::KeystrokeLog {
+                seq: item_idx * 2 + pos,
+                t_us: shown_us + 100_000 + u64::from(pos) * intervals_us[item_idx as usize % 2],
+                release_us: None,
+                item_idx,
+                pos,
+                kind: rs_typing_trainer::engine::session::KeystrokeKind::Char,
+                typed: Some("a".into()),
+                expected: Some("a".into()),
+                correct: true,
+                code: Some("KeyA".into()),
+            });
+        }
+    }
+    let mut record = SessionRecord::from_log(
+        &Config::default(),
+        rs_typing_trainer::engine::session::SessionLog {
+            duration_us: 4_000_000,
+            items,
+            keystrokes,
+            ..Default::default()
+        },
+        Utc.with_ymd_and_hms(2026, 11, day, 12, 0, 0).unwrap(),
+    );
+    record.header.id = Some(id);
+    record.header.mode = "bench".into();
+    record.header.bench_id = Some(format!("bench-v3/{part}/{form:02}"));
+    record
+}
+
+fn v3_bench_analysis_app(lang: Lang) -> common::TestApp {
+    let mut config = Config::default();
+    config.general.lang = lang;
+    let mut app = test_app_at(config, as_of());
+    app.handle_key(key(KeyCode::Char('a')));
+    app.analysis_tab = rs_typing_trainer::app::ANALYSIS_BENCH_TAB;
+
+    let mut records = Vec::new();
+    let mut id = 1_i64;
+    for (day, form, half_a, half_b) in [(10, 1, 60.0, 40.0), (11, 2, 120.0, 40.0)] {
+        for part in ["EW", "ES", "JW", "JS", "PW"] {
+            records.push(v3_split_record(id, day, part, form, half_a, half_b));
+            id += 1;
+        }
+    }
+    for (day, form, wpm) in [(8, 1, 35.0), (9, 2, 42.0)] {
+        let mut record = v3_split_record(id, day, "EW", form, 60.0, 40.0);
+        record.header.bench_id = Some(format!("bench-v2/A/{form:02}"));
+        record.header.net_wpm = wpm;
+        records.push(record);
+        id += 1;
+    }
+    // The view owns trial ordering rather than relying on caller order.
+    records.reverse();
+    app.analysis_records = records;
+    app
+}
+
 #[test]
 fn analysis_mode_filter_includes_phrase_sessions() {
     let directory = TempDir::new().unwrap();
@@ -320,6 +394,72 @@ fn analysis_bench_tab_combines_v1_and_v2_for_part_b() {
     let output = render(&app);
     let compact = output.chars().filter(|character| !character.is_whitespace()).collect::<String>();
     assert!(compact.contains("+12.0WPM"), "{output}");
+}
+
+#[test]
+fn analysis_bench_tab_shows_v3_trajectories_reliability_and_previous_v2_series() {
+    for (lang, parts, english, japanese, transition, no_change, previous, reference) in [
+        (
+            Lang::En,
+            [
+                "English words: 48.0 → 60.0 WPM",
+                "English sentences: 48.0 → 60.0 WPM",
+                "Japanese words and phrases: 48.0 → 60.0 WPM",
+                "Japanese sentences: 48.0 → 60.0 WPM",
+                "Pseudo-words: 48.0 → 60.0 WPM",
+            ],
+            "English: 48.0 → 60.0 WPM",
+            "Japanese: 48.0 → 60.0 WPM",
+            "Transitions: 48.0 → 60.0 WPM",
+            "no change (within measurement error)",
+            "Previous series (v2)",
+            "reference",
+        ),
+        (
+            Lang::Ja,
+            [
+                "英単語: 48.0 → 60.0 WPM",
+                "英文: 48.0 → 60.0 WPM",
+                "日本語の単語と句: 48.0 → 60.0 WPM",
+                "日本語の短文: 48.0 → 60.0 WPM",
+                "擬似語: 48.0 → 60.0 WPM",
+            ],
+            "英語: 48.0 → 60.0 WPM",
+            "日本語: 48.0 → 60.0 WPM",
+            "移り変わり: 48.0 → 60.0 WPM",
+            "変化なし（誤差の範囲）",
+            "以前の系列（v2）",
+            "参考",
+        ),
+    ] {
+        let app = v3_bench_analysis_app(lang);
+        for (width, height) in [(80, 24), (120, 40)] {
+            let output = render_size(&app, width, height);
+            let normalized = compact(&output);
+            for expected in parts.into_iter().chain([
+                english,
+                japanese,
+                transition,
+                no_change,
+                previous,
+                reference,
+                "SEM 21.2 WPM",
+                "MDC95 58.8 WPM",
+                "n=2",
+            ]) {
+                assert!(
+                    normalized.contains(&compact(expected)),
+                    "{width}x{height}, {lang:?}, missing {expected:?}:\n{output}"
+                );
+            }
+            assert!(
+                normalized.contains(&compact("A: 35.0 → 42.0 WPM")),
+                "{width}x{height}, {lang:?}:\n{output}"
+            );
+            assert!(!output.contains("Sustained speed"), "{width}x{height}, {lang:?}:\n{output}");
+            assert!(!output.contains("持続速度"), "{width}x{height}, {lang:?}:\n{output}");
+        }
+    }
 }
 
 #[test]

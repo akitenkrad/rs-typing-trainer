@@ -227,7 +227,9 @@ fn v3_runs_warmup_then_five_scored_parts_with_fixed_conditions_and_restores_conf
         assert_eq!(rs_typing_trainer::analysis::model::session_language(record), params["lang"]);
     }
     let summary = render(&app);
-    assert!(summary.contains("v3 analysis is coming soon"), "{summary}");
+    assert!(summary.contains("measurement error"), "{summary}");
+    assert!(summary.contains("Grades will appear in the next update"), "{summary}");
+    assert!(!summary.contains("v3 analysis is coming soon"), "{summary}");
     for part in [
         "English words",
         "English sentences",
@@ -305,7 +307,7 @@ fn v3_forms_rotate_only_within_v3_and_resume_replays_warmup_before_first_missing
 }
 
 #[test]
-fn v3_records_are_not_benchmarks_or_practice_inputs_for_v2_analysis_but_remain_in_history() {
+fn v3_records_keep_v2_as_a_previous_trend_series_and_remain_in_history() {
     let v2_earlier = record(23, "bench-v2/A/08", 35.0);
     let v2 = record(24, "bench-v2/A/01", 40.0);
     let v3 = record(25, "bench-v3/EW/01", 120.0);
@@ -318,7 +320,7 @@ fn v3_records_are_not_benchmarks_or_practice_inputs_for_v2_analysis_but_remain_i
     let bench_points = trend
         .series
         .iter()
-        .find(|series| series.name == "bench")
+        .find(|series| series.name == "bench v2 (previous series)")
         .map(|series| series.points.iter().map(|point| point.value).collect::<Vec<_>>())
         .unwrap();
     assert_eq!(bench_points, [35.0, 40.0]);
@@ -344,6 +346,32 @@ fn v3_records_are_not_benchmarks_or_practice_inputs_for_v2_analysis_but_remain_i
     assert_eq!(
         parts.iter().filter_map(rs_typing_trainer::app::bench_part).collect::<Vec<_>>(),
         ["EW", "ES"]
+    );
+}
+
+#[test]
+fn analysis_keeps_v3_records_available_without_feeding_the_legacy_summary() {
+    let date = chrono::NaiveDate::from_ymd_opt(2026, 11, 26).unwrap();
+    let mut app = test_app_at(v3_config(), date);
+    db::save(&app.db_path(), &record(26, "bench-v3/EW/04", 55.0)).unwrap();
+
+    app.handle_key(key(KeyCode::Char('a')));
+
+    assert!(
+        app.analysis_records
+            .iter()
+            .any(|row| row.header.bench_id.as_deref() == Some("bench-v3/EW/04")),
+        "the analysis tabs need the v3 record for progress and benchmark views"
+    );
+    assert!(
+        rs_typing_trainer::analysis::summary::skill_axis_values(&app.analysis_records, app.practice_layout(), &app.config)
+            .iter()
+            .all(|axis| axis.raw.is_none()),
+        "phase 4a must not feed v3 into the eight axes"
+    );
+    assert!(
+        app.analysis_coach.as_ref().is_some_and(|report| report.grades.languages.is_empty()),
+        "phase 4a must not feed v3 into grades"
     );
 }
 
@@ -419,7 +447,7 @@ fn v3_part_result_and_history_detail_show_accuracy_adjusted_metrics_at_80x24() {
 }
 
 #[test]
-fn v3_summary_shows_parts_and_language_rollups_at_80x24() {
+fn v3_summary_shows_parts_language_rollups_and_error_guidance_at_reference_sizes() {
     let date = chrono::NaiveDate::from_ymd_opt(2026, 11, 26).unwrap();
     for lang in [rs_typing_trainer::i18n::Lang::En, rs_typing_trainer::i18n::Lang::Ja] {
         let mut config = v3_config();
@@ -448,7 +476,6 @@ fn v3_summary_shows_parts_and_language_rollups_at_80x24() {
         }
         assert_eq!(app.screen, Screen::BenchSummary);
 
-        let output = render_size(&app, 80, 24);
         let expected = match lang {
             rs_typing_trainer::i18n::Lang::En => [
                 "English words",
@@ -459,7 +486,8 @@ fn v3_summary_shows_parts_and_language_rollups_at_80x24() {
                 "English total",
                 "Japanese total",
                 "Transitions",
-                "v3 analysis is coming soon",
+                "measurement error",
+                "Grades will appear in the next update",
             ],
             rs_typing_trainer::i18n::Lang::Ja => [
                 "英単語",
@@ -470,15 +498,23 @@ fn v3_summary_shows_parts_and_language_rollups_at_80x24() {
                 "英語",
                 "日本語",
                 "移り変わり",
-                "v3 の分析は準備中",
+                "この物差しの誤差",
+                "段階は次の更新で表示",
             ],
         };
-        for label in expected {
-            assert!(contains_compact(&output, label), "missing {label:?} for {lang:?}:\n{output}");
+        for (width, height) in [(80, 24), (120, 40)] {
+            let output = render_size(&app, width, height);
+            for label in expected {
+                assert!(
+                    contains_compact(&output, label),
+                    "missing {label:?} for {lang:?} at {width}x{height}:\n{output}"
+                );
+            }
+            for label in ["WPM", "%"] {
+                assert!(output.contains(label), "missing {label:?} for {lang:?} at {width}x{height}:\n{output}");
+            }
         }
-        for label in ["WPM", "%"] {
-            assert!(output.contains(label), "missing {label:?} for {lang:?}:\n{output}");
-        }
+        let output = render_size(&app, 80, 24);
 
         // The heading and the five part rows are right-aligned columns, so
         // they end in the same terminal cell. Full-width headings (主 WPM,

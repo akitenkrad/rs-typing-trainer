@@ -1,8 +1,11 @@
 use chrono::{Duration, NaiveDate, TimeZone, Utc};
+use rs_typing_trainer::analysis::bench_v3::{BenchV3Change, BenchV3Group};
 use rs_typing_trainer::analysis::growth::{
-    Accumulation, BenchGrowth, BenchPoint, Change, GrowthReport, HeadlineKind, LanguageGrowth, TrendPeriod, build_growth, headline,
+    Accumulation, BenchGrowth, BenchPoint, BenchV3GrowthTarget, Change, GrowthReport, HeadlineKind, LanguageGrowth, TrendPeriod, build_growth,
+    headline,
 };
-use rs_typing_trainer::analysis::progress::{DailyPoint, DailyTrend, DailyTrendSource, Progress};
+use rs_typing_trainer::analysis::progress::{BenchV3Trend, BenchV3TrendPoint, DailyPoint, DailyTrend, DailyTrendSource, Progress};
+use rs_typing_trainer::bench::BenchV3Part;
 use rs_typing_trainer::config::Config;
 use rs_typing_trainer::engine::session::SessionLog;
 use rs_typing_trainer::i18n::Lang;
@@ -66,6 +69,53 @@ fn bench_record(day_number: u32, bench_id: &str, wpm: f64) -> SessionRecord {
     record.header.mode = "bench".into();
     record.header.bench_id = Some(bench_id.into());
     record.header.net_wpm = wpm;
+    record
+}
+
+fn v3_record(id: i64, day_number: u32, part: BenchV3Part, form: u8, wpm: f64) -> SessionRecord {
+    let started = Utc.with_ymd_and_hms(2026, 11, day_number, 12, 0, 0).unwrap();
+    let interval_us = (12_000_000.0 / wpm) as u64;
+    let mut keystrokes = Vec::new();
+    for item_idx in 0..2_u32 {
+        let base = u64::from(item_idx) * 1_000_000;
+        for pos in 0..4_u32 {
+            keystrokes.push(rs_typing_trainer::engine::session::KeystrokeLog {
+                seq: item_idx * 4 + pos,
+                t_us: base + 100_000 + u64::from(pos) * interval_us,
+                release_us: None,
+                item_idx,
+                pos,
+                kind: rs_typing_trainer::engine::session::KeystrokeKind::Char,
+                typed: Some("a".into()),
+                expected: Some("a".into()),
+                correct: true,
+                code: None,
+            });
+        }
+    }
+    let mut record = SessionRecord::from_log(
+        &Config::default(),
+        SessionLog {
+            duration_us: 2_000_000,
+            items: (0..2)
+                .map(|idx| rs_typing_trainer::engine::session::ItemLog {
+                    idx,
+                    text: "aaaa".into(),
+                    reading: None,
+                    kind: None,
+                    shown_us: u64::from(idx) * 1_000_000,
+                    done_us: None,
+                    outcome: rs_typing_trainer::engine::session::ItemOutcome::Completed,
+                })
+                .collect(),
+            keystrokes,
+            ..SessionLog::default()
+        },
+        started,
+    );
+    record.header.id = Some(id);
+    record.header.mode = "bench".into();
+    record.header.bench_id = Some(format!("bench-v3/{}/{form:02}", part.as_str()));
     record
 }
 
@@ -286,6 +336,13 @@ fn insufficient_headline_names_the_daily_series_in_both_languages() {
     assert!(bench_en.contains("7 days of benchmark records"), "{bench_en}");
     assert!(bench_en.contains("[B] in the title"), "{bench_en}");
 
+    let v3_ja = headline(&report(DailyTrendSource::BenchV3), Lang::Ja).text;
+    assert!(v3_ja.contains("ベンチ v3"), "{v3_ja}");
+    assert!(v3_ja.contains("正確さを含む速さ"), "{v3_ja}");
+    let v3_en = headline(&report(DailyTrendSource::BenchV3), Lang::En).text;
+    assert!(v3_en.contains("benchmark v3"), "{v3_en}");
+    assert!(v3_en.contains("accuracy-adjusted speed"), "{v3_en}");
+
     let adjusted_ja = headline(&report(DailyTrendSource::CorrectedWpm), Lang::Ja).text;
     assert!(adjusted_ja.contains("速さを比べられる記録が 7 日分"), "{adjusted_ja}");
     let adjusted_en = headline(&report(DailyTrendSource::CorrectedWpm), Lang::En).text;
@@ -462,4 +519,76 @@ fn stored_skill_summaries_and_menu_changes_supply_recent_growth_events() {
     let graduations = rs_typing_trainer::analysis::growth::menu_graduations(&summaries);
     assert_eq!(graduations.len(), 1);
     assert_eq!(graduations[0].level, Some(2));
+}
+
+#[test]
+fn v3_growth_uses_rolling_mainline_and_keeps_group_parts_reliability_and_previous_v2() {
+    let values = [(1, 10.0), (8, 20.0), (15, 100.0), (22, 40.0)];
+    let mut records = vec![bench_record(1, "bench-v2/A/01", 33.0)];
+    for (index, (date, wpm)) in values.into_iter().enumerate() {
+        let form = index as u8 + 1;
+        records.push(v3_record(100 + index as i64 * 2, date, BenchV3Part::EW, form, wpm));
+        records.push(v3_record(101 + index as i64 * 2, date, BenchV3Part::ES, form, wpm));
+    }
+    let raw = values
+        .into_iter()
+        .map(|(date, value)| BenchV3TrendPoint {
+            date: day(date),
+            value,
+            accuracy: 1.0,
+        })
+        .collect::<Vec<_>>();
+    let mainline = [(1, 10.0), (8, 15.0), (15, 20.0), (22, 40.0)]
+        .into_iter()
+        .map(|(date, value)| point(date, value))
+        .collect::<Vec<_>>();
+    let progress = Progress {
+        trends: vec![DailyTrend {
+            target: "en".into(),
+            source: DailyTrendSource::BenchV3,
+            speed: values.into_iter().map(|(date, value)| point(date, value)).collect(),
+            accuracy: values.into_iter().map(|(date, _)| point(date, 1.0)).collect(),
+            speed_slope_per_week: Some(7.0),
+            accuracy_slope_per_week: Some(0.0),
+            retest_correlation: None,
+        }],
+        bench_v3_trends: vec![BenchV3Trend {
+            target: "en".into(),
+            runs: raw,
+            mainline: mainline.clone(),
+        }],
+        ..Progress::default()
+    };
+
+    let report = build_growth(&records, &progress, day(22));
+    let english = report.languages.iter().find(|language| language.language == "en").unwrap();
+    assert_eq!(english.source, DailyTrendSource::BenchV3);
+    assert_eq!(english.points, mainline);
+    assert_eq!(english.first.as_ref().and_then(|period| period.speed), Some(10.0));
+    assert_eq!(english.recent.as_ref().and_then(|period| period.speed), Some(40.0));
+    assert_eq!(english.benches.len(), 1, "v2 remains available as the previous series");
+    assert_eq!(english.benches[0].part.as_str(), "A");
+
+    let group = report
+        .bench_v3
+        .iter()
+        .find(|growth| growth.target == BenchV3GrowthTarget::Group(BenchV3Group::English))
+        .unwrap();
+    assert!((group.first.wpm - 10.0).abs() < 0.01, "{group:?}");
+    assert!((group.latest.wpm - 40.0).abs() < 0.01, "{group:?}");
+    assert!((group.best.wpm - 100.0).abs() < 0.01, "{group:?}");
+    assert_eq!(
+        group.mainline.iter().map(|point| point.wpm.round()).collect::<Vec<_>>(),
+        [10.0, 15.0, 20.0, 40.0]
+    );
+    assert_eq!(group.change, BenchV3Change::Increase);
+    assert!(group.reliability.is_some_and(|value| value.sample_count == 4 && value.reference_only));
+
+    let ew = report
+        .bench_v3
+        .iter()
+        .find(|growth| growth.target == BenchV3GrowthTarget::Part(BenchV3Part::EW))
+        .unwrap();
+    assert!((ew.latest.wpm - 40.0).abs() < 0.01, "{ew:?}");
+    assert!(ew.reliability.is_some());
 }

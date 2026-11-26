@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{Datelike, Duration as ChronoDuration, NaiveDate};
 use ratatui::Frame;
@@ -11,8 +11,10 @@ use ratatui::widgets::{Axis, Block, Borders, Chart, Clear, Dataset, GraphType, P
 use ratatui_image::Image;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+use crate::analysis::bench_v3::BenchV3Group;
+use crate::analysis::growth::BenchV3GrowthTarget;
 use crate::app::{AnalysisPeriod, App};
-use crate::bench::{BenchPart, is_preferred_bench_series, parse_bench_id, preferred_bench_series};
+use crate::bench::{BENCH_SERIES_V2, BenchPart, BenchV3Part, is_preferred_bench_series, parse_bench_id, preferred_bench_series};
 use crate::graphics::GraphicsMode;
 use crate::i18n::{Lang, Msg};
 use crate::layout::geometry::geometry;
@@ -181,10 +183,19 @@ fn render_growth(frame: &mut Frame, app: &App, area: Rect) {
     let image_enabled = app.graphics.mode != GraphicsMode::Off && app.graphics.cell_pixels.is_some();
     let mut lines = vec![headline(&app.analysis_growth, lang).text, String::new()];
     for (growth_index, growth) in app.analysis_growth.languages.iter().enumerate() {
+        let v3_group = app.analysis_growth.bench_v3.iter().find(|row| {
+            matches!(
+                (growth.language.as_str(), row.target),
+                ("en", BenchV3GrowthTarget::Group(BenchV3Group::English)) | ("ja", BenchV3GrowthTarget::Group(BenchV3Group::Japanese))
+            )
+        });
+        let v3_mdc = v3_group.and_then(|row| row.reliability.map(|value| value.mdc95_wpm));
         let language = language_label(&growth.language, lang);
         let source = match (growth.source, lang) {
             (DailyTrendSource::Bench, Lang::En) => "benchmark",
             (DailyTrendSource::Bench, Lang::Ja) => "ベンチ",
+            (DailyTrendSource::BenchV3, Lang::En) => "benchmark v3 (accuracy-adjusted speed)",
+            (DailyTrendSource::BenchV3, Lang::Ja) => "ベンチ v3（正確さを含む速さ）",
             (DailyTrendSource::CorrectedWpm, Lang::En) => "adjusted WPM",
             (DailyTrendSource::CorrectedWpm, Lang::Ja) => "補正 WPM",
         };
@@ -199,7 +210,11 @@ fn render_growth(frame: &mut Frame, app: &App, area: Rect) {
             lines.push(period_line(growth.first.as_ref(), true, lang));
             lines.push(period_line(growth.recent.as_ref(), false, lang));
             if let Some(change) = growth.change {
-                let speed = format_growth_delta(change.speed, " WPM");
+                let speed = if growth.source == DailyTrendSource::BenchV3 {
+                    crate::ui::result::format_v3_change(change.speed, v3_mdc, lang)
+                } else {
+                    format_growth_delta(change.speed, " WPM")
+                };
                 let accuracy = change
                     .accuracy_points
                     .map_or(String::new(), |value| format!("   {}", format_growth_delta(value, "pt")));
@@ -214,14 +229,75 @@ fn render_growth(frame: &mut Frame, app: &App, area: Rect) {
             Lang::En => "  One and three months ago".to_owned(),
             Lang::Ja => "  1 か月前・3 か月前の自分".to_owned(),
         });
-        lines.push(anchor_line(growth.month_ago.as_ref(), 30, growth.recent.as_ref(), lang));
-        lines.push(anchor_line(growth.quarter_ago.as_ref(), 90, growth.recent.as_ref(), lang));
+        lines.push(anchor_line(growth.month_ago.as_ref(), 30, growth.recent.as_ref(), v3_mdc, lang));
+        lines.push(anchor_line(growth.quarter_ago.as_ref(), 90, growth.recent.as_ref(), v3_mdc, lang));
         lines.push(String::new());
         lines.push(match lang {
             Lang::En => "  Benchmarks (first → latest, personal best)".to_owned(),
             Lang::Ja => "  ベンチマーク（初回 → 最新，自己ベスト）".to_owned(),
         });
-        if growth.benches.is_empty() {
+        let v3_rows = app
+            .analysis_growth
+            .bench_v3
+            .iter()
+            .filter(|row| match (growth.language.as_str(), row.target) {
+                ("en", BenchV3GrowthTarget::Group(BenchV3Group::English)) => true,
+                ("en", BenchV3GrowthTarget::Part(part)) => matches!(part.as_str(), "EW" | "ES" | "PW"),
+                ("ja", BenchV3GrowthTarget::Group(BenchV3Group::Japanese)) => true,
+                ("ja", BenchV3GrowthTarget::Part(part)) => matches!(part.as_str(), "JW" | "JS"),
+                _ => false,
+            })
+            .collect::<Vec<_>>();
+        if growth.source == DailyTrendSource::BenchV3 && !v3_rows.is_empty() {
+            for row in v3_rows {
+                let label = match row.target {
+                    BenchV3GrowthTarget::Group(BenchV3Group::English) => {
+                        if lang == Lang::Ja {
+                            "英語まとめ"
+                        } else {
+                            "English summary"
+                        }
+                    }
+                    BenchV3GrowthTarget::Group(BenchV3Group::Japanese) => {
+                        if lang == Lang::Ja {
+                            "日本語まとめ"
+                        } else {
+                            "Japanese summary"
+                        }
+                    }
+                    BenchV3GrowthTarget::Group(BenchV3Group::Transition) => {
+                        if lang == Lang::Ja {
+                            "移り変わりまとめ"
+                        } else {
+                            "Transition summary"
+                        }
+                    }
+                    BenchV3GrowthTarget::Part(part) => part.as_str(),
+                };
+                let delta = row.latest.wpm - row.first.wpm;
+                let change = crate::ui::result::format_v3_change(delta, row.reliability.map(|value| value.mdc95_wpm), lang);
+                lines.push(format!(
+                    "    {label}   {:.1} → {:.1} WPM   {change}   {} {:.1} ({})",
+                    row.first.wpm,
+                    row.latest.wpm,
+                    if lang == Lang::Ja { "ベスト" } else { "best" },
+                    row.best.wpm,
+                    row.best.date.format("%m/%d")
+                ));
+            }
+            if !growth.benches.is_empty() {
+                let previous = growth
+                    .benches
+                    .iter()
+                    .map(|bench| format!("{} {:.1} → {:.1} WPM", bench.part.as_str(), bench.first.wpm, bench.latest.wpm))
+                    .collect::<Vec<_>>()
+                    .join("，");
+                lines.push(match lang {
+                    Lang::En => format!("    Previous series: v2 {previous}"),
+                    Lang::Ja => format!("    以前の系列: v2 {previous}"),
+                });
+            }
+        } else if growth.benches.is_empty() {
             lines.push(format!("    {}", if lang == Lang::Ja { "記録なし" } else { "no records" }));
         } else {
             for bench in &growth.benches {
@@ -239,8 +315,16 @@ fn render_growth(frame: &mut Frame, app: &App, area: Rect) {
             }
         }
         lines.push(String::new());
-        let (chart_points, granularity) = growth_chart_points(&growth.points);
+        let (chart_points, granularity) = if growth.source == DailyTrendSource::BenchV3 {
+            let mut points = growth.points.clone();
+            points.sort_by_key(|point| point.date);
+            (points, GrowthChartGranularity::RollingThree)
+        } else {
+            growth_chart_points(&growth.points)
+        };
         lines.push(match (lang, granularity) {
+            (Lang::En, GrowthChartGranularity::RollingThree) => "  Speed over time (rolling median of the latest 3 runs)".to_owned(),
+            (Lang::Ja, GrowthChartGranularity::RollingThree) => "  速さの推移（直近 3 回の中央値）".to_owned(),
             (Lang::En, GrowthChartGranularity::Weekly) => "  Speed over time (all time, weekly medians)".to_owned(),
             (Lang::Ja, GrowthChartGranularity::Weekly) => "  速さの推移（全期間，週ごとの中央値）".to_owned(),
             (Lang::En, GrowthChartGranularity::Daily) => "  Speed over time (all time, daily values)".to_owned(),
@@ -406,8 +490,26 @@ fn render_growth(frame: &mut Frame, app: &App, area: Rect) {
         let Some(growth) = app.analysis_growth.languages.get(index) else {
             continue;
         };
-        let (points, _) = growth_chart_points(&growth.points);
-        let Some(axis) = TrendAxis::from_dates(points.iter().map(|point| point.date)) else {
+        let (points, _) = if growth.source == DailyTrendSource::BenchV3 {
+            let mut points = growth.points.clone();
+            points.sort_by_key(|point| point.date);
+            (points, GrowthChartGranularity::RollingThree)
+        } else {
+            growth_chart_points(&growth.points)
+        };
+        let raw = app
+            .analysis_growth
+            .bench_v3
+            .iter()
+            .find(|row| {
+                matches!(
+                    (growth.language.as_str(), row.target),
+                    ("en", BenchV3GrowthTarget::Group(BenchV3Group::English)) | ("ja", BenchV3GrowthTarget::Group(BenchV3Group::Japanese))
+                )
+            })
+            .map(|row| row.raw.as_slice())
+            .unwrap_or_default();
+        let Some(axis) = TrendAxis::from_dates(points.iter().map(|point| point.date).chain(raw.iter().map(|point| point.date))) else {
             continue;
         };
         let chart_area = Rect::new(area.x.saturating_add(4), area.y + visible as u16, area.width.saturating_sub(4), 7);
@@ -418,6 +520,13 @@ fn render_growth(frame: &mut Frame, app: &App, area: Rect) {
             series: vec![crate::ui::analysis_image::TrendSeries {
                 name: language_label(&growth.language, lang).to_owned(),
                 color,
+                raw_points: raw
+                    .iter()
+                    .map(|point| TrendPoint {
+                        date: point.date,
+                        value: point.wpm,
+                    })
+                    .collect(),
                 points: points
                     .iter()
                     .map(|point| TrendPoint {
@@ -430,7 +539,7 @@ fn render_growth(frame: &mut Frame, app: &App, area: Rect) {
             x_ticks: trend_tick_candidates(&axis, f64::from(chart_area.width.saturating_sub(8)) / axis.span().max(1.0)),
         };
         if !image_enabled || !render_metric_chart_image(frame, app, chart_area, lang, &mut spec, &axis) {
-            render_growth_chart_text(frame, chart_area, &points, &axis, color);
+            render_growth_chart_text(frame, chart_area, &points, raw, &axis, color);
         }
     }
 }
@@ -457,7 +566,14 @@ fn growth_endpoint_line(points: &[crate::analysis::progress::DailyPoint], lang: 
     }
 }
 
-fn render_growth_chart_text(frame: &mut Frame, area: Rect, points: &[crate::analysis::progress::DailyPoint], axis: &TrendAxis, color: Color) {
+fn render_growth_chart_text(
+    frame: &mut Frame,
+    area: Rect,
+    points: &[crate::analysis::progress::DailyPoint],
+    raw: &[crate::analysis::growth::BenchPoint],
+    axis: &TrendAxis,
+    color: Color,
+) {
     let mut runs = Vec::<Vec<(f64, f64)>>::new();
     let mut previous = None;
     for point in points {
@@ -469,18 +585,35 @@ fn render_growth_chart_text(frame: &mut Frame, area: Rect, points: &[crate::anal
         }
         previous = Some(point.date);
     }
-    let datasets = runs
-        .iter()
-        .map(|run| {
+    let raw_values = raw.iter().map(|point| (axis.position(point.date), point.wpm)).collect::<Vec<_>>();
+    let mut datasets = if raw_values.is_empty() {
+        Vec::new()
+    } else {
+        vec![
             Dataset::default()
                 .marker(symbols::Marker::Braille)
-                .graph_type(GraphType::Line)
-                .style(Style::default().fg(color))
-                .data(run)
-        })
-        .collect::<Vec<_>>();
-    let minimum = points.iter().map(|point| point.value).fold(f64::INFINITY, f64::min);
-    let maximum = points.iter().map(|point| point.value).fold(f64::NEG_INFINITY, f64::max);
+                .graph_type(GraphType::Scatter)
+                .style(Style::default().fg(color).add_modifier(Modifier::DIM))
+                .data(&raw_values),
+        ]
+    };
+    datasets.extend(runs.iter().map(|run| {
+        Dataset::default()
+            .marker(symbols::Marker::Braille)
+            .graph_type(GraphType::Line)
+            .style(Style::default().fg(color))
+            .data(run)
+    }));
+    let minimum = points
+        .iter()
+        .map(|point| point.value)
+        .chain(raw.iter().map(|point| point.wpm))
+        .fold(f64::INFINITY, f64::min);
+    let maximum = points
+        .iter()
+        .map(|point| point.value)
+        .chain(raw.iter().map(|point| point.wpm))
+        .fold(f64::NEG_INFINITY, f64::max);
     let padding = if (maximum - minimum).abs() < f64::EPSILON {
         (maximum.abs() * 0.05).max(1.0)
     } else {
@@ -523,6 +656,7 @@ fn anchor_line(
     anchor: Option<&crate::analysis::growth::TrendPeriod>,
     days: i64,
     recent: Option<&crate::analysis::growth::TrendPeriod>,
+    mdc95: Option<f64>,
     lang: Lang,
 ) -> String {
     let label = match (days, lang) {
@@ -538,7 +672,12 @@ fn anchor_line(
         return format!("    {label}   {old:.1} WPM");
     };
     let delta = now - old;
-    format!("    {label}   {old:.1} WPM → {now:.1} WPM   {}", format_growth_delta(delta, ""))
+    let change = if mdc95.is_some() {
+        crate::ui::result::format_v3_change(delta, mdc95, lang)
+    } else {
+        format_growth_delta(delta, "")
+    };
+    format!("    {label}   {old:.1} WPM → {now:.1} WPM   {change}")
 }
 
 fn format_growth_delta(value: f64, suffix: &str) -> String {
@@ -554,6 +693,7 @@ fn format_growth_delta(value: f64, suffix: &str) -> String {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum GrowthChartGranularity {
+    RollingThree,
     Weekly,
     Daily,
 }
@@ -951,16 +1091,16 @@ fn render_trend(frame: &mut Frame, app: &App, area: Rect) {
     // three text charts, so that a day sits in the same column in each chart.
     let image_axis = shared_trend_axis(image_specs.iter().flatten());
     let text_data = kinds.map(|kind| build_text_trend_data(&app.analysis_records, kind, lang));
-    let text_axis = TrendAxis::from_dates(
-        text_data
+    let text_axis = TrendAxis::from_dates(text_data.iter().flatten().flat_map(|data| {
+        data.series
             .iter()
-            .flatten()
-            .flat_map(|data| data.series.iter().flat_map(|series| series.points.iter().filter_map(|(date, _)| *date))),
-    );
-    let text_unknown = text_data
-        .iter()
-        .flatten()
-        .any(|data| data.series.iter().any(|series| series.points.iter().any(|(date, _)| date.is_none())));
+            .flat_map(|series| series.points.iter().chain(&series.raw_points).filter_map(|(date, _)| *date))
+    }));
+    let text_unknown = text_data.iter().flatten().any(|data| {
+        data.series
+            .iter()
+            .any(|series| series.points.iter().chain(&series.raw_points).any(|(date, _)| date.is_none()))
+    });
     for (((area, kind), spec), text) in chunks.iter().copied().zip(kinds).zip(image_specs).zip(text_data) {
         if let (Some(mut spec), Some(axis)) = (spec, image_axis.as_ref())
             && render_metric_chart_image(frame, app, area, lang, &mut spec, axis)
@@ -1139,22 +1279,46 @@ fn render_metric_chart_text(
         })
         .collect::<Vec<_>>();
     let mut named = BTreeSet::new();
-    let datasets = runs
+    let raw_runs = spec
+        .series
+        .iter()
+        .enumerate()
+        .map(|(index, series)| {
+            (
+                index,
+                series.raw_points.iter().map(|(date, value)| (axis.x(*date), *value)).collect::<Vec<_>>(),
+            )
+        })
+        .filter(|(_, values)| !values.is_empty())
+        .collect::<Vec<_>>();
+    let mut datasets = raw_runs
         .iter()
         .map(|(index, values)| {
-            let dataset = Dataset::default()
+            Dataset::default()
                 .marker(symbols::Marker::Braille)
-                .graph_type(GraphType::Line)
-                .style(Style::default().fg(spec.series[*index].color))
-                .data(values);
-            if named.insert(*index) {
-                dataset.name(spec.series[*index].name.clone())
-            } else {
-                dataset
-            }
+                .graph_type(GraphType::Scatter)
+                .style(Style::default().fg(spec.series[*index].color).add_modifier(Modifier::DIM))
+                .data(values)
         })
         .collect::<Vec<_>>();
-    let values = runs.iter().flat_map(|(_, run)| run).map(|(_, value)| *value).collect::<Vec<_>>();
+    datasets.extend(runs.iter().map(|(index, values)| {
+        let dataset = Dataset::default()
+            .marker(symbols::Marker::Braille)
+            .graph_type(GraphType::Line)
+            .style(Style::default().fg(spec.series[*index].color))
+            .data(values);
+        if named.insert(*index) {
+            dataset.name(spec.series[*index].name.clone())
+        } else {
+            dataset
+        }
+    }));
+    let values = runs
+        .iter()
+        .chain(&raw_runs)
+        .flat_map(|(_, run)| run)
+        .map(|(_, value)| *value)
+        .collect::<Vec<_>>();
     let min_y = values.iter().copied().fold(f64::INFINITY, f64::min);
     let max_y = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     let padding = if (max_y - min_y).abs() < f64::EPSILON {
@@ -2140,11 +2304,226 @@ fn group_label(name: &str, lang: Lang) -> String {
 
 fn render_bench(frame: &mut Frame, app: &App, area: Rect) {
     let lang = app.config.general.lang;
+    if app
+        .analysis_records
+        .iter()
+        .any(|record| record.header.bench_id.as_deref().and_then(crate::bench::parse_v3_bench_id).is_some())
+    {
+        let title = match lang {
+            Lang::En => "bench-v3 / accuracy-adjusted speed",
+            Lang::Ja => "bench-v3／正確さを含む速さ",
+        };
+        frame.render_widget(Paragraph::new(bench_v3_text_lines(app, lang)).block(Block::default().title(title)), area);
+        return;
+    }
     let lines = bench_text_lines(app, lang);
     if render_bench_images(frame, app, area, &lines) {
         return;
     }
     frame.render_widget(Paragraph::new(lines).block(Block::default().title(Msg::BenchEightAxes.text(lang))), area);
+}
+
+fn bench_v3_text_lines(app: &App, lang: Lang) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::from(match lang {
+        Lang::En => "Parts (effective WPM, attempts in order)",
+        Lang::Ja => "各パート（正確さを含む WPM，試行順）",
+    })];
+    for part in [BenchV3Part::EW, BenchV3Part::ES, BenchV3Part::JW, BenchV3Part::JS, BenchV3Part::PW] {
+        let values = bench_v3_part_values(app, part);
+        if values.is_empty() {
+            continue;
+        }
+        lines.push(Line::from(format!(
+            "{}: {} WPM",
+            crate::ui::bench_summary::v3_part_label(part, lang),
+            bench_v3_trajectory(&values)
+        )));
+    }
+    lines.push(Line::from(""));
+    for group in [BenchV3Group::English, BenchV3Group::Japanese, BenchV3Group::Transition] {
+        let values = bench_v3_group_values(app, group);
+        if values.is_empty() {
+            continue;
+        }
+        let label = bench_v3_group_label(group, lang);
+        let reliability = crate::analysis::bench_v3::compute_bench_v3_group_reliability(&app.analysis_records, group, app.config.analysis.pause_ms);
+        let complete_runs = crate::analysis::bench_v3::compute_bench_v3_group_runs(&app.analysis_records, group, app.config.analysis.pause_ms).len();
+        let speeds = values.iter().map(|(value, _)| *value).collect::<Vec<_>>();
+        let change = speeds
+            .windows(2)
+            .last()
+            .map(|pair| bench_v3_change_label(pair[1] - pair[0], reliability.map(|value| value.mdc95_wpm), lang));
+        let partial = values.last().is_some_and(|(_, partial)| *partial);
+        lines.push(Line::from(format!(
+            "{label}: {} WPM{}{}",
+            bench_v3_first_latest(&speeds),
+            match (partial, lang) {
+                (true, Lang::En) => " (partial parts)",
+                (true, Lang::Ja) => "（一部のパートのみ）",
+                (false, _) => "",
+            },
+            change.map_or_else(String::new, |value| format!(" · {value}"))
+        )));
+        if group != BenchV3Group::Transition {
+            lines.push(Line::from(bench_v3_reliability_line(label, reliability, complete_runs, lang)));
+        }
+    }
+
+    let previous = bench_v2_compact_lines(app);
+    if !previous.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(match lang {
+            Lang::En => "Previous series (v2)",
+            Lang::Ja => "以前の系列（v2）",
+        }));
+        lines.extend(previous.into_iter().map(Line::from));
+    }
+    lines
+}
+
+fn bench_v3_part_values(app: &App, part: BenchV3Part) -> Vec<f64> {
+    let mut records = app
+        .analysis_records
+        .iter()
+        .filter(|record| {
+            record
+                .header
+                .bench_id
+                .as_deref()
+                .and_then(crate::bench::parse_v3_bench_id)
+                .is_some_and(|(candidate, _)| candidate == part)
+        })
+        .filter_map(|record| {
+            let finished = chrono::DateTime::parse_from_rfc3339(&record.header.finished_at)
+                .ok()?
+                .with_timezone(&chrono::Utc);
+            Some(((finished, record.header.id.unwrap_or(i64::MIN)), record))
+        })
+        .collect::<Vec<_>>();
+    records.sort_by_key(|(order, _)| *order);
+    records
+        .into_iter()
+        .filter_map(|(_, record)| {
+            crate::analysis::bench_v3::compute_bench_v3_metrics(std::slice::from_ref(record), app.config.analysis.pause_ms).effective_wpm
+        })
+        .collect()
+}
+
+fn bench_v3_group_values(app: &App, group: BenchV3Group) -> Vec<(f64, bool)> {
+    let mut runs = BTreeMap::<(NaiveDate, u8), Vec<crate::record::SessionRecord>>::new();
+    for record in &app.analysis_records {
+        let Some((part, form)) = record.header.bench_id.as_deref().and_then(crate::bench::parse_v3_bench_id) else {
+            continue;
+        };
+        if !group.parts().contains(&part) {
+            continue;
+        }
+        let Some(date) = chrono::DateTime::parse_from_rfc3339(&record.header.finished_at)
+            .ok()
+            .map(|finished| finished.date_naive())
+        else {
+            continue;
+        };
+        runs.entry((date, form)).or_default().push(record.clone());
+    }
+    runs.into_values()
+        .filter_map(|records| {
+            let summary = crate::analysis::bench_v3::compute_bench_v3_group_metrics(&records, group, app.config.analysis.pause_ms)?;
+            Some((summary.metrics.effective_wpm?, summary.partial))
+        })
+        .collect()
+}
+
+fn bench_v3_trajectory(values: &[f64]) -> String {
+    values.iter().map(|value| format!("{value:.1}")).collect::<Vec<_>>().join(" → ")
+}
+
+fn bench_v3_first_latest(values: &[f64]) -> String {
+    match values {
+        [] => String::new(),
+        [value] => format!("{value:.1}"),
+        [first, .., latest] => format!("{first:.1} → {latest:.1}"),
+    }
+}
+
+fn bench_v3_group_label(group: BenchV3Group, lang: Lang) -> &'static str {
+    match (group, lang) {
+        (BenchV3Group::English, Lang::En) => "English",
+        (BenchV3Group::Japanese, Lang::En) => "Japanese",
+        (BenchV3Group::Transition, Lang::En) => "Transitions",
+        (BenchV3Group::English, Lang::Ja) => "英語",
+        (BenchV3Group::Japanese, Lang::Ja) => "日本語",
+        (BenchV3Group::Transition, Lang::Ja) => "移り変わり",
+    }
+}
+
+fn bench_v3_change_label(value: f64, mdc95_wpm: Option<f64>, lang: Lang) -> String {
+    use crate::analysis::bench_v3::{BenchV3Change, classify_bench_v3_change};
+
+    match classify_bench_v3_change(value, mdc95_wpm) {
+        BenchV3Change::DifferenceOnly => format!("{value:+.1} WPM"),
+        BenchV3Change::WithinError => match lang {
+            Lang::En => "no change (within measurement error)".to_owned(),
+            Lang::Ja => "変化なし（誤差の範囲）".to_owned(),
+        },
+        BenchV3Change::Increase => format!("▲ {value:+.1} WPM"),
+        BenchV3Change::Decrease => format!("▼ {value:+.1} WPM"),
+    }
+}
+
+fn bench_v3_reliability_line(
+    label: &str,
+    reliability: Option<crate::analysis::bench_v3::BenchV3Reliability>,
+    complete_runs: usize,
+    lang: Lang,
+) -> String {
+    match (reliability, lang) {
+        (Some(value), Lang::En) => format!(
+            "{label}: SEM {:.1} WPM · MDC95 {:.1} WPM · n={}{}",
+            value.sem_wpm,
+            value.mdc95_wpm,
+            value.sample_count,
+            if value.reference_only { " (reference)" } else { "" }
+        ),
+        (Some(value), Lang::Ja) => format!(
+            "{label}: SEM {:.1} WPM・MDC95 {:.1} WPM・n={}{}",
+            value.sem_wpm,
+            value.mdc95_wpm,
+            value.sample_count,
+            if value.reference_only { "（参考）" } else { "" }
+        ),
+        (None, Lang::En) => format!("{label}: SEM / MDC95 available after 2 complete runs · n={complete_runs}"),
+        (None, Lang::Ja) => format!("{label}: SEM／MDC95 は完了した 2 回分から表示・n={complete_runs}"),
+    }
+}
+
+fn bench_v2_compact_lines(app: &App) -> Vec<String> {
+    [BenchPart::A, BenchPart::B, BenchPart::C, BenchPart::D]
+        .into_iter()
+        .filter_map(|part| {
+            let mut records = app
+                .analysis_records
+                .iter()
+                .filter(|record| {
+                    record
+                        .header
+                        .bench_id
+                        .as_deref()
+                        .and_then(parse_bench_id)
+                        .is_some_and(|(series, candidate, _)| series == BENCH_SERIES_V2 && candidate == part)
+                })
+                .filter_map(|record| {
+                    let finished = chrono::DateTime::parse_from_rfc3339(&record.header.finished_at)
+                        .ok()?
+                        .with_timezone(&chrono::Utc);
+                    Some(((finished, record.header.id.unwrap_or(i64::MIN)), record.header.net_wpm))
+                })
+                .collect::<Vec<_>>();
+            records.sort_by_key(|(order, _)| *order);
+            let values = records.into_iter().map(|(_, value)| value).collect::<Vec<_>>();
+            (!values.is_empty()).then(|| format!("{}: {} WPM", part.as_str(), bench_v3_first_latest(&values)))
+        })
+        .collect()
 }
 
 fn bench_text_lines(app: &App, lang: Lang) -> Vec<Line<'static>> {

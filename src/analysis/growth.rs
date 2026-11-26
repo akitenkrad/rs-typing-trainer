@@ -4,10 +4,15 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Datelike, Duration, NaiveDate};
 
+use crate::analysis::bench_v3::{
+    BenchV3Change, BenchV3Group, BenchV3Reliability, classify_bench_v3_change, compute_bench_v3_group_reliability, compute_bench_v3_group_runs,
+    compute_bench_v3_metrics, compute_bench_v3_part_reliability, rolling_median_3,
+};
 use crate::analysis::grades::Level;
+use crate::analysis::metrics::AnalysisSettings;
 use crate::analysis::model::session_language;
-use crate::analysis::progress::{DailyPoint, DailyTrend, DailyTrendSource, Progress};
-use crate::bench::{BenchPart, is_preferred_bench_series, parse_bench_id, preferred_bench_series};
+use crate::analysis::progress::{BenchV3Trend, DailyPoint, DailyTrend, DailyTrendSource, Progress};
+use crate::bench::{BenchPart, BenchV3Part, is_preferred_bench_series, parse_bench_id, parse_v3_bench_id, preferred_bench_series};
 use crate::i18n::Lang;
 use crate::record::SessionRecord;
 use crate::record::db::SkillSnapshotRecord;
@@ -82,6 +87,24 @@ pub struct BenchGrowth {
     pub best: BenchPoint,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BenchV3GrowthTarget {
+    Group(BenchV3Group),
+    Part(BenchV3Part),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BenchV3Growth {
+    pub target: BenchV3GrowthTarget,
+    pub first: BenchPoint,
+    pub latest: BenchPoint,
+    pub best: BenchPoint,
+    pub raw: Vec<BenchPoint>,
+    pub mainline: Vec<BenchPoint>,
+    pub reliability: Option<BenchV3Reliability>,
+    pub change: BenchV3Change,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PersonalBest {
     pub language: String,
@@ -105,6 +128,7 @@ pub struct GrowthReport {
     pub languages: Vec<LanguageGrowth>,
     pub accumulation: Accumulation,
     pub personal_bests: Vec<PersonalBest>,
+    pub bench_v3: Vec<BenchV3Growth>,
     pub promotions: Vec<SkillPromotion>,
     pub graduations: Vec<GraduationEvent>,
 }
@@ -139,16 +163,13 @@ pub struct Headline {
 }
 
 pub fn build_growth(records: &[SessionRecord], progress: &Progress, as_of: NaiveDate) -> GrowthReport {
-    let filtered = records
-        .iter()
-        .filter(|record| !record.header.bench_id.as_deref().is_some_and(crate::bench::is_v3_bench_id))
-        .cloned()
-        .collect::<Vec<_>>();
-    let records = filtered.as_slice();
     let mut languages = progress
         .trends
         .iter()
-        .filter_map(|trend| language_growth(trend, records, as_of))
+        .filter_map(|trend| {
+            let v3 = progress.bench_v3_trends.iter().find(|row| row.target == trend.target);
+            language_growth(trend, v3, records, as_of)
+        })
         .collect::<Vec<_>>();
     let (benches, personal_bests) = benchmark_growth(records, as_of);
     for (language, bench) in benches {
@@ -175,6 +196,7 @@ pub fn build_growth(records: &[SessionRecord], progress: &Progress, as_of: Naive
         languages,
         accumulation: accumulation(records, as_of),
         personal_bests,
+        bench_v3: benchmark_v3_growth(records, as_of, AnalysisSettings::default().pause_ms),
         promotions: Vec::new(),
         graduations: Vec::new(),
     }
@@ -233,8 +255,13 @@ pub fn menu_graduations(summaries: &[crate::practice::menu::progress::RunStepsSu
     events
 }
 
-fn language_growth(trend: &DailyTrend, records: &[SessionRecord], as_of: NaiveDate) -> Option<LanguageGrowth> {
-    let points = trend.speed.iter().filter(|point| point.date <= as_of).cloned().collect::<Vec<_>>();
+fn language_growth(trend: &DailyTrend, v3: Option<&BenchV3Trend>, records: &[SessionRecord], as_of: NaiveDate) -> Option<LanguageGrowth> {
+    let source_points = if trend.source == DailyTrendSource::BenchV3 {
+        v3.map_or(trend.speed.as_slice(), |v3| v3.mainline.as_slice())
+    } else {
+        trend.speed.as_slice()
+    };
+    let points = source_points.iter().filter(|point| point.date <= as_of).cloned().collect::<Vec<_>>();
     let recorded_days = points.iter().map(|point| point.date).collect::<BTreeSet<_>>().len();
     if points.is_empty() && trend.accuracy.iter().all(|point| point.date > as_of) {
         return None;
@@ -250,11 +277,13 @@ fn language_growth(trend: &DailyTrend, records: &[SessionRecord], as_of: NaiveDa
     };
     let mut first = TrendPeriod::first_seven_days(&filtered);
     let mut recent = TrendPeriod::recent_seven_days(&filtered, as_of);
-    if let Some(period) = &mut first {
-        period.accuracy = record_accuracy(records, &trend.target, period.start, period.end);
-    }
-    if let Some(period) = &mut recent {
-        period.accuracy = record_accuracy(records, &trend.target, period.start, period.end);
+    if trend.source != DailyTrendSource::BenchV3 {
+        if let Some(period) = &mut first {
+            period.accuracy = record_accuracy(records, &trend.target, period.start, period.end);
+        }
+        if let Some(period) = &mut recent {
+            period.accuracy = record_accuracy(records, &trend.target, period.start, period.end);
+        }
     }
     let change = (recorded_days >= 7).then(|| period_change(first.as_ref()?, recent.as_ref()?)).flatten();
     Some(LanguageGrowth {
@@ -268,6 +297,87 @@ fn language_growth(trend: &DailyTrend, records: &[SessionRecord], as_of: NaiveDa
         change,
         points,
         benches: Vec::new(),
+    })
+}
+
+fn benchmark_v3_growth(records: &[SessionRecord], as_of: NaiveDate, pause_ms: u64) -> Vec<BenchV3Growth> {
+    let records = records
+        .iter()
+        .filter(|record| DateTime::parse_from_rfc3339(&record.header.finished_at).is_ok_and(|at| at.date_naive() <= as_of))
+        .cloned()
+        .collect::<Vec<_>>();
+    let records = records.as_slice();
+    let mut growth = Vec::new();
+    for group in [BenchV3Group::English, BenchV3Group::Japanese, BenchV3Group::Transition] {
+        let raw = compute_bench_v3_group_runs(records, group, pause_ms)
+            .into_iter()
+            .filter_map(|run| {
+                Some(BenchPoint {
+                    date: run.date,
+                    wpm: run.metrics.effective_wpm?,
+                })
+            })
+            .collect::<Vec<_>>();
+        let reliability = compute_bench_v3_group_reliability(records, group, pause_ms);
+        if let Some(row) = make_v3_growth(BenchV3GrowthTarget::Group(group), raw, reliability) {
+            growth.push(row);
+        }
+    }
+    for part in [BenchV3Part::EW, BenchV3Part::ES, BenchV3Part::JW, BenchV3Part::JS, BenchV3Part::PW] {
+        let mut raw = records
+            .iter()
+            .filter(|record| {
+                record
+                    .header
+                    .bench_id
+                    .as_deref()
+                    .and_then(parse_v3_bench_id)
+                    .is_some_and(|(candidate, _)| candidate == part)
+            })
+            .filter_map(|record| {
+                let at = DateTime::parse_from_rfc3339(&record.header.finished_at).ok()?;
+                let date = at.date_naive();
+                let metrics = compute_bench_v3_metrics(std::slice::from_ref(record), pause_ms);
+                Some((
+                    at,
+                    record.header.id,
+                    BenchPoint {
+                        date,
+                        wpm: metrics.effective_wpm?,
+                    },
+                ))
+            })
+            .collect::<Vec<_>>();
+        raw.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+        let raw = raw.into_iter().map(|(_, _, point)| point).collect();
+        let reliability = compute_bench_v3_part_reliability(records, part, pause_ms);
+        if let Some(row) = make_v3_growth(BenchV3GrowthTarget::Part(part), raw, reliability) {
+            growth.push(row);
+        }
+    }
+    growth
+}
+
+fn make_v3_growth(target: BenchV3GrowthTarget, raw: Vec<BenchPoint>, reliability: Option<BenchV3Reliability>) -> Option<BenchV3Growth> {
+    let values = raw.iter().map(|point| point.wpm).collect::<Vec<_>>();
+    let mainline = raw
+        .iter()
+        .zip(rolling_median_3(&values))
+        .map(|(point, wpm)| BenchPoint { date: point.date, wpm })
+        .collect::<Vec<_>>();
+    let first = *mainline.first()?;
+    let latest = *mainline.last()?;
+    let best = *raw.iter().max_by(|left, right| left.wpm.total_cmp(&right.wpm))?;
+    let change = classify_bench_v3_change(latest.wpm - first.wpm, reliability.map(|value| value.mdc95_wpm));
+    Some(BenchV3Growth {
+        target,
+        first,
+        latest,
+        best,
+        raw,
+        mainline,
+        reliability,
+        change,
     })
 }
 
@@ -546,6 +656,22 @@ pub fn comparison_guidance(source: DailyTrendSource, recorded_days: usize, lang:
         ),
         (DailyTrendSource::Bench, Lang::En, false) => format!(
             " Once 7 days of benchmark records are available, you can compare with when you started ({recorded_days} days so far. Run a benchmark with [B] in the title)."
+        ),
+        (DailyTrendSource::BenchV3, Lang::Ja, true) => {
+            format!(
+                "ベンチ v3 の正確さを含む速さが 7 日分たまると，はじめの頃と比べられます（今 {recorded_days} 日分．ベンチはタイトルの [B] で測れます）"
+            )
+        }
+        (DailyTrendSource::BenchV3, Lang::Ja, false) => {
+            format!(
+                "ベンチ v3 の正確さを含む速さが 7 日分たまると，はじめの頃と比べられます（今 {recorded_days} 日分．ベンチはタイトルの [B] で測れます）．"
+            )
+        }
+        (DailyTrendSource::BenchV3, Lang::En, true) => format!(
+            "Once 7 days of benchmark v3 accuracy-adjusted speed are available, you can compare with when you started ({recorded_days} days so far. Run a benchmark with [B] in the title)"
+        ),
+        (DailyTrendSource::BenchV3, Lang::En, false) => format!(
+            " Once 7 days of benchmark v3 accuracy-adjusted speed are available, you can compare with when you started ({recorded_days} days so far. Run a benchmark with [B] in the title)."
         ),
         (DailyTrendSource::CorrectedWpm, Lang::Ja, true) => {
             format!("速さを比べられる記録が 7 日分たまると，はじめの頃と比べられます（今 {recorded_days} 日分）")

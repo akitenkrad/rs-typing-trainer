@@ -55,12 +55,12 @@ pub fn build(
     as_of: NaiveDate,
     lang: Lang,
 ) -> AppResult<CoachReport> {
-    let filtered = records
+    let legacy_records = records
         .iter()
         .filter(|record| !record.header.bench_id.as_deref().is_some_and(crate::bench::is_v3_bench_id))
         .cloned()
         .collect::<Vec<_>>();
-    let records = filtered.as_slice();
+    let legacy_records = legacy_records.as_slice();
     let layout = builtin_layout(&config.keyboard.layout).unwrap_or_else(|_| builtin_layout("qwerty").expect("bundled qwerty"));
     let keyboard_geometry = geometry(&config.keyboard.geometry).unwrap_or_else(|| geometry("ansi").expect("bundled ansi"));
     let catalog = DataCatalog::load(&DataConfig::default(), home)?;
@@ -83,7 +83,7 @@ pub fn build(
         &references,
     );
     let grades = analyze_grades(
-        records,
+        legacy_records,
         &progress.forms,
         &layout,
         &keyboard_geometry,
@@ -93,7 +93,7 @@ pub fn build(
         catalog.words_ja(),
     );
     let diagnosis = diagnose(
-        records,
+        legacy_records,
         &layout,
         &keyboard_geometry,
         DiagnosisOptions {
@@ -104,11 +104,11 @@ pub fn build(
         at,
         catalog.words_ja(),
     );
-    let habits = analyze_habits(records, &progress.forms);
-    let goals = goal_suggestions(records, &grades, &progress);
+    let habits = analyze_habits(legacy_records, &progress.forms);
+    let goals = goal_suggestions(legacy_records, &grades, &progress);
     let map = transition_map(&diagnosis.player_model);
     let lines = compose_lines(
-        records,
+        legacy_records,
         config,
         &grades,
         &progress,

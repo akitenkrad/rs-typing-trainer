@@ -6,6 +6,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect, Size};
 use ratatui::style::Color;
+use rs_typing_trainer::analysis::bench_v3::rolling_median_3;
 use rs_typing_trainer::analysis::grades::Level;
 use rs_typing_trainer::analysis::grades::{Component, ComponentValue, GradeSource, GradeStatus, evaluate_language};
 use rs_typing_trainer::analysis::metrics::{BigramMetric, GroupMetric, TransitionClass};
@@ -666,6 +667,7 @@ fn calendar_chart(forecasts: Vec<TrendForecast>) -> TrendChartSpec {
             TrendSeries {
                 name: "words".into(),
                 color: SERIES_COLORS[0],
+                raw_points: Vec::new(),
                 points: vec![
                     TrendPoint { date: date(1), value: 20.0 },
                     TrendPoint { date: date(3), value: 30.0 },
@@ -675,6 +677,7 @@ fn calendar_chart(forecasts: Vec<TrendForecast>) -> TrendChartSpec {
             TrendSeries {
                 name: "bench-A".into(),
                 color: SERIES_COLORS[1],
+                raw_points: Vec::new(),
                 points: vec![TrendPoint { date: date(1), value: 35.0 }, TrendPoint { date: date(10), value: 25.0 }],
             },
         ],
@@ -704,6 +707,17 @@ fn trend_lines_use_series_colours_and_calendar_proportional_x_positions() {
         image.pixels().any(|pixel| pixel.0 == rgba(SERIES_COLORS[1])),
         "second series colour is absent"
     );
+}
+
+#[test]
+fn trend_chart_draws_raw_runs_as_faint_points_without_changing_the_mainline() {
+    let baseline = calendar_chart(Vec::new());
+    let baseline_image = render_trend_chart(CellPixels::new(4, 4), &baseline).unwrap();
+    let mut with_raw = baseline.clone();
+    with_raw.series[0].raw_points = vec![TrendPoint { date: date(3), value: 38.0 }];
+    let raw_image = render_trend_chart(CellPixels::new(4, 4), &with_raw).unwrap();
+    assert_ne!(raw_image, baseline_image);
+    assert_eq!(with_raw.series[0].points, baseline.series[0].points);
 }
 
 #[test]
@@ -786,6 +800,16 @@ fn record(day: u32, wpm: f64) -> SessionRecord {
     record
 }
 
+fn v3_chart_record(day: u32, part: &str, form: u8, wpm: f64) -> SessionRecord {
+    let mut row = record(day, wpm);
+    let interval_us = (12_000_000.0 / wpm) as u64;
+    row.log.keystrokes[0].t_us = 100_000;
+    row.log.keystrokes[1].t_us = 100_000 + interval_us;
+    row.header.mode = "bench".into();
+    row.header.bench_id = Some(format!("bench-v3/{part}/{form:02}"));
+    row
+}
+
 #[test]
 fn trend_charts_draw_every_benchmark_version_as_one_series() {
     let mut v1 = record(1, 20.0);
@@ -801,6 +825,28 @@ fn trend_charts_draw_every_benchmark_version_as_one_series() {
     assert_eq!(spec.series[0].name, "bench");
     let values = spec.series[0].points.iter().map(|point| point.value).collect::<Vec<_>>();
     assert_eq!(values, [20.0, 40.0]);
+}
+
+#[test]
+fn v3_trend_keeps_raw_runs_and_draws_the_rolling_three_mainline_separately_from_v2() {
+    let mut records = Vec::new();
+    for (day, wpm) in [(1, 60.0), (2, 120.0), (3, 180.0), (4, 240.0)] {
+        records.push(v3_chart_record(day, "EW", day as u8, wpm));
+        records.push(v3_chart_record(day, "ES", day as u8, wpm));
+    }
+    let mut old = record(1, 35.0);
+    old.header.mode = "bench".into();
+    old.header.bench_id = Some("bench-v2/A/01".into());
+    records.push(old);
+
+    let spec = build_trend_data(&records, MetricKind::NetWpm, Lang::En).unwrap();
+    let v3 = spec.series.iter().find(|series| series.name == "bench v3 English").unwrap();
+    assert_eq!(v3.raw_points.len(), 4);
+    assert_eq!(
+        v3.points.iter().map(|point| point.value).collect::<Vec<_>>(),
+        rolling_median_3(&v3.raw_points.iter().map(|point| point.value).collect::<Vec<_>>())
+    );
+    assert!(spec.series.iter().any(|series| series.name == "bench v2 (previous series)"));
 }
 
 #[test]

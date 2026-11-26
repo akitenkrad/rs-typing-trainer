@@ -403,3 +403,28 @@ term = { en = "This run's error margin", ja = "この回の誤差の目安" }
 short = { en = "Half the difference between accuracy-adjusted speeds for the odd- and even-numbered items.", ja = "奇数番目と偶数番目の項目で求めた正確さを含む速さの差の半分" }
 detail = { en = "Tempo and accuracy are calculated separately for each half and multiplied. Half of the absolute difference is shown as a split-half estimate of the run's error.", ja = "各半分でテンポと正確さを別々に求めて掛けます．その差の絶対値の半分を，折半法によるこの回の誤差の目安として表示します．" }
 screens = ["bench", "history", "result"]
+
+[[term]]
+id = "sem"
+category = "bench"
+term = { en = "SEM", ja = "SEM" }
+aliases = ["Standard error of measurement", "測定の標準誤差"]
+short = { en = "The benchmark's estimated measurement error, calculated from recent split-half differences.", ja = "最近の折半差から求める，ベンチという物差しの測定誤差" }
+detail = { en = "For up to the latest 10 runs, let d be half_a minus half_b. SEM is the sample standard deviation of d divided by 2. It requires at least 2 runs and is marked as a reference with fewer than 5.", ja = "直近 10 回までについて，d = half_a − half_b とします．SEM は d の標本標準偏差を 2 で割った値です．2 回以上で求め，5 回未満では参考と明記します．" }
+screens = ["bench", "result", "analysis.bench"]
+
+[[term]]
+id = "mdc"
+category = "bench"
+term = { en = "Minimal detectable change (MDC)", ja = "意味のある変化の最小幅（MDC）" }
+short = { en = "The smallest change that exceeds the benchmark's estimated measurement error.", ja = "ベンチの測定誤差を超えたとみなす，変化の最小幅" }
+detail = { en = "MDC95 is 1.96 × sqrt(2) × SEM. A smaller absolute change is shown as no change within measurement error; a change at least as large is shown with an up or down marker.", ja = "MDC95 は 1.96 × √2 × SEM です．差の絶対値がこれより小さければ «変化なし（誤差の範囲）»，以上なら上向きまたは下向きの印を表示します．" }
+screens = ["bench", "result", "analysis.bench"]
+
+[[term]]
+id = "rolling-median"
+category = "bench"
+term = { en = "Median of the latest 3 runs", ja = "直近 3 回の中央値" }
+short = { en = "The median of the current benchmark run and up to the two preceding runs.", ja = "今回と，その前の 2 回までを合わせた中央値" }
+detail = { en = "This smoothed line is used for bench-v3 trends, growth comparisons and the four-week slope. Until three runs exist, it uses all available runs; individual run values remain as faint points.", ja = "bench-v3 の推移・成長の比較・4 週の傾きで使う，ならした本線です．3 回に満たない間は，ある回だけの中央値を使い，各回の値は薄い点で残します．" }
+screens = ["bench", "analysis.trends", "analysis.bench", "analysis.growth"]
