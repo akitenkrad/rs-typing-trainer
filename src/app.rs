@@ -4010,6 +4010,16 @@ impl App {
         }
         if let Some(bench_id) = self.active_bench_id.clone() {
             record.header.mode = "bench".to_owned();
+            // The configuration's sentence language is the practice language,
+            // not the part's (MYTASK-3665): record the language the part types.
+            if let Some((_, part, _)) = crate::bench::parse_bench_id(&bench_id)
+                && let Ok(mut params) = serde_json::from_str::<serde_json::Value>(&record.header.mode_params)
+                && let Some(object) = params.as_object_mut()
+            {
+                let lang = if part == BenchPart::C { "ja" } else { "en" };
+                object.insert("lang".to_owned(), serde_json::Value::from(lang));
+                record.header.mode_params = params.to_string();
+            }
             self.bench_comparison = db::bench_comparison(&db_path, &bench_id, record.header.net_wpm, record.header.accuracy).ok();
             record.header.bench_id = Some(bench_id);
             record.header.error_mode = "stop".to_owned();

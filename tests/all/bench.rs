@@ -1161,3 +1161,41 @@ fn title_starts_a_fixed_benchmark_session() {
     assert!(matches!(app.screen, Screen::Countdown { .. }));
     assert_eq!(app.active_bench_id.as_deref(), Some("bench-v2/B/01"));
 }
+
+/// MYTASK-3665: part A is English even when the practice language is
+/// Japanese; the saved record says so.
+#[test]
+fn a_benchmark_part_records_its_own_language_not_the_practice_language() {
+    let mut config = Config::default();
+    config.mode.sentence.lang = "ja".to_owned();
+    let date = chrono::NaiveDate::from_ymd_opt(2026, 11, 20).unwrap();
+    let mut app = test_app_at(config, date);
+    let started = Instant::now();
+    app.handle_key_at(key(KeyCode::Char('b')), started);
+    app.handle_key_at(key(KeyCode::Enter), started);
+    common::accept_briefing(&mut app, started);
+    assert!(matches!(app.screen, Screen::Countdown { .. }), "{:?}", app.screen);
+    let mut at = started + Duration::from_secs(4);
+    app.on_tick_at_date(Duration::from_secs(3), at, date).unwrap();
+    assert_eq!(app.screen, Screen::Playing);
+    for _ in 0..30 {
+        let Some(expected) = app.game.as_ref().and_then(|game| game.session.expected()) else {
+            break;
+        };
+        let character = expected.chars().next().unwrap();
+        at += Duration::from_millis(150);
+        app.handle_key_at(key(KeyCode::Char(character)), at);
+    }
+    app.on_tick_at_date(Duration::from_secs(1), started + Duration::from_secs(70), date)
+        .unwrap();
+    let id = app.last_save_id.expect("the part is saved");
+    let record = db::load_record(&app.config.storage.db_path.clone().unwrap(), id).unwrap().unwrap();
+    assert!(
+        record.header.bench_id.as_deref().is_some_and(|bench| bench.contains("/A/")),
+        "{:?}",
+        record.header.bench_id
+    );
+    let params: serde_json::Value = serde_json::from_str(&record.header.mode_params).unwrap();
+    assert_eq!(params["lang"], "en", "{params}");
+    assert_eq!(rs_typing_trainer::analysis::model::session_language(&record), "en");
+}

@@ -1094,13 +1094,12 @@ fn parse_time(value: &str) -> Option<DateTime<Utc>> {
 }
 
 pub fn session_language(record: &SessionRecord) -> &'static str {
+    // A benchmark types its part's language whatever the practice language
+    // was; benchmarks before MYTASK-3665 recorded the latter in `lang`.
+    if let Some((_, part, _)) = record.header.bench_id.as_deref().and_then(crate::bench::parse_bench_id) {
+        return if part == crate::bench::BenchPart::C { "ja" } else { "en" };
+    }
     if record.header.mode == "romaji"
-        || record
-            .header
-            .bench_id
-            .as_deref()
-            .and_then(crate::bench::parse_bench_id)
-            .is_some_and(|(_, part, _)| part == crate::bench::BenchPart::C)
         || serde_json::from_str::<serde_json::Value>(&record.header.mode_params)
             .ok()
             .and_then(|value| value.get("lang").and_then(serde_json::Value::as_str).map(str::to_owned))

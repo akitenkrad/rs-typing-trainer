@@ -276,6 +276,25 @@ fn session_language_recognizes_mode_sentence_setting_and_benchmark_c() {
     assert_eq!(session_language(&bench_c), "ja");
 }
 
+/// MYTASK-3665: a benchmark taken while the practice language was Japanese
+/// recorded `"lang": "ja"`; its part, not that field, decides its language.
+#[test]
+fn session_language_follows_the_benchmark_part_over_the_recorded_lang() {
+    let at = Utc.with_ymd_and_hms(2026, 11, 20, 1, 0, 0).unwrap();
+    for (bench_id, lang, expected) in [
+        ("bench-v2/A/04", "ja", "en"),
+        ("bench-v2/B/04", "ja", "en"),
+        ("bench-v2/D/04", "ja", "en"),
+        ("bench-v2/C/04", "en", "ja"),
+    ] {
+        let mut record = synthetic_record(40, at, "as", 1.0);
+        record.header.mode = "bench".to_owned();
+        record.header.bench_id = Some(bench_id.to_owned());
+        record.header.mode_params = serde_json::json!({ "lang": lang }).to_string();
+        assert_eq!(session_language(&record), expected, "{bench_id} recorded with lang {lang}");
+    }
+}
+
 fn ascii_training(length: usize) -> String {
     "abac".chars().cycle().take(length).collect()
 }
