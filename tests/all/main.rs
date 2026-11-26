@@ -16,6 +16,7 @@ mod analysis_ui;
 mod bench;
 mod bench_summary_analysis;
 mod bench_tab_summary;
+mod bench_v3;
 mod bigtext;
 mod bigtext_image;
 mod blind;

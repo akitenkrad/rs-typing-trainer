@@ -15,6 +15,10 @@ use crate::engine::romaji::RomajiJudge;
 use crate::layout::KeyboardLayout;
 use crate::layout::geometry::{Finger, KeyboardGeometry};
 
+mod v3;
+
+pub use v3::*;
+
 pub const BENCH_SERIES_V1: &str = "bench-v1";
 pub const BENCH_SERIES_V2: &str = "bench-v2";
 pub const BENCH_SERIES: &str = BENCH_SERIES_V2;
@@ -357,7 +361,7 @@ fn english_phrase_stage(data: &DataCatalog, minimum: usize, maximum: usize, coun
         .take(3_000)
         .map(|row| row.text.to_ascii_lowercase())
         .collect::<HashSet<_>>();
-    let mut rows = data
+    let rows = data
         .fixed_items(DataKind::EnglishPhrase)
         .into_iter()
         .filter(|row| row.tier == Tier::Core)
@@ -368,12 +372,10 @@ fn english_phrase_stage(data: &DataCatalog, minimum: usize, maximum: usize, coun
                 .filter(|word| !word.is_empty())
                 .all(|word| common.contains(&word.to_ascii_lowercase()))
         })
-        .map(|row| (sha256(&row.text), row))
         .collect::<Vec<_>>();
-    rows.sort_by(|(left_hash, left), (right_hash, right)| left_hash.cmp(right_hash).then_with(|| left.text.cmp(&right.text)));
-    rows.into_iter()
-        .take(count)
-        .map(|(_, row)| BenchPrompt {
+    select_english_by_sha(rows, count)
+        .into_iter()
+        .map(|row| BenchPrompt {
             text: row.text.clone(),
             reading: None,
             target: row.text.clone(),
@@ -400,7 +402,7 @@ fn japanese_word_stage(data: &DataCatalog, minimum: usize, maximum: usize, count
 }
 
 fn japanese_phrase_stage(data: &DataCatalog, minimum: usize, maximum: usize, count: usize) -> Vec<BenchPrompt> {
-    let mut rows = data
+    let rows = data
         .fixed_items(DataKind::JapanesePhrase)
         .into_iter()
         .filter(|row| {
@@ -408,6 +410,19 @@ fn japanese_phrase_stage(data: &DataCatalog, minimum: usize, maximum: usize, cou
                 .as_deref()
                 .is_some_and(|reading| (minimum..=maximum).contains(&reading.chars().count()))
         })
+        .collect::<Vec<_>>();
+    select_japanese_by_sha(rows, count).into_iter().filter_map(japanese_prompt).collect()
+}
+
+fn select_english_by_sha<'a>(rows: impl IntoIterator<Item = &'a crate::data::DataItem>, count: usize) -> Vec<&'a crate::data::DataItem> {
+    let mut rows = rows.into_iter().map(|row| (sha256(&row.text), row)).collect::<Vec<_>>();
+    rows.sort_by(|(left_hash, left), (right_hash, right)| left_hash.cmp(right_hash).then_with(|| left.text.cmp(&right.text)));
+    rows.into_iter().take(count).map(|(_, row)| row).collect()
+}
+
+fn select_japanese_by_sha<'a>(rows: impl IntoIterator<Item = &'a crate::data::DataItem>, count: usize) -> Vec<&'a crate::data::DataItem> {
+    let mut rows = rows
+        .into_iter()
         .map(|row| (sha256(row.reading.as_deref().unwrap_or_default()), row))
         .collect::<Vec<_>>();
     rows.sort_by(|(left_hash, left), (right_hash, right)| {
@@ -418,7 +433,7 @@ fn japanese_phrase_stage(data: &DataCatalog, minimum: usize, maximum: usize, cou
             .then_with(|| left.text.cmp(&right.text))
             .then_with(|| left_reading.cmp(right_reading))
     });
-    rows.into_iter().take(count).filter_map(|(_, row)| japanese_prompt(row)).collect()
+    rows.into_iter().take(count).map(|(_, row)| row).collect()
 }
 
 fn sha256(value: &str) -> [u8; 32] {
@@ -597,11 +612,30 @@ fn generate_comprehensive_versions(data: &DataCatalog, layout: &KeyboardLayout, 
 }
 
 fn markov_model(data: &DataCatalog) -> MarkovModel {
-    let mut rows = data.fixed_items(DataKind::EnglishWord);
-    rows.sort_by_key(|row| row.rank.unwrap_or(usize::MAX));
+    markov_model_from_items(data.fixed_items(DataKind::EnglishWord))
+}
+
+fn markov_model_from_items<'a>(rows: impl IntoIterator<Item = &'a crate::data::DataItem>) -> MarkovModel {
+    markov_model_from_items_with_core_source(rows, false)
+}
+
+fn markov_model_from_core_items<'a>(rows: impl IntoIterator<Item = &'a crate::data::DataItem>) -> MarkovModel {
+    markov_model_from_items_with_core_source(rows, true)
+}
+
+fn markov_model_from_items_with_core_source<'a>(rows: impl IntoIterator<Item = &'a crate::data::DataItem>, core_source_only: bool) -> MarkovModel {
+    let mut rows = rows.into_iter().filter(|row| row.kind == DataKind::EnglishWord).collect::<Vec<_>>();
+    rows.sort_by(|left, right| {
+        left.rank
+            .unwrap_or(usize::MAX)
+            .cmp(&right.rank.unwrap_or(usize::MAX))
+            .then_with(|| left.text.cmp(&right.text))
+    });
     let real_words = rows.iter().filter_map(|row| normalized_word(&row.text)).collect::<HashSet<_>>();
     let source_words = rows
-        .into_iter()
+        .iter()
+        .copied()
+        .filter(|row| !core_source_only || row.tier == Tier::Core)
         .take(PART_B_SOURCE_WORDS)
         .filter_map(|row| normalized_word(&row.text))
         .collect::<Vec<_>>();
