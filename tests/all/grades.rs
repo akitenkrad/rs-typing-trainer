@@ -1,4 +1,4 @@
-use chrono::{TimeZone, Utc};
+use chrono::{Local, TimeZone, Utc};
 use rs_typing_trainer::analysis::grades::{
     Component, ComponentValue, GradeChangeKind, GradeHistoryPoint, GradeOptions, GradeSource, GradeStatus, Level, analyze_grades, bundled_thresholds,
     bundled_thresholds_v2, component_grades_for_session, detect_grade_changes, evaluate_language, evaluate_language_with_version, grade_component,
@@ -550,8 +550,8 @@ fn partial_v3_language_does_not_mix_old_bench_and_uses_accuracy_adjusted_provisi
 
 #[test]
 fn v3_runs_use_local_dates_and_do_not_join_parts_across_local_midnight() {
-    let before_midnight = Utc.with_ymd_and_hms(2026, 1, 1, 14, 58, 0).unwrap();
-    let after_midnight = Utc.with_ymd_and_hms(2026, 1, 1, 15, 1, 0).unwrap();
+    let before_midnight = Local.with_ymd_and_hms(2026, 1, 1, 23, 58, 0).single().unwrap().with_timezone(&Utc);
+    let after_midnight = Local.with_ymd_and_hms(2026, 1, 2, 0, 1, 0).single().unwrap().with_timezone(&Utc);
     let records = vec![
         v3_record(before_midnight, "EW", 1, 40.0, 10, 10),
         v3_record(after_midnight, "ES", 1, 80.0, 10, 10),

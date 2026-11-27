@@ -227,6 +227,16 @@ fn previous_delta_compares_effective_wpm_for_the_same_v3_part() {
     );
 }
 
+/// The local wall-clock time as RFC 3339, so that tests about local days pass in any time zone.
+fn local_rfc3339(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> String {
+    use chrono::TimeZone;
+    chrono::Local
+        .with_ymd_and_hms(year, month, day, hour, minute, 0)
+        .single()
+        .unwrap()
+        .to_rfc3339()
+}
+
 fn split_record(bench_id: &str, finished_at: &str, half_a_wpm: f64, half_b_wpm: f64) -> SessionRecord {
     let a_ms = (12_000.0 / half_a_wpm).round() as u64;
     let b_ms = (12_000.0 / half_b_wpm).round() as u64;
@@ -279,10 +289,10 @@ fn language_reliability_uses_pooled_complete_runs() {
 #[test]
 fn group_runs_use_local_day_and_form_as_identity_but_keep_actual_trial_order() {
     let records = [
-        split_record("bench-v3/EW/08", "2026-11-13T23:01:00Z", 40.0, 40.0),
-        split_record("bench-v3/ES/08", "2026-11-13T23:02:00Z", 40.0, 40.0),
-        split_record("bench-v3/EW/01", "2026-11-14T20:01:00+09:00", 120.0, 120.0),
-        split_record("bench-v3/ES/01", "2026-11-14T20:02:00+09:00", 120.0, 120.0),
+        split_record("bench-v3/EW/08", &local_rfc3339(2026, 11, 14, 8, 1), 40.0, 40.0),
+        split_record("bench-v3/ES/08", &local_rfc3339(2026, 11, 14, 8, 2), 40.0, 40.0),
+        split_record("bench-v3/EW/01", &local_rfc3339(2026, 11, 14, 20, 1), 120.0, 120.0),
+        split_record("bench-v3/ES/01", &local_rfc3339(2026, 11, 14, 20, 2), 120.0, 120.0),
     ];
 
     assert_eq!(
