@@ -36,7 +36,7 @@ Every step of [today's training](training.md#steps-are-cells-of-the-table) is on
 | Rollover | Press the next key before releasing the last one, staying relaxed | The first level of `overlap.burst` (pacer off) |
 | Spelling | Keep to the romaji spelling the analysis suggests (Japanese only) | The first level of `japanese.spelling` (`mode.key_filter = "include"`) |
 | Weak transitions | More of your slow or error-prone key transitions (`adaptive`) | Pacer off |
-| Rhythm | One keystroke per metronome beat; the result shows the median drift from the beat (`rhythm`) | Pacer off |
+| Rhythm | One keystroke per actual tick; only the pendulum display is slowed to 1/2, 1/4, etc. The result shows the median drift from the beat (`rhythm`) | Pacer off |
 | Burst | Three all-out sprints; the fastest is recorded (`burst`) | Pacer off |
 | Endurance | `endurance.minutes` (3–5) without a break; the first and second halves are compared (`endurance`) | Pacer off |
 | Unlock keys | Start with a few keys and add one when you are fast on the newest (`unlock`) | Pacer off |

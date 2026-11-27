@@ -94,6 +94,7 @@ mod review_flow;
 mod review_schedule;
 mod review_ui;
 mod rhythm;
+mod rhythm_display;
 mod romaji;
 mod romaji_prop;
 mod schema_v2;

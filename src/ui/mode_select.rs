@@ -178,8 +178,8 @@ pub fn skill_description(app: &App, cell: DrillCell, lang: Lang) -> String {
             "弱い遷移: 遅い・間違えやすいキーの移り変わりを多く打つ",
         ),
         DrillSkill::Rhythm => text(
-            "Rhythm: type on the metronome beat; the drift is measured",
-            "リズム: メトロノームの拍に合わせて打ち，拍とのずれを測る",
+            "Rhythm: drift is measured at the ticks; the pendulum is shown at 1/2 or 1/4 speed",
+            "リズム: 目盛りが実際の拍．拍とのずれを測り，振り子は 1/2・1/4 などで表示する",
         ),
         DrillSkill::Burst => {
             let items = burst_items_for(app, cell);

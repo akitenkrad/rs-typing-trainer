@@ -4111,7 +4111,9 @@ impl App {
         {
             let beat = crate::practice::rhythm::beat_index(bpm, game.elapsed);
             if beat > game.last_rhythm_beat {
-                if self.config.rhythm.bell {
+                let divisor = u64::from(crate::practice::rhythm::display_divisor(bpm));
+                let reached_display_beat = beat / divisor > game.last_rhythm_beat / divisor;
+                if self.config.rhythm.bell && reached_display_beat {
                     eprint!("\x07");
                 }
                 game.last_rhythm_beat = beat;

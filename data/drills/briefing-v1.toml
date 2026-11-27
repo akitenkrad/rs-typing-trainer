@@ -144,9 +144,10 @@ met = { en = "Use these transitions inside ordinary words next.", ja = "次は�
 skill = "rhythm"
 purpose = { en = "Even out the intervals between keystrokes. An even rhythm leads to steady speed.", ja = "打鍵の間隔をそろえる．間隔がそろうと速さも安定する" }
 goal = { en = "Keep the variation of intervals within words (IKI CV) at or below your own median.", ja = "語中の打鍵間隔のばらつき（IKI の CV）を，自分の中央値以下に抑える" }
-content = { en = "Type on the metronome beat. The band shows your recent intervals within words.", ja = "メトロノームの拍に合わせて打ちます．直近の語中の打鍵間隔を帯で示します" }
+content = { en = "Type on the tick marks, which are the actual beats. Only the pendulum display is slowed to 1/2, 1/4, or another easy-to-see tempo. The band shows your recent intervals within words.", ja = "目盛りが実際の拍なので，そこに合わせて打ちます．振り子の表示だけ，見やすいよう 1/2・1/4 などに落とします．直近の語中の打鍵間隔を帯で示します" }
 tips = [
   { en = "Keep intervals even instead of typing faster.", ja = "速く打つより，間隔をそろえる" },
+  { en = "Use the tick marks for the actual beats; the slower pendulum is only a visual guide.", ja = "実際の拍は目盛りで見る．ゆっくり動く振り子は表示上の目安" },
   { en = "Do not rush the easy letters or stall on the hard ones.", ja = "打ちやすい文字で急がず，難しい文字で止まらない" },
 ]
 missed = { en = "The intervals varied. Slow down to a pace where the hard letters fit the same beat.", ja = "間隔がばらついていました．難しい文字も同じ拍に収まる速さまで落とす" }

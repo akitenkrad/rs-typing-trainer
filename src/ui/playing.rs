@@ -350,19 +350,57 @@ fn display_now(game: &crate::app::GameState) -> Instant {
 fn render_rhythm(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let Some(game) = app.game.as_ref() else { return };
     let bpm = app.rhythm_bpm.unwrap_or(180.0);
-    let period = 60.0 / bpm.max(f64::EPSILON);
-    let phase = (game.elapsed.as_secs_f64() % period) / period;
-    let beat = if phase < 0.2 { "●" } else { "○" };
-    let text = match app.config.general.lang {
-        crate::i18n::Lang::En => format!("{beat} Beat  {bpm:.0} BPM"),
-        crate::i18n::Lang::Ja => format!("{beat} 拍  {bpm:.0} BPM"),
+    let divisor = crate::practice::rhythm::display_divisor(bpm);
+    let shown_bpm = bpm / f64::from(divisor);
+    let (label, full_description) = match app.config.general.lang {
+        crate::i18n::Lang::En if divisor == 1 => ("Beat ", format!("{bpm:.0} BPM")),
+        crate::i18n::Lang::En => ("Beat ", format!("shown {shown_bpm:.0} BPM (actual {bpm:.0} BPM ÷{divisor})")),
+        crate::i18n::Lang::Ja if divisor == 1 => ("拍 ", format!("{bpm:.0} BPM")),
+        crate::i18n::Lang::Ja => ("拍 ", format!("表示 {shown_bpm:.0} BPM（実 {bpm:.0} BPM の 1/{divisor}）")),
     };
-    frame.render_widget(
-        Paragraph::new(text)
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(theme.warning).add_modifier(Modifier::BOLD)),
-        area,
-    );
+    let short_description = if divisor == 1 {
+        full_description.clone()
+    } else {
+        format!("{shown_bpm:.0}/{bpm:.0} BPM")
+    };
+
+    const MIN_TRACK_WIDTH: usize = 9;
+    const MAX_TRACK_WIDTH: usize = 41;
+    let available_width = usize::from(area.width);
+    let fixed_width = label.width() + 2;
+    let description = [full_description, short_description]
+        .into_iter()
+        .find(|candidate| available_width.saturating_sub(fixed_width + 2 + candidate.width()) >= MIN_TRACK_WIDTH)
+        .unwrap_or_default();
+    let description_gap = if description.is_empty() { 0 } else { 2 };
+    let track_room = available_width.saturating_sub(fixed_width + description_gap + description.width());
+    let track_width = track_room.clamp(1, MAX_TRACK_WIDTH);
+
+    let mut track = vec!['·'; track_width];
+    let last_track_cell = track_width.saturating_sub(1);
+    if divisor > 1 {
+        for beat in 1..divisor {
+            let index = (f64::from(beat) * last_track_cell as f64 / f64::from(divisor)).round() as usize;
+            track[index] = '╎';
+        }
+    }
+    let ball_index = (crate::practice::rhythm::pendulum_position(bpm, divisor, game.elapsed) * last_track_cell as f64).round() as usize;
+    let before_ball = track[..ball_index].iter().collect::<String>();
+    let after_ball = track[ball_index + 1..].iter().collect::<String>();
+    let track_style = Style::default().fg(theme.muted);
+    let mut spans = vec![
+        Span::styled(label, Style::default().fg(theme.fg)),
+        Span::styled("┃", track_style),
+        Span::styled(before_ball, track_style),
+        Span::styled("●", Style::default().fg(theme.warning).add_modifier(Modifier::BOLD)),
+        Span::styled(after_ball, track_style),
+        Span::styled("┃", track_style),
+    ];
+    if !description.is_empty() {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(description, Style::default().fg(theme.muted)));
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)).alignment(Alignment::Center), area);
 }
 
 fn render_adaptive_focus(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
