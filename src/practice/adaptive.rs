@@ -56,6 +56,43 @@ pub struct TransitionCost {
     pub review_days: Option<i64>,
 }
 
+/// Where the cursor is relative to the focused transition.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FocusTransitionPhase {
+    /// Neither key of the transition has been typed yet.
+    BeforeFrom,
+    /// The `from` key was just typed and the `to` key is next.
+    AfterFrom,
+}
+
+/// Find the first focused transition at or after the current typing cursor.
+///
+/// `expected` is the complete keystroke guide for the current item and
+/// `cursor` is a character index into that guide. The pair immediately before
+/// the cursor remains eligible so the UI can keep showing the transition while
+/// its second key is next.
+pub fn focus_transition_at(focus: &[(char, char)], expected: &str, cursor: usize) -> Option<(char, char, FocusTransitionPhase)> {
+    let characters = expected.chars().collect::<Vec<_>>();
+    if cursor > characters.len() {
+        return None;
+    }
+    characters
+        .windows(2)
+        .enumerate()
+        .skip(cursor.saturating_sub(1))
+        .find_map(|(index, pair)| {
+            focus.contains(&(pair[0], pair[1])).then_some((
+                pair[0],
+                pair[1],
+                if index < cursor {
+                    FocusTransitionPhase::AfterFrom
+                } else {
+                    FocusTransitionPhase::BeforeFrom
+                },
+            ))
+        })
+}
+
 impl TransitionCost {
     pub fn reason(&self, lang: &str) -> String {
         match (self.reason_kind, lang) {

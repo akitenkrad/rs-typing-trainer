@@ -76,6 +76,7 @@ fn reports_cold_and_cached_result_card_creation_time() {
                 pressed: false,
                 modifier: false,
                 finger_color: None,
+                focus_arrow: None,
             },
         }],
         cells: Size::new(80, 10),

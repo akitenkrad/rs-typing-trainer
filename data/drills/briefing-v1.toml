@@ -134,6 +134,7 @@ purpose = { en = "Speed up the key transitions you are slowest at or miss most o
 goal = { en = "Type the target transitions faster than their estimates.", ja = "対象の遷移を，推定より速く打つ" }
 content = { en = "Prompts contain more of your weak transitions. Each one shows its time and whether it beat the estimate.", ja = "苦手な遷移を多く含む出題になります．対象の遷移を打つたびに，その時間と推定より速いか遅いかが出ます" }
 tips = [
+  { en = "The focus transition is marked on the keyboard with the colours ① → ②.", ja = "重点の遷移は，キーボード上で ① → ② の色で示します．" },
   { en = "Prepare the next finger before you type.", ja = "打つ前に次の指を準備する" },
   { en = "When the same finger repeats, move it quickly.", ja = "同じ指が続くときは素早く移す" },
 ]

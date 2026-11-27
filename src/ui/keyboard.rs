@@ -13,9 +13,10 @@ use unicode_width::UnicodeWidthStr;
 use crate::graphics::{GraphicsDetection, GraphicsMode};
 use crate::layout::geometry::{Finger, KeyRow, KeyboardGeometry, PhysicalKey};
 use crate::layout::{KeyStroke, KeyboardLayout};
+use crate::practice::adaptive::FocusTransitionPhase;
 use crate::practice::keyboard_fade::KeyFade;
 use crate::ui::analysis_image::PixelPoint;
-use crate::ui::keyboard_image::{KeyTileSpec, KeyboardImageCache};
+use crate::ui::keyboard_image::{FocusKeyMarker, KeyTileSpec, KeyboardImageCache, TileArrowOverlay, encode_focus_marker};
 
 const QUARTERS_PER_UNIT: u16 = 4;
 const BOARD_QUARTERS: u16 = 60;
@@ -31,10 +32,24 @@ pub struct KeyFeedback {
 pub struct KeyboardState {
     pub next: Option<KeyStroke>,
     pub last: Option<KeyFeedback>,
+    pub focus: Option<FocusTransitionKeys>,
     pub heatmap: HashMap<String, f64>,
     pub unlock: Option<UnlockKeyboardState>,
     pub fade: HashMap<String, KeyFade>,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FocusTransitionKeys {
+    pub from_code: String,
+    pub to_code: String,
+    pub phase: FocusTransitionPhase,
+}
+
+pub const FOCUS_FROM_COLOR: Color = Color::Rgb(154, 92, 196);
+pub const FOCUS_TO_COLOR: Color = Color::Rgb(214, 139, 55);
+/// The focus arrow on the image keyboard: light so it reads over both the
+/// grey keys and the coloured from/to keys.
+pub const FOCUS_ARROW_COLOR: Color = Color::Rgb(250, 250, 250);
 
 #[derive(Clone, Debug, Default)]
 pub struct UnlockKeyboardState {
@@ -340,7 +355,10 @@ pub fn keycap_tile_placements(
             if cells_width == 0 {
                 continue;
             }
-            let (label, style) = key_appearance(key, layout, state, view.show, heatmap_only, false, u16::MAX);
+            let (mut label, style) = key_appearance(key, layout, state, view.show, heatmap_only, false, u16::MAX);
+            if !heatmap_only && let Some(marker) = focus_key_marker(key.code, state) {
+                label = encode_focus_marker(label, marker);
+            }
             placements.push(KeyTilePlacement {
                 x: left,
                 y: row_index as u16 * 2,
@@ -353,11 +371,77 @@ pub fn keycap_tile_placements(
                     pressed: is_pressed(key.code, state),
                     modifier: is_modifier(key),
                     finger_color: view.finger_guide.then(|| finger_color(key.finger)),
+                    focus_arrow: None,
                 },
             });
         }
     }
+    if !heatmap_only {
+        add_focus_arrow_to_tiles(&mut placements, geometry, state);
+    }
     placements
+}
+
+fn add_focus_arrow_to_tiles(placements: &mut [KeyTilePlacement], geometry: &KeyboardGeometry, state: &KeyboardState) {
+    let Some(focus) = state.focus.as_ref() else {
+        return;
+    };
+    if focus.from_code == focus.to_code {
+        return;
+    }
+    let (Some(from), Some(to)) = (
+        keycap_center_cells(geometry, &focus.from_code),
+        keycap_center_cells(geometry, &focus.to_code),
+    ) else {
+        return;
+    };
+
+    for placement in placements {
+        let left = f64::from(placement.x);
+        let top = f64::from(placement.y);
+        let right = left + f64::from(placement.spec.cells.width);
+        let bottom = top + f64::from(placement.spec.cells.height);
+        if !segment_intersects_rect((from.x, from.y), (to.x, to.y), (left, top, right, bottom)) {
+            continue;
+        }
+        let draw_head = to.x >= left && to.x < right && to.y >= top && to.y < bottom;
+        placement.spec.focus_arrow = Some(TileArrowOverlay::from_cell_coordinates(
+            (from.x - left, from.y - top),
+            (to.x - left, to.y - top),
+            FOCUS_ARROW_COLOR,
+            focus.phase,
+            draw_head,
+        ));
+    }
+}
+
+fn segment_intersects_rect(from: (f64, f64), to: (f64, f64), rect: (f64, f64, f64, f64)) -> bool {
+    let delta = (to.0 - from.0, to.1 - from.1);
+    let mut enter = 0.0_f64;
+    let mut exit = 1.0_f64;
+    for (direction, distance) in [
+        (-delta.0, from.0 - rect.0),
+        (delta.0, rect.2 - from.0),
+        (-delta.1, from.1 - rect.1),
+        (delta.1, rect.3 - from.1),
+    ] {
+        if direction.abs() <= f64::EPSILON {
+            if distance < 0.0 {
+                return false;
+            }
+            continue;
+        }
+        let ratio = distance / direction;
+        if direction < 0.0 {
+            enter = enter.max(ratio);
+        } else {
+            exit = exit.min(ratio);
+        }
+        if enter > exit {
+            return false;
+        }
+    }
+    true
 }
 
 fn render_keycap(
@@ -577,7 +661,7 @@ fn key_appearance(
             Color::Rgb(75, 81, 91)
         });
     }
-    if show == "auto" && !is_next_key(key.code, state) {
+    if show == "auto" && !is_next_key(key.code, state) && !is_focus_key(key.code, state) {
         match state.fade.get(key.code) {
             Some(KeyFade::Dim) => style = style.fg(Color::DarkGray),
             Some(KeyFade::Hidden) => label.clear(),
@@ -597,12 +681,67 @@ fn key_appearance(
         };
     }
     if !heatmap_only {
+        if let Some((from, to, phase)) = focus_role(key.code, state) {
+            style = focus_style(style, from, to, phase);
+            let marker = match (available_width != u16::MAX, from, to) {
+                (false, _, _) => "",
+                (true, true, true) => "①②",
+                (true, true, false) => "①",
+                (true, false, true) => "②",
+                (true, false, false) => "",
+            };
+            let marked = format!("{label}{marker}");
+            if UnicodeWidthStr::width(marked.as_str()) <= usize::from(available_width) {
+                label = marked;
+            }
+        }
         style = feedback_style(style, key.code, state);
     }
     if UnicodeWidthStr::width(label.as_str()) > usize::from(available_width) {
         label = if available_width > 0 { "·".to_owned() } else { String::new() };
     }
     (label, style)
+}
+
+fn focus_key_marker(code: &str, state: &KeyboardState) -> Option<FocusKeyMarker> {
+    focus_role(code, state).map(|(from, to, phase)| {
+        if from && to {
+            match phase {
+                FocusTransitionPhase::BeforeFrom => FocusKeyMarker::From,
+                FocusTransitionPhase::AfterFrom => FocusKeyMarker::To,
+            }
+        } else if from {
+            FocusKeyMarker::From
+        } else {
+            FocusKeyMarker::To
+        }
+    })
+}
+
+fn focus_role(code: &str, state: &KeyboardState) -> Option<(bool, bool, FocusTransitionPhase)> {
+    let focus = state.focus.as_ref()?;
+    let from = focus.from_code == code;
+    let to = focus.to_code == code;
+    (from || to).then_some((from, to, focus.phase))
+}
+
+fn focus_style(mut style: Style, from: bool, to: bool, phase: FocusTransitionPhase) -> Style {
+    let color = if from && to {
+        match phase {
+            FocusTransitionPhase::BeforeFrom => FOCUS_FROM_COLOR,
+            FocusTransitionPhase::AfterFrom => FOCUS_TO_COLOR,
+        }
+    } else if from {
+        FOCUS_FROM_COLOR
+    } else {
+        FOCUS_TO_COLOR
+    };
+    style = style.fg(Color::Black).bg(color);
+    match (phase, from, to) {
+        (FocusTransitionPhase::BeforeFrom, true, _) | (FocusTransitionPhase::AfterFrom, _, true) => style.add_modifier(Modifier::BOLD),
+        (FocusTransitionPhase::AfterFrom, true, false) => style.add_modifier(Modifier::DIM),
+        _ => style,
+    }
 }
 
 fn key_label(key: &PhysicalKey, layout: &KeyboardLayout) -> String {
@@ -663,6 +802,10 @@ fn is_next_key(code: &str, state: &KeyboardState) -> bool {
             .next
             .as_ref()
             .is_some_and(|target| target.shift && matches!(code, "ShiftLeft" | "ShiftRight"))
+}
+
+fn is_focus_key(code: &str, state: &KeyboardState) -> bool {
+    state.focus.as_ref().is_some_and(|focus| focus.from_code == code || focus.to_code == code)
 }
 
 fn is_pressed(code: &str, state: &KeyboardState) -> bool {

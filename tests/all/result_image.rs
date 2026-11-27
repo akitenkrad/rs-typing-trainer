@@ -603,6 +603,7 @@ fn mistype_keyboard_draws_the_most_frequent_key_with_the_strongest_face() {
             pressed: false,
             modifier: false,
             finger_color: None,
+            focus_arrow: None,
         },
     };
     let spec = MistypeKeyboardSpec {

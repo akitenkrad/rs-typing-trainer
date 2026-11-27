@@ -1614,6 +1614,7 @@ fn render_keyboard(frame: &mut Frame, app: &App, area: Rect) {
     let state = KeyboardState {
         next: selected_stroke,
         last: None,
+        focus: None,
         heatmap,
         fade: Default::default(),
         unlock: None,

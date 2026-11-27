@@ -73,6 +73,7 @@ fn render_keyboard(layout_name: &str, show: &str, next: Option<KeyStroke>, width
     let state = KeyboardState {
         next,
         last: None,
+        focus: None,
         heatmap: HashMap::new(),
         fade: HashMap::new(),
         unlock: None,
@@ -256,6 +257,7 @@ fn heatmap_changes_key_color_intensity() {
     let state = KeyboardState {
         next: None,
         last: None,
+        focus: None,
         heatmap,
         fade: HashMap::new(),
         unlock: None,

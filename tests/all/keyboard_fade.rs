@@ -7,8 +7,9 @@ use ratatui::style::Color;
 use rs_typing_trainer::analysis::metrics::{DetailedMetrics, KeyMetric};
 use rs_typing_trainer::layout::geometry::geometry;
 use rs_typing_trainer::layout::{KeyStroke, builtin_layout};
+use rs_typing_trainer::practice::adaptive::FocusTransitionPhase;
 use rs_typing_trainer::practice::keyboard_fade::{KeyFade, key_fade_states};
-use rs_typing_trainer::ui::keyboard::{KeyboardState, KeyboardView};
+use rs_typing_trainer::ui::keyboard::{FocusTransitionKeys, KeyboardState, KeyboardView};
 
 fn metrics() -> DetailedMetrics {
     DetailedMetrics {
@@ -107,6 +108,49 @@ fn auto_dims_then_hides_only_mastered_keys_and_never_hides_next_key() {
     let s = terminal.backend().buffer().content().iter().find(|cell| cell.symbol() == "s").unwrap();
     assert_eq!(s.style().fg, Some(Color::DarkGray));
     assert!(terminal.backend().buffer().content().iter().any(|cell| cell.symbol() == "d"));
+}
+
+#[test]
+fn auto_keeps_both_focus_keys_visible_and_next_key_style_wins() {
+    let mut fade = HashMap::new();
+    fade.insert("KeyA".to_owned(), KeyFade::Hidden);
+    fade.insert("KeyS".to_owned(), KeyFade::Hidden);
+    let state = KeyboardState {
+        next: Some(KeyStroke {
+            code: "KeyA".to_owned(),
+            shift: false,
+        }),
+        focus: Some(FocusTransitionKeys {
+            from_code: "KeyA".to_owned(),
+            to_code: "KeyS".to_owned(),
+            phase: FocusTransitionPhase::BeforeFrom,
+        }),
+        fade,
+        ..KeyboardState::default()
+    };
+    let mut terminal = Terminal::new(TestBackend::new(120, 8)).unwrap();
+    terminal
+        .draw(|frame| {
+            rs_typing_trainer::ui::keyboard::render(
+                frame,
+                Rect::new(0, 0, 120, 8),
+                &geometry("ansi").unwrap(),
+                &builtin_layout("qwerty").unwrap(),
+                &state,
+                KeyboardView {
+                    show: "auto",
+                    style: "plain",
+                    finger_guide: false,
+                },
+            )
+        })
+        .unwrap();
+
+    let buffer = terminal.backend().buffer();
+    let from = buffer.content().iter().find(|cell| cell.symbol() == "①").unwrap();
+    let to = buffer.content().iter().find(|cell| cell.symbol() == "②").unwrap();
+    assert_eq!(from.style().bg, Some(Color::Cyan));
+    assert_ne!(to.style().bg, Some(Color::Cyan));
 }
 
 #[test]

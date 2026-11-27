@@ -8,6 +8,7 @@ mod common;
 
 mod about_ui;
 mod adaptive;
+mod adaptive_focus_keyboard;
 mod analysis_image;
 mod analysis_metrics;
 mod analysis_trend_breaks;

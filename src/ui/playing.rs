@@ -14,7 +14,10 @@ use crate::game::word::WordState;
 use crate::i18n::Msg;
 use crate::layout::geometry::{Finger, geometry};
 use crate::ui::bigtext::BigTextSize;
-use crate::ui::keyboard::{KeyFeedback, KeyboardState, KeyboardStyle, KeyboardView, UnlockKeyboardState, resolve_style};
+use crate::ui::keyboard::{
+    FOCUS_FROM_COLOR, FOCUS_TO_COLOR, FocusTransitionKeys, KeyFeedback, KeyboardState, KeyboardStyle, KeyboardView, UnlockKeyboardState,
+    resolve_style,
+};
 use crate::ui::theme::Theme;
 
 /// How long the mistype flash effect lingers on screen.
@@ -135,7 +138,7 @@ pub fn render_with_footer(frame: &mut Frame, app: &App, footer: Option<Line<'sta
     render_top_bar(frame, app, &theme, chunks[index]);
     index += 1;
     if show_focus {
-        render_adaptive_focus(frame, app, &theme, chunks[index]);
+        render_adaptive_focus(frame, app, &theme, chunks[index], layout.keyboard_style.is_some());
         index += 1;
     }
     if show_rhythm {
@@ -403,34 +406,90 @@ fn render_rhythm(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     frame.render_widget(Paragraph::new(Line::from(spans)).alignment(Alignment::Center), area);
 }
 
-fn render_adaptive_focus(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
-    let label = match app.config.general.lang {
-        crate::i18n::Lang::En => "Today's focus",
-        crate::i18n::Lang::Ja => "今日の重点",
-    };
-    let transitions = app
+fn render_adaptive_focus(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, keyboard_visible: bool) {
+    let active = current_focus_transition(app);
+    let mut spans = Vec::new();
+    if keyboard_visible {
+        let label = match app.config.general.lang {
+            crate::i18n::Lang::En => "Focus",
+            crate::i18n::Lang::Ja => "重点",
+        };
+        spans.push(Span::styled(
+            format!("{label}  "),
+            Style::default().fg(theme.warning).add_modifier(Modifier::BOLD),
+        ));
+        for (index, row) in app.adaptive_focus.iter().take(5).enumerate() {
+            if index > 0 {
+                spans.push(Span::raw("  "));
+            }
+            let pair = row.from.chars().next().zip(row.to.chars().next());
+            if pair.is_some_and(|(from, to)| active.is_some_and(|value| value.0 == from && value.1 == to)) {
+                spans.extend(focus_pair_spans(&row.from, &row.to));
+            } else {
+                spans.push(Span::styled(format!("[{}]→[{}]", row.from, row.to), Style::default().fg(theme.muted)));
+            }
+        }
+    } else {
+        let label = match app.config.general.lang {
+            crate::i18n::Lang::En => "Today's focus",
+            crate::i18n::Lang::Ja => "今日の重点",
+        };
+        spans.push(Span::styled(
+            format!("{label}: "),
+            Style::default().fg(theme.warning).add_modifier(Modifier::BOLD),
+        ));
+        let reason_lang = match app.config.general.lang {
+            crate::i18n::Lang::En => "en",
+            crate::i18n::Lang::Ja => "ja",
+        };
+        for (index, row) in app.adaptive_focus.iter().take(5).enumerate() {
+            if index > 0 {
+                spans.push(Span::raw("  "));
+            }
+            let pair = row.from.chars().next().zip(row.to.chars().next());
+            if pair.is_some_and(|(from, to)| active.is_some_and(|value| value.0 == from && value.1 == to)) {
+                spans.extend(focus_reason_pair_spans(&row.from, &row.to));
+                spans.push(Span::styled(
+                    format!(" ({})", row.reason(reason_lang)),
+                    Style::default().fg(theme.warning).add_modifier(Modifier::BOLD),
+                ));
+            } else {
+                spans.push(Span::styled(
+                    format!("{}→{} ({})", row.from, row.to, row.reason(reason_lang)),
+                    Style::default().fg(theme.warning).add_modifier(Modifier::BOLD),
+                ));
+            }
+        }
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)).alignment(Alignment::Center), area);
+}
+
+fn focus_pair_spans<'a>(from: &'a str, to: &'a str) -> Vec<Span<'a>> {
+    vec![
+        Span::raw("["),
+        Span::styled(from, Style::default().fg(Color::Black).bg(FOCUS_FROM_COLOR).add_modifier(Modifier::BOLD)),
+        Span::raw("]→["),
+        Span::styled(to, Style::default().fg(Color::Black).bg(FOCUS_TO_COLOR).add_modifier(Modifier::BOLD)),
+        Span::raw("]"),
+    ]
+}
+
+fn focus_reason_pair_spans<'a>(from: &'a str, to: &'a str) -> Vec<Span<'a>> {
+    vec![
+        Span::styled(from, Style::default().fg(Color::Black).bg(FOCUS_FROM_COLOR).add_modifier(Modifier::BOLD)),
+        Span::raw("→"),
+        Span::styled(to, Style::default().fg(Color::Black).bg(FOCUS_TO_COLOR).add_modifier(Modifier::BOLD)),
+    ]
+}
+
+fn current_focus_transition(app: &App) -> Option<(char, char, crate::practice::adaptive::FocusTransitionPhase)> {
+    let game = app.game.as_ref()?;
+    let focus = app
         .adaptive_focus
         .iter()
-        .take(5)
-        .map(|row| {
-            format!(
-                "{}→{} ({})",
-                row.from,
-                row.to,
-                row.reason(match app.config.general.lang {
-                    crate::i18n::Lang::En => "en",
-                    crate::i18n::Lang::Ja => "ja",
-                })
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("  ");
-    frame.render_widget(
-        Paragraph::new(format!("{label}: {transitions}"))
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(theme.warning).add_modifier(Modifier::BOLD)),
-        area,
-    );
+        .filter_map(|row| row.from.chars().next().zip(row.to.chars().next()))
+        .collect::<Vec<_>>();
+    crate::practice::adaptive::focus_transition_at(&focus, &game.session.current_guide(), game.session.position())
 }
 
 fn render_keyboard(frame: &mut Frame, app: &App, area: Rect, keyboard_style: KeyboardStyle) {
@@ -442,6 +501,13 @@ fn render_keyboard(frame: &mut Frame, app: &App, area: Rect, keyboard_style: Key
         geometry = geometry.with_digit6_finger(Finger::RightIndex);
     }
     let layout = app.practice_layout();
+    let focus = current_focus_transition(app).and_then(|(from, to, phase)| {
+        Some(FocusTransitionKeys {
+            from_code: layout.stroke_for(from)?.code,
+            to_code: layout.stroke_for(to)?.code,
+            phase,
+        })
+    });
     let next = game
         .session
         .expected()
@@ -460,6 +526,7 @@ fn render_keyboard(frame: &mut Frame, app: &App, area: Rect, keyboard_style: Key
     let state = KeyboardState {
         next,
         last,
+        focus,
         heatmap: Default::default(),
         fade: app.keyboard_fade.clone(),
         unlock: app.unlock_state.as_ref().map(|unlock| {

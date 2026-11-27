@@ -63,6 +63,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         let state = KeyboardState {
             next,
             last: None,
+            focus: None,
             heatmap,
             fade: Default::default(),
             unlock: None,
