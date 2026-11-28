@@ -123,20 +123,18 @@ impl RomajiJudge {
 
     /// Expand the reading using the player's most-used spelling for each mora.
     ///
-    /// The result is the first of the first [`PREFERRED_SPELLING_LIMIT`]
-    /// accepted spellings (in the order of [`Self::accepted_spellings`]) that
-    /// uses the preferred spelling for the most moras. It is computed directly
-    /// from the per-mora variants instead of enumerating the spellings: the
-    /// candidates are the tuples of variant indices up to the mixed-radix
-    /// number `L - 1`, so they split into «equal up to position k, smaller at
-    /// k, free after k» branches plus `L - 1` itself, and each branch's best
-    /// tuple is chosen mora by mora.
+    /// Among every accepted spelling (no matter how long the reading is), the
+    /// result is the one that uses the preferred spelling for the most moras,
+    /// a spelling's moras being the ones [`Self::spelling_segments`] splits it
+    /// into. Ties go to the first spelling in the order of
+    /// [`Self::accepted_spellings`], so with no preferred mora anywhere the
+    /// result is the first spelling.
     ///
-    /// That shortcut scores each tuple by its own variants, while the
-    /// enumeration scores a spelling by re-splitting it with
-    /// [`Self::spelling_segments`]. The two agree only when no two tuples
-    /// spell the same string; when the variants of this reading could make
-    /// that happen, the enumeration is used instead.
+    /// The spellings are not enumerated. When no two tuples of variants can
+    /// spell the same string (always the case for kana readings), each mora
+    /// independently takes its first preferred variant, or its first variant.
+    /// Otherwise [`best_resplit_tuple`] searches the tuples that split back
+    /// into themselves, which is the same set of spellings in the same order.
     pub fn preferred_spelling(&self, preferences: &BTreeMap<String, String>) -> String {
         if self.moras.is_empty() {
             return String::new();
@@ -145,24 +143,66 @@ impl RomajiJudge {
         if variants.iter().any(Vec::is_empty) {
             return String::new();
         }
-        if !spellings_split_uniquely(&variants) {
-            return self.preferred_spelling_by_enumeration(preferences);
-        }
-        self.preferred_spelling_direct(&variants, preferences, PREFERRED_SPELLING_LIMIT)
+        let matches = |index: usize, variant: usize| preferences.get(&self.moras[index]) == Some(&variants[index][variant]);
+        let tuple = if spellings_split_uniquely(&variants) {
+            first_preferred_tuple(&variants, matches)
+        } else {
+            best_resplit_tuple(&variants, matches)
+        };
+        spell_tuple(&variants, &tuple)
     }
 
-    /// The enumeration that [`Self::preferred_spelling`] replaces, kept as the
-    /// reference the direct computation is checked against.
+    /// [`Self::preferred_spelling`] always through [`best_resplit_tuple`], so
+    /// the search for ambiguous readings is also checked on every reading.
+    #[cfg(test)]
+    pub(crate) fn preferred_spelling_by_search(&self, preferences: &BTreeMap<String, String>) -> String {
+        let variants = (0..self.moras.len()).map(|index| self.variants_for(index)).collect::<Vec<_>>();
+        if variants.is_empty() || variants.iter().any(Vec::is_empty) {
+            return String::new();
+        }
+        let tuple = best_resplit_tuple(&variants, |index, variant| {
+            preferences.get(&self.moras[index]) == Some(&variants[index][variant])
+        });
+        spell_tuple(&variants, &tuple)
+    }
+
+    /// How many tuples of variants (accepted spellings, counting repeats) this
+    /// reading has, saturating at `u128::MAX`.
+    #[cfg(test)]
+    pub(crate) fn spelling_tuple_count(&self) -> u128 {
+        if self.moras.is_empty() {
+            return 0;
+        }
+        (0..self.moras.len()).fold(1_u128, |product, index| product.saturating_mul(self.variants_for(index).len() as u128))
+    }
+
+    /// The exhaustive reference: enumerates every accepted spelling, splits
+    /// each with [`Self::spelling_segments`] and keeps the first with the most
+    /// preferred moras, for several preference sets at once. Only for
+    /// readings with a manageable [`Self::spelling_tuple_count`].
+    #[cfg(test)]
+    pub(crate) fn preferred_spellings_exhaustive_many(&self, sets: &[&BTreeMap<String, String>]) -> Vec<String> {
+        let count = usize::try_from(self.spelling_tuple_count()).expect("countable spellings");
+        self.preferred_spellings_enumerated_many(sets, count)
+    }
+
+    /// The enumeration that `preferred_spelling` used up to d13c5a7, which
+    /// only looked at the first 4,096 accepted spellings.
     #[cfg(test)]
     pub(crate) fn preferred_spelling_bruteforce(&self, preferences: &BTreeMap<String, String>) -> String {
-        self.preferred_spelling_by_enumeration(preferences)
+        self.preferred_spellings_bruteforce_many(&[preferences]).remove(0)
     }
 
     /// [`Self::preferred_spelling_bruteforce`] for several preference sets,
     /// enumerating and splitting the spellings once.
     #[cfg(test)]
     pub(crate) fn preferred_spellings_bruteforce_many(&self, sets: &[&BTreeMap<String, String>]) -> Vec<String> {
-        let candidates = self.accepted_spellings(PREFERRED_SPELLING_LIMIT);
+        self.preferred_spellings_enumerated_many(sets, OLD_PREFERRED_SPELLING_LIMIT)
+    }
+
+    #[cfg(test)]
+    fn preferred_spellings_enumerated_many(&self, sets: &[&BTreeMap<String, String>], limit: usize) -> Vec<String> {
+        let candidates = self.accepted_spellings(limit);
         let segments = candidates
             .iter()
             .map(|candidate| self.spelling_segments(candidate).unwrap_or_default())
@@ -183,95 +223,12 @@ impl RomajiJudge {
             .collect()
     }
 
-    /// Whether [`Self::preferred_spelling`] can use the direct computation for
-    /// this reading (no two spellings of it are the same string).
+    /// Whether [`Self::preferred_spelling`] takes the mora-by-mora shortcut
+    /// for this reading (no two spellings of it are the same string).
     #[cfg(test)]
     pub(crate) fn preferred_spelling_is_direct(&self) -> bool {
         let variants = (0..self.moras.len()).map(|index| self.variants_for(index)).collect::<Vec<_>>();
         spellings_split_uniquely(&variants)
-    }
-
-    fn preferred_spelling_direct(&self, variants: &[Vec<String>], preferences: &BTreeMap<String, String>, limit: usize) -> String {
-        let count = variants.len();
-        let matches = |index: usize, variant: usize| preferences.get(&self.moras[index]) == Some(&variants[index][variant]);
-        // The last candidate, `min(limit, product) - 1`, as mixed-radix digits.
-        let product = variants
-            .iter()
-            .fold(1_u128, |product, options| product.saturating_mul(options.len() as u128));
-        let candidates = (limit as u128).min(product);
-        if candidates == 0 {
-            return String::new();
-        }
-        let mut remaining = candidates - 1;
-        let mut last = vec![0_usize; count];
-        for index in (0..count).rev() {
-            let radix = variants[index].len() as u128;
-            last[index] = usize::try_from(remaining % radix).expect("digit below the variant count");
-            remaining /= radix;
-        }
-        // A free position takes its first preferred variant, or the first one.
-        let free = (0..count)
-            .map(|index| {
-                (0..variants[index].len())
-                    .find(|&variant| matches(index, variant))
-                    .map_or((0, 0), |variant| (variant, 1))
-            })
-            .collect::<Vec<_>>();
-        let mut free_score_after = vec![0_usize; count + 1];
-        for index in (0..count).rev() {
-            free_score_after[index] = free_score_after[index + 1] + free[index].1;
-        }
-        // Branches are visited in candidate order and only a strictly higher
-        // score replaces the best, like the enumeration.
-        let mut best: Option<(usize, Vec<usize>)> = None;
-        let mut prefix_score = 0_usize;
-        for position in 0..count {
-            if last[position] > 0 {
-                let (variant, matched) = (0..last[position])
-                    .find(|&variant| matches(position, variant))
-                    .map_or((0, 0), |variant| (variant, 1));
-                let score = prefix_score + matched + free_score_after[position + 1];
-                if best.as_ref().is_none_or(|(best_score, _)| score > *best_score) {
-                    let mut tuple = last[..position].to_vec();
-                    tuple.push(variant);
-                    tuple.extend(free[position + 1..].iter().map(|&(variant, _)| variant));
-                    best = Some((score, tuple));
-                }
-            }
-            prefix_score += usize::from(matches(position, last[position]));
-        }
-        if best.as_ref().is_none_or(|(best_score, _)| prefix_score > *best_score) {
-            best = Some((prefix_score, last));
-        }
-        // With no preferred mora anywhere the enumeration keeps the first candidate.
-        let tuple = match best {
-            Some((score, tuple)) if score > 0 => tuple,
-            _ => vec![0; count],
-        };
-        tuple
-            .iter()
-            .enumerate()
-            .map(|(index, &variant)| variants[index][variant].as_str())
-            .collect()
-    }
-
-    fn preferred_spelling_by_enumeration(&self, preferences: &BTreeMap<String, String>) -> String {
-        let candidates = self.accepted_spellings(PREFERRED_SPELLING_LIMIT);
-        let mut best = candidates.first().cloned().unwrap_or_default();
-        let mut best_score = 0_usize;
-        for candidate in candidates {
-            let score = self
-                .spelling_segments(&candidate)
-                .unwrap_or_default()
-                .iter()
-                .filter(|(mora, spelling)| preferences.get(mora) == Some(spelling))
-                .count();
-            if score > best_score {
-                best = candidate;
-                best_score = score;
-            }
-        }
-        best
     }
 
     fn spelling_segments_from(&self, mora_index: usize, remaining: &str) -> Option<Vec<(String, String)>> {
@@ -456,8 +413,144 @@ impl Judge for RomajiJudge {
     }
 }
 
-/// How many accepted spellings [`RomajiJudge::preferred_spelling`] considers.
-const PREFERRED_SPELLING_LIMIT: usize = 4_096;
+/// How many accepted spellings `preferred_spelling` considered up to d13c5a7.
+#[cfg(test)]
+const OLD_PREFERRED_SPELLING_LIMIT: usize = 4_096;
+
+fn spell_tuple(variants: &[Vec<String>], tuple: &[usize]) -> String {
+    tuple
+        .iter()
+        .enumerate()
+        .map(|(index, &variant)| variants[index][variant].as_str())
+        .collect()
+}
+
+/// Each mora's first preferred variant, or its first variant: the first of
+/// the tuples with the most preferred moras, since every tuple scores the
+/// sum of its moras' own matches.
+fn first_preferred_tuple(variants: &[Vec<String>], matches: impl Fn(usize, usize) -> bool) -> Vec<usize> {
+    variants
+        .iter()
+        .enumerate()
+        .map(|(index, options)| (0..options.len()).find(|&variant| matches(index, variant)).unwrap_or(0))
+        .collect()
+}
+
+/// A tuple of variants that comes before the one being built and spells the
+/// same characters so far. It has spelled the moras before `mora`; `ahead`
+/// are characters it has spelled that the tuple being built has not yet.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct Rival {
+    mora: usize,
+    ahead: String,
+}
+
+/// The first tuple (in candidate order) with the most preferred moras among
+/// the tuples that [`RomajiJudge::spelling_segments`] gives back unchanged.
+///
+/// `spelling_segments` tries the variants in order and backtracks, so it
+/// returns the first tuple that spells a string. A tuple splits back into
+/// itself exactly when no earlier tuple spells the same string, and each
+/// accepted spelling is then counted once, at its first tuple, with that
+/// tuple's own score: the same ranking the enumeration made.
+///
+/// The tuples are built mora by mora while tracking every earlier tuple that
+/// still spells the same characters (a [`Rival`]). A rival appears where the
+/// tuple picks a variant that a lower variant is a proper prefix of, or is a
+/// proper prefix of; it disappears when the characters stop agreeing. A
+/// tuple whose rival reaches the same mora with nothing ahead has an earlier
+/// twin and is dropped. Prefixes with the same set of rivals have the same
+/// futures, so only the best of them (most preferred moras, then first in
+/// order) is kept: the work grows with the reading's length times the number
+/// of distinct rival sets, not with the number of tuples. With no prefix
+/// pairs among the variants no rival ever appears and this is
+/// [`first_preferred_tuple`].
+fn best_resplit_tuple(variants: &[Vec<String>], matches: impl Fn(usize, usize) -> bool) -> Vec<usize> {
+    let count = variants.len();
+    let mut layer: BTreeMap<Vec<Rival>, (usize, Vec<usize>)> = BTreeMap::from([(Vec::new(), (0, Vec::new()))]);
+    for index in 0..count {
+        let mut next: BTreeMap<Vec<Rival>, (usize, Vec<usize>)> = BTreeMap::new();
+        for (rivals, (score, prefix)) in &layer {
+            for (choice, spelling) in variants[index].iter().enumerate() {
+                let mut moved = Vec::new();
+                for rival in rivals {
+                    advance_rival(variants, rival, spelling, &mut moved);
+                }
+                for lower in &variants[index][..choice] {
+                    if let Some(rest) = spelling.strip_prefix(lower.as_str()) {
+                        catch_up_rival(variants, index + 1, rest, &mut moved);
+                    } else if let Some(rest) = lower.strip_prefix(spelling.as_str()) {
+                        moved.push(Rival {
+                            mora: index + 1,
+                            ahead: rest.to_owned(),
+                        });
+                    }
+                }
+                moved.sort();
+                moved.dedup();
+                if moved.iter().any(|rival| rival.mora == index + 1 && rival.ahead.is_empty()) {
+                    continue;
+                }
+                let score = score + usize::from(matches(index, choice));
+                let replace = next
+                    .get(&moved)
+                    .is_none_or(|(best_score, best)| score > *best_score || (score == *best_score && prefix.as_slice() < &best[..index]));
+                if replace {
+                    let mut tuple = Vec::with_capacity(count);
+                    tuple.extend_from_slice(prefix);
+                    tuple.push(choice);
+                    next.insert(moved, (score, tuple));
+                }
+            }
+        }
+        layer = next;
+    }
+    // The first tuple never has a rival, so `layer` is not empty.
+    layer
+        .into_values()
+        .reduce(|best, candidate| {
+            if candidate.0 > best.0 || (candidate.0 == best.0 && candidate.1 < best.1) {
+                candidate
+            } else {
+                best
+            }
+        })
+        .map_or_else(|| vec![0; count], |(_, tuple)| tuple)
+}
+
+/// Moves `rival` on after the tuple being built spells `spelling`.
+fn advance_rival(variants: &[Vec<String>], rival: &Rival, spelling: &str, out: &mut Vec<Rival>) {
+    if let Some(rest) = spelling.strip_prefix(rival.ahead.as_str()) {
+        catch_up_rival(variants, rival.mora, rest, out);
+    } else if let Some(rest) = rival.ahead.strip_prefix(spelling) {
+        out.push(Rival {
+            mora: rival.mora,
+            ahead: rest.to_owned(),
+        });
+    }
+}
+
+/// Every way a rival at `mora` can spell `owed`, the characters the tuple
+/// being built has spelled beyond it.
+fn catch_up_rival(variants: &[Vec<String>], mora: usize, owed: &str, out: &mut Vec<Rival>) {
+    if owed.is_empty() {
+        out.push(Rival { mora, ahead: String::new() });
+        return;
+    }
+    let Some(options) = variants.get(mora) else {
+        return;
+    };
+    for variant in options {
+        if let Some(rest) = owed.strip_prefix(variant.as_str()) {
+            catch_up_rival(variants, mora + 1, rest, out);
+        } else if let Some(rest) = variant.strip_prefix(owed) {
+            out.push(Rival {
+                mora: mora + 1,
+                ahead: rest.to_owned(),
+            });
+        }
+    }
+}
 
 /// Whether every tuple of variants spells a different string, so that
 /// [`RomajiJudge::spelling_segments`] gives each spelling back as its own

@@ -1,9 +1,11 @@
-//! Checks that `RomajiJudge::preferred_spelling` returns exactly what the
-//! enumeration over the first 4,096 accepted spellings returned.
+//! Checks that `RomajiJudge::preferred_spelling` returns exactly what an
+//! enumeration of every accepted spelling returns, and what the enumeration
+//! over the first 4,096 accepted spellings (used up to d13c5a7) returned
+//! whenever a reading has no more than 4,096 spellings.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{RomajiJudge, base_spellings, spellings_split_uniquely};
+use super::{RomajiJudge, base_spellings, best_resplit_tuple, first_preferred_tuple, spell_tuple, spellings_split_uniquely};
 use crate::config::DataConfig;
 use crate::data::{DataCatalog, DataKind};
 
@@ -121,22 +123,72 @@ fn corpus_readings(long: bool) -> BTreeSet<String> {
     readings
 }
 
-/// Runs `check` over `cases` on every core and adds up what it returns.
-fn on_all_cores<T: Sync>(cases: &[T], check: impl Fn(&T) -> usize + Sync) -> usize {
+/// Runs `check` over `cases` on every core and adds up the counts it returns.
+fn on_all_cores<T: Sync, const N: usize>(cases: &[T], check: impl Fn(&T) -> [usize; N] + Sync) -> [usize; N] {
     let threads = std::thread::available_parallelism().map_or(4, std::num::NonZeroUsize::get);
     let chunk = cases.len().div_ceil(threads).max(1);
+    let add = |mut total: [usize; N], counts: [usize; N]| {
+        for (total, count) in total.iter_mut().zip(counts) {
+            *total += count;
+        }
+        total
+    };
     std::thread::scope(|scope| {
         let handles = cases
             .chunks(chunk)
-            .map(|part| scope.spawn(|| part.iter().map(&check).sum::<usize>()))
+            .map(|part| scope.spawn(|| part.iter().map(&check).fold([0; N], add)))
             .collect::<Vec<_>>();
-        handles.into_iter().map(|handle| handle.join().expect("check thread")).sum()
+        handles.into_iter().map(|handle| handle.join().expect("check thread")).fold([0; N], add)
     })
+}
+
+/// Readings with at most this many spellings in a debug build, and in a
+/// release build, are also compared with the exhaustive enumeration.
+const EXHAUSTIVE_DEBUG: u128 = 20_000;
+const EXHAUSTIVE_RELEASE: u128 = 500_000;
+
+/// Compares `preferred_spelling` for every preference set with the search
+/// used for ambiguous readings (always), the exhaustive enumeration (up to
+/// `exhaustive` spellings) and the old 4,096 enumeration (up to 4,096
+/// spellings, where the old cut-off had no effect). Returns
+/// `[old compared, exhaustive compared, exhaustive past 4,096]`.
+fn compare_all(judge: &RomajiJudge, sets: &[(String, &BTreeMap<String, String>)], exhaustive: u128) -> (Vec<String>, [usize; 3]) {
+    let reading = judge.moras().concat();
+    let references = sets.iter().map(|(_, preferences)| *preferences).collect::<Vec<_>>();
+    let actual = references
+        .iter()
+        .map(|preferences| judge.preferred_spelling(preferences))
+        .collect::<Vec<_>>();
+    for ((name, preferences), actual) in sets.iter().zip(&actual) {
+        assert_eq!(
+            &judge.preferred_spelling_by_search(preferences),
+            actual,
+            "search: reading={reading:?}, preferences={name}"
+        );
+    }
+    let count = judge.spelling_tuple_count();
+    let mut counts = [0; 3];
+    if count <= 4_096 {
+        let old = judge.preferred_spellings_bruteforce_many(&references);
+        for (((name, _), actual), old) in sets.iter().zip(&actual).zip(old) {
+            assert_eq!(actual, &old, "old enumeration: reading={reading:?}, preferences={name}");
+        }
+        counts[0] = 1;
+    }
+    if count <= exhaustive {
+        let expected = judge.preferred_spellings_exhaustive_many(&references);
+        for (((name, _), actual), expected) in sets.iter().zip(&actual).zip(expected) {
+            assert_eq!(actual, &expected, "exhaustive: reading={reading:?}, preferences={name}");
+        }
+        counts[1] = 1;
+        counts[2] = usize::from(count > 4_096);
+    }
+    (actual, counts)
 }
 
 #[test]
 fn preferred_spelling_matches_the_enumeration_on_bundled_words_and_phrases() {
-    check_bundled(false, 10_000, 1_000);
+    check_bundled(false, 10_000, 1_000, EXHAUSTIVE_DEBUG, 20);
 }
 
 /// Every bundled reading, sentences and passages included. The enumeration
@@ -145,10 +197,10 @@ fn preferred_spelling_matches_the_enumeration_on_bundled_words_and_phrases() {
 #[test]
 #[ignore = "slow in a debug build; run with --release"]
 fn preferred_spelling_matches_the_enumeration_on_every_bundled_reading() {
-    check_bundled(true, 20_000, 10_000);
+    check_bundled(true, 20_000, 10_000, EXHAUSTIVE_RELEASE, 1_000);
 }
 
-fn check_bundled(long: bool, minimum_readings: usize, minimum_changed: usize) {
+fn check_bundled(long: bool, minimum_readings: usize, minimum_changed: usize, exhaustive: u128, minimum_past: usize) {
     // Long readings first, so the threads finish at about the same time.
     let mut readings = corpus_readings(long).into_iter().collect::<Vec<_>>();
     assert!(readings.len() > minimum_readings, "bundled readings: {}", readings.len());
@@ -159,27 +211,28 @@ fn check_bundled(long: bool, minimum_readings: usize, minimum_changed: usize) {
         interleaved.extend(readings.iter().skip(offset).step_by(threads).cloned());
     }
     let sets = preference_sets();
-    let references = sets.iter().map(|(_, preferences)| preferences).collect::<Vec<_>>();
-    let changed_by_preferences = on_all_cores(&interleaved, |reading| {
+    let named = sets
+        .iter()
+        .map(|(name, preferences)| ((*name).to_owned(), preferences))
+        .collect::<Vec<_>>();
+    let [changed, old, compared, past] = on_all_cores(&interleaved, |reading| {
         let judge = RomajiJudge::new(reading);
-        // The direct computation is used for every bundled reading.
+        // The mora-by-mora shortcut is used for every bundled reading.
         assert!(judge.preferred_spelling_is_direct(), "reading={reading:?}");
         let first = judge.accepted_spellings(1).into_iter().next().unwrap_or_default();
-        let expected = judge.preferred_spellings_bruteforce_many(&references);
-        let mut changed = 0;
-        for ((name, preferences), expected) in sets.iter().zip(expected) {
-            assert_eq!(judge.preferred_spelling(preferences), expected, "reading={reading:?}, preferences={name}");
-            changed += usize::from(expected != first);
-        }
-        changed
+        let (actual, [old, compared, past]) = compare_all(&judge, &named, exhaustive);
+        let changed = actual.iter().filter(|spelling| **spelling != first).count();
+        [changed, old, compared, past]
     });
     // The preferences do change the spelling, so the comparison is not vacuous.
-    assert!(changed_by_preferences > minimum_changed, "changed: {changed_by_preferences}");
+    assert!(changed > minimum_changed, "changed: {changed}");
+    assert!(compared > minimum_readings / 2, "compared with the exhaustive enumeration: {compared}");
+    assert!(past > minimum_past, "compared past 4,096 spellings: {past}");
     eprintln!(
-        "compared {} (readings {} x {} preference sets), {changed_by_preferences} differ from the first spelling",
-        readings.len() * sets.len(),
+        "bundled readings {} x {} preference sets: search {}, exhaustive {compared} (past 4,096: {past}), old enumeration {old}; {changed} differ from the first spelling",
         readings.len(),
-        sets.len()
+        sets.len(),
+        readings.len(),
     );
 }
 
@@ -244,63 +297,155 @@ fn random_preferences(random: &mut Random) -> BTreeMap<String, String> {
 
 #[test]
 fn preferred_spelling_matches_the_enumeration_on_random_readings() {
-    check_random(0x9E37_79B9_7F4A_7C15, 400);
+    check_random(0x9E37_79B9_7F4A_7C15, 400, EXHAUSTIVE_DEBUG);
 }
 
 /// The same with more cases; run with `cargo test --release -- --ignored preferred_spelling`.
 #[test]
 #[ignore = "slow in a debug build; run with --release"]
 fn preferred_spelling_matches_the_enumeration_on_many_random_readings() {
-    check_random(0xD1B5_4A32_D192_ED03, 10_000);
+    check_random(0xD1B5_4A32_D192_ED03, 10_000, EXHAUSTIVE_RELEASE);
 }
 
-fn check_random(seed: u64, count: usize) {
+fn check_random(seed: u64, count: usize, exhaustive: u128) {
     let mut random = Random(seed);
     let cases = (0..count)
         .map(|_| (random_reading(&mut random), random_preferences(&mut random)))
         .collect::<Vec<_>>();
-    let mut long = 0_usize;
-    let mut truncated = 0_usize;
-    let mut enumerated = 0_usize;
-    for (reading, _) in &cases {
+    let [compared, long, truncated, ambiguous, old, exhaustive_compared, past] = on_all_cores(&cases, |(reading, preferences)| {
         let judge = RomajiJudge::new(reading);
-        long += usize::from(judge.moras().len() >= 20);
-        truncated += usize::from(judge.accepted_spellings(4_097).len() > 4_096);
-        enumerated += usize::from(!judge.preferred_spelling_is_direct());
-    }
-    let compared = on_all_cores(&cases, |(reading, preferences)| {
-        let judge = RomajiJudge::new(reading);
-        let expected = judge.preferred_spelling_bruteforce(preferences);
-        assert_eq!(
-            judge.preferred_spelling(preferences),
-            expected,
-            "reading={reading:?}, preferences={preferences:?}"
-        );
-        // The batched reference used for the bundled readings agrees too.
-        assert_eq!(
-            judge.preferred_spellings_bruteforce_many(&[preferences]),
-            [expected],
-            "reading={reading:?}"
-        );
-        1
+        let (_, [old, compared, past]) = compare_all(&judge, &[(format!("{preferences:?}"), preferences)], exhaustive);
+        [
+            1,
+            usize::from(judge.moras().len() >= 20),
+            usize::from(judge.spelling_tuple_count() > 4_096),
+            usize::from(!judge.preferred_spelling_is_direct()),
+            old,
+            compared,
+            past,
+        ]
     });
     assert_eq!(compared, cases.len());
-    // Long readings past the 4,096-spelling cut-off are well represented.
+    // Long readings past the old 4,096-spelling cut-off are well represented,
+    // and enough of them are small enough to enumerate.
     assert!(long > cases.len() / 3, "long: {long}");
     assert!(truncated > cases.len() / 3, "truncated: {truncated}");
-    eprintln!("random cases {compared}: long {long}, truncated {truncated}, enumerated {enumerated}");
+    assert!(past > cases.len() / 50, "compared past 4,096 spellings: {past}");
+    eprintln!(
+        "random cases {compared}: long {long}, past 4,096 {truncated}, ambiguous {ambiguous}; exhaustive {exhaustive_compared} (past 4,096: {past}), old enumeration {old}"
+    );
+}
+
+/// Variant tables over a two-letter alphabet, where many tuples spell the
+/// same string, checked against an enumeration that splits every spelling
+/// the way `spelling_segments` does.
+#[test]
+fn the_search_matches_the_enumeration_on_ambiguous_variant_tables() {
+    let mut random = Random(0x2545_F491_4F6C_DD1D);
+    let mut ambiguous = 0;
+    let mut duplicated = 0;
+    for _ in 0..3_000 {
+        let length = 1 + random.below(7);
+        let variants = (0..length)
+            .map(|_| {
+                let mut options = Vec::new();
+                for _ in 0..1 + random.below(4) {
+                    let spelling = (0..1 + random.below(3))
+                        .map(|_| if random.below(2) == 0 { 'a' } else { 'b' })
+                        .collect::<String>();
+                    if !options.contains(&spelling) {
+                        options.push(spelling);
+                    }
+                }
+                options
+            })
+            .collect::<Vec<_>>();
+        let preferred = variants
+            .iter()
+            .map(|options| (random.below(3) > 0).then(|| random.below(options.len())))
+            .collect::<Vec<_>>();
+        let matches = |index: usize, variant: usize| preferred[index] == Some(variant);
+        let (expected, has_duplicates) = enumerate_table(&variants, matches);
+        assert_eq!(
+            spell_tuple(&variants, &best_resplit_tuple(&variants, matches)),
+            expected,
+            "variants={variants:?}, preferred={preferred:?}"
+        );
+        if spellings_split_uniquely(&variants) {
+            assert!(!has_duplicates, "variants={variants:?}");
+            assert_eq!(spell_tuple(&variants, &first_preferred_tuple(&variants, matches)), expected);
+        } else {
+            ambiguous += 1;
+        }
+        duplicated += usize::from(has_duplicates);
+    }
+    assert!(duplicated > 500, "tables where two tuples spell the same string: {duplicated}");
+    eprintln!("ambiguous tables {ambiguous}, with duplicate spellings {duplicated}");
+}
+
+/// The first spelling with the most preferred moras, enumerating every tuple
+/// and splitting its spelling by trying the variants in order; also whether
+/// two tuples spelled the same string.
+fn enumerate_table(variants: &[Vec<String>], matches: impl Fn(usize, usize) -> bool) -> (String, bool) {
+    fn split(variants: &[Vec<String>], index: usize, rest: &str) -> Option<Vec<usize>> {
+        if index == variants.len() {
+            return rest.is_empty().then(Vec::new);
+        }
+        variants[index].iter().enumerate().find_map(|(variant, spelling)| {
+            let tail = split(variants, index + 1, rest.strip_prefix(spelling.as_str())?)?;
+            Some(std::iter::once(variant).chain(tail).collect())
+        })
+    }
+    let mut tuple = vec![0_usize; variants.len()];
+    let mut best = (0_usize, spell_tuple(variants, &tuple));
+    let mut seen = BTreeSet::new();
+    let mut duplicates = false;
+    loop {
+        let spelling = spell_tuple(variants, &tuple);
+        let parts = split(variants, 0, &spelling).expect("a spelling splits");
+        let score = parts.iter().enumerate().filter(|&(index, &variant)| matches(index, variant)).count();
+        if score > best.0 {
+            best = (score, spelling.clone());
+        }
+        duplicates |= !seen.insert(spelling);
+        // The next tuple in candidate order.
+        let Some(position) = (0..variants.len()).rev().find(|&index| tuple[index] + 1 < variants[index].len()) else {
+            return (best.1, duplicates);
+        };
+        tuple[position] += 1;
+        for later in &mut tuple[position + 1..] {
+            *later = 0;
+        }
+    }
 }
 
 #[test]
-fn the_4096_cut_off_is_kept() {
-    // 13 し have 3^13 spellings; the first 4,096 all start with seven «shi»,
-    // so a «si» preference cannot reach the first moras.
+fn every_preferred_mora_counts_however_long_the_reading_is() {
+    // 13 し have 3^13 spellings. Up to d13c5a7 only the first 4,096 were
+    // looked at; they all start with seven «shi», so a «si» preference could
+    // not reach the first moras.
     let judge = RomajiJudge::new(&"し".repeat(13));
+    assert!(judge.spelling_tuple_count() > 4_096);
     let preferences = BTreeMap::from([("し".to_owned(), "si".to_owned())]);
-    let spelling = judge.preferred_spelling(&preferences);
-    assert_eq!(spelling, judge.preferred_spelling_bruteforce(&preferences));
-    assert!(spelling.starts_with(&"shi".repeat(5)), "{spelling}");
-    assert!(spelling.ends_with("si"), "{spelling}");
+    assert_eq!(judge.preferred_spelling(&preferences), "si".repeat(13));
+    assert!(judge.preferred_spelling_bruteforce(&preferences).starts_with(&"shi".repeat(5)));
+    assert_eq!(judge.preferred_spellings_exhaustive_many(&[&preferences]), ["si".repeat(13)]);
+
+    // A sentence: the preferences apply from its first mora on.
+    let judge = RomajiJudge::new("しんじゅくえきのちかくにあるきっさてんでしゅくだいをしよう");
+    assert!(judge.spelling_tuple_count() > 4_096);
+    let preferences = changed(&[("し", "si"), ("ち", "ti"), ("ん", "nn"), ("じゅ", "zyu"), ("しゅ", "syu")]);
+    assert_eq!(
+        judge.preferred_spelling(&preferences),
+        "sinnzyukuekinotikakuniarukissatenndesyukudaiwosiyou"
+    );
+    assert!(judge.preferred_spelling_bruteforce(&preferences).starts_with("shin"));
+
+    // A preference the context rules out is still not used: ん before a
+    // vowel cannot be «n», so the next preferred-or-first variant is kept.
+    let judge = RomajiJudge::new(&"しんあい".repeat(4));
+    let preferences = BTreeMap::from([("ん".to_owned(), "n".to_owned()), ("し".to_owned(), "si".to_owned())]);
+    assert_eq!(judge.preferred_spelling(&preferences), "sinnai".repeat(4));
 }
 
 #[test]
@@ -348,5 +493,6 @@ fn preferred_spelling_speed_on_a_long_reading() {
         direct.as_secs_f64() * 1_000.0,
         enumeration.as_secs_f64() * 1_000.0
     );
-    assert!(direct.as_secs_f64() < 0.001, "{direct:?}");
+    // At most 0.1 ms for one long reading.
+    assert!(direct.as_secs_f64() < 0.000_1, "{direct:?}");
 }
