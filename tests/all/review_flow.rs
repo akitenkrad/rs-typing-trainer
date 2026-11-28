@@ -86,3 +86,27 @@ fn benchmark_result_does_not_open_review() {
     app.handle_key_at(key(KeyCode::Char('d')), now);
     assert_eq!(app.screen, Screen::Result);
 }
+
+#[test]
+fn review_ctrl_d_scrolls_instead_of_returning_to_the_result() {
+    let now = Instant::now();
+    let mut page = result_app();
+    let mut chord = result_app();
+    page.handle_key_at(key(KeyCode::Char('d')), now);
+    chord.handle_key_at(key(KeyCode::Char('d')), now);
+    let _ = render(&page, 80, 12);
+    let _ = render(&chord, 80, 12);
+
+    page.handle_key_at(key(KeyCode::PageDown), now);
+    chord.handle_key_at(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL), now);
+    assert_eq!(chord.screen, Screen::Review);
+    assert_eq!(chord.review_scroll, page.review_scroll);
+
+    page.handle_key_at(key(KeyCode::PageUp), now);
+    chord.handle_key_at(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL), now);
+    assert_eq!(chord.screen, Screen::Review);
+    assert_eq!(chord.review_scroll, page.review_scroll);
+
+    chord.handle_key_at(KeyEvent::new(KeyCode::Char('D'), KeyModifiers::CONTROL), now);
+    assert_eq!(chord.screen, Screen::Review);
+}

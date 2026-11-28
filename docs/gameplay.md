@@ -32,7 +32,7 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | Title | `S` | Open settings |
 | Title | `?` | Open About |
 | Title | `Q` / `Esc` | Quit |
-| About | `↑` / `↓`, `PgUp` / `PgDn` | Scroll |
+| About | `↑` / `↓`, `PgUp` / `PgDn` (`Ctrl+U` / `Ctrl+D`) | Scroll |
 | About | `G` | Open the glossary with all terms |
 | About | `Esc` / `Enter` / `Q` / `?` | Return to the title screen |
 | Individual training | `←` `↓` `↑` `→` (`h` `j` `k` `l`) | Move over the table: rows are skills, columns what you type (see [Individual training](modes.md#individual-training)) |
@@ -64,6 +64,7 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | Result | `D` | Open the review of the session just played (not available for benchmark results) |
 | Result | `H` | Open history |
 | Result | `Q` / `Esc` | Quit |
+| Review | `↑` / `↓`, `PgUp` / `PgDn` (`Ctrl+U` / `Ctrl+D`) | Scroll |
 | Review | `?` | Open glossary terms used on the review |
 | Benchmark part result | `Space` / `Enter` | Continue to the next part or summary after the input delay |
 | Benchmark part result | `Esc` twice within 2 seconds | End the benchmark after the input delay, retaining completed parts |
@@ -80,14 +81,14 @@ Running the program without a subcommand is the same as `rs-typing-trainer play`
 | Analysis confusion | `←` / `→` | Select the expected key |
 | Analysis (all tabs) | `?` | Open glossary terms used on the current tab; `Tab` switches between this tab and all terms |
 | History | `↑` / `↓` (`k` / `j`) | Move the selection |
-| History | `PgUp` / `PgDn` / `Home` / `End` | Jump through the list |
+| History | `PgUp` / `PgDn` (`Ctrl+U` / `Ctrl+D`), `Home` / `End` (`<` / `>`) | Jump through the list |
 | History | `Tab` | Cycle All / Practice / Bench |
 | History | `M` / `L` / `P` | Cycle recorded modes, language, or period |
 | History | `S` | Cycle newest, oldest, WPM and accuracy sort orders |
 | History | `Enter` | Expand/collapse a benchmark run, or open a session/part in detail |
 | History | `R` | Open reading reports |
 | History | `Esc` / `Q` | Return to the screen that opened history |
-| Reading reports | `↑` / `↓` (`k` / `j`), `PgUp` / `PgDn` / `Home` / `End` | Move the selection |
+| Reading reports | `↑` / `↓` (`k` / `j`), `PgUp` / `PgDn` (`Ctrl+U` / `Ctrl+D`), `Home` / `End` (`<` / `>`) | Move the selection |
 | Reading reports | `E` / `Enter` | Edit and save the correct hiragana reading |
 | Reading reports | `D` / `Delete` | Remove the selected report and any saved correction after confirmation; the item returns to prompts with its original reading the next time practice starts |
 | Reading reports | `Esc` / `Q` | Return to history |

@@ -161,3 +161,27 @@ fn about_explains_what_key_release_timing_is_for() {
         assert!(text.contains(&without_whitespace(value)), "{lang:?}: {text}");
     }
 }
+
+#[test]
+fn about_ctrl_u_and_ctrl_d_scroll_like_page_keys() {
+    let mut page = test_app(Config::default());
+    let mut chord = test_app(Config::default());
+    page.screen = Screen::About;
+    chord.screen = Screen::About;
+    render(&page, 80, 24);
+    render(&chord, 80, 24);
+
+    for _ in 0..100 {
+        page.handle_key(key(KeyCode::PageDown));
+        chord.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
+        assert_eq!(chord.about_scroll, page.about_scroll);
+    }
+    assert!(chord.about_scroll > 0);
+    for _ in 0..100 {
+        page.handle_key(key(KeyCode::PageUp));
+        chord.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        assert_eq!(chord.about_scroll, page.about_scroll);
+    }
+    assert_eq!(chord.about_scroll, 0);
+    assert_eq!(chord.screen, Screen::About);
+}

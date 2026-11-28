@@ -380,3 +380,23 @@ fn japanese_growth_uses_zero_two_and_four_column_section_indents() {
     let (accumulation_detail_column, accumulation_detail) = first_content(&rows[accumulation_row + 1]).unwrap();
     assert_eq!((accumulation_detail_column, accumulation_detail), (accumulation_column + 2, '練'));
 }
+
+#[test]
+fn growth_ctrl_u_and_ctrl_d_scroll_like_page_keys() {
+    let mut page = fixture(Lang::Ja);
+    let mut chord = fixture(Lang::Ja);
+    let _ = render(&page, 80, 24);
+    let _ = render(&chord, 80, 24);
+    for _ in 0..30 {
+        page.handle_key(key(KeyCode::PageDown));
+        chord.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
+        assert_eq!(chord.analysis_growth_scroll, page.analysis_growth_scroll);
+    }
+    assert!(chord.analysis_growth_scroll > 0);
+    for _ in 0..30 {
+        page.handle_key(key(KeyCode::PageUp));
+        chord.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        assert_eq!(chord.analysis_growth_scroll, page.analysis_growth_scroll);
+    }
+    assert_eq!(chord.analysis_growth_scroll, 0);
+}

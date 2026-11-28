@@ -370,7 +370,7 @@ Missing values are shown as `— (no data)` on screen, `null` in JSON and an emp
 
 ### Growth tab
 
-Growth always uses all records and shows `Compares all time` in its footer; the period and mode filters do not apply. `↑`/`↓` scroll one row and `PgUp`/`PgDn` scroll ten rows, with both directions bounded by the content.
+Growth always uses all records and shows `Compares all time` in its footer; the period and mode filters do not apply. `↑`/`↓` scroll one row and `PgUp`/`PgDn` (or `Ctrl+U`/`Ctrl+D`) scroll ten rows, with both directions bounded by the content.
 
 For each language, speed reuses the existing daily-speed series without mixing definitions. A language with any v3 result uses its pooled accuracy-adjusted speed; otherwise it uses the preferred benchmark series (A for English, C for Japanese), or difficulty-adjusted WPM when that language has no benchmark. The source is printed beside the section title. For v3, “since you started”, the one- and three-month comparisons, the speed chart and the four-week slope all use the median-of-latest-three main line; individual runs remain as faint points in image and text charts. The first value is the median from the first recorded date through the following six calendar days; the current value is the median from the analysis date and the preceding six days. A comparison starts after seven distinct dates in that speed series, not after seven practice days in general. Until then, a benchmark series says how many benchmark dates exist and points to `[B]` in the title; an adjusted-WPM series calls them comparable-speed records. The headline uses the same source-specific explanation. Accuracy is the median of the matching pooled accuracies in the same calendar window for v3, or of that language's session accuracies for earlier series. The 30- and 90-day comparisons use a ±3-day window around each target date. Missing windows say `no records`.
 
@@ -405,7 +405,7 @@ Text version at 80×24 (the middle is scrollable):
 │  Practice time 12 h 30 min (this month 4 h 10 min)                          │
 │  Practice days 42   current streak 5   longest streak 9                     │
 │  Keystrokes 183,402                                                         │
-│            [↑/↓ PgUp/PgDn] Scroll   Compares all time   [Esc] Back          │
+│  [↑/↓ PgUp/PgDn ^U/^D] Scroll   [?] Terms   Compares all time   [Esc] Back   │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 

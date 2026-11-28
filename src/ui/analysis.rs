@@ -74,8 +74,8 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
     if app.analysis_tab == crate::app::ANALYSIS_GROWTH_TAB {
         let hint = match lang {
-            Lang::En => "[↑/↓ PgUp/PgDn] Scroll   [?] Terms   Compares all time   [Esc] Back",
-            Lang::Ja => "[↑/↓ PgUp/PgDn] スクロール   [?] 用語   全期間で比べます   [Esc] 戻る",
+            Lang::En => "[↑/↓ PgUp/PgDn ^U/^D] Scroll   [?] Terms   Compares all time   [Esc] Back",
+            Lang::Ja => "[↑/↓ PgUp/PgDn ^U/^D] スクロール   [?] 用語   全期間で比べます   [Esc] 戻る",
         };
         frame.render_widget(Paragraph::new(hint).alignment(Alignment::Center), chunks[2]);
         return;

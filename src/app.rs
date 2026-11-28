@@ -1113,6 +1113,7 @@ impl App {
     }
 
     fn handle_about_key(&mut self, key: KeyEvent) {
+        let key = scroll_alias(key);
         let max = self.about_scroll_max.get();
         match key.code {
             KeyCode::Char('G') => self.open_glossary(None, true),
@@ -1201,6 +1202,7 @@ impl App {
             return;
         }
 
+        let key = list_alias(key);
         let count = self.glossary_visible_terms().map_or(0, |terms| terms.len());
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => self.screen = self.glossary_origin,
@@ -1709,6 +1711,7 @@ impl App {
     }
 
     fn handle_analysis_key(&mut self, key: KeyEvent, action: InputAction) {
+        let key = scroll_alias(key);
         match key.code {
             KeyCode::Char('?') => self.open_glossary(Some(self.analysis_glossary_context()), false),
             KeyCode::Up | KeyCode::Char('k') if self.analysis_tab == ANALYSIS_COACH_TAB && self.analysis_goal_picker => {
@@ -2624,6 +2627,7 @@ impl App {
     }
 
     fn handle_review_key(&mut self, key: KeyEvent, action: InputAction, now: Instant) {
+        let key = scroll_alias(key);
         let max = self.review_scroll_max.get();
         match key.code {
             KeyCode::Char('?') => self.open_glossary(Some("review"), false),
@@ -2642,6 +2646,7 @@ impl App {
     }
 
     fn handle_history_key(&mut self, key: KeyEvent, action: InputAction) {
+        let key = list_alias(key);
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => {
                 if self.history_selected > 0 {
@@ -2759,6 +2764,7 @@ impl App {
         }
 
         self.reading_reports_notice = None;
+        let key = list_alias(key);
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => {
                 self.reading_reports_selected = self.reading_reports_selected.saturating_sub(1);
@@ -4563,6 +4569,45 @@ struct AdaptiveRecordContext<'a> {
     candidates: &'a [TransitionCost],
     results: &'a [AdaptiveResultRow],
     finished_at: &'a str,
+}
+
+/// MYTASK-3703: Ctrl+U / Ctrl+D stand in for PageUp / PageDown (as in vi and
+/// less) on keyboards without those keys. The control chord is rewritten
+/// before any handler looks at plain characters, so Ctrl+D never reaches the
+/// `d` bindings (delete, close).
+fn scroll_alias(key: KeyEvent) -> KeyEvent {
+    if !key.modifiers.contains(KeyModifiers::CONTROL) {
+        return key;
+    }
+    let code = match key.code {
+        KeyCode::Char('u') | KeyCode::Char('U') => KeyCode::PageUp,
+        KeyCode::Char('d') | KeyCode::Char('D') => KeyCode::PageDown,
+        _ => return key,
+    };
+    KeyEvent {
+        code,
+        modifiers: KeyModifiers::empty(),
+        ..key
+    }
+}
+
+/// MYTASK-3703: list screens also take `<` / `>` (as in less) for Home / End,
+/// on top of the Ctrl+U / Ctrl+D aliases.
+fn list_alias(key: KeyEvent) -> KeyEvent {
+    let key = scroll_alias(key);
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        return key;
+    }
+    let code = match key.code {
+        KeyCode::Char('<') => KeyCode::Home,
+        KeyCode::Char('>') => KeyCode::End,
+        _ => return key,
+    };
+    KeyEvent {
+        code,
+        modifiers: KeyModifiers::empty(),
+        ..key
+    }
 }
 
 fn record_adaptive_state(context: AdaptiveRecordContext<'_>) -> AppResult<()> {

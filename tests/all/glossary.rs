@@ -302,3 +302,61 @@ fn generated_glossary_docs_match_checked_in_files() {
         "run `cargo run --example gen_glossary_docs`"
     );
 }
+
+fn ctrl(character: char) -> KeyEvent {
+    KeyEvent::new(KeyCode::Char(character), KeyModifiers::CONTROL)
+}
+
+fn glossary_selection_after(start: usize, event: KeyEvent) -> usize {
+    let mut app = test_app(Config::default());
+    app.screen = Screen::About;
+    app.handle_key(key(KeyCode::Char('G')));
+    assert_eq!(app.screen, Screen::Glossary);
+    app.glossary_selected = start;
+    app.handle_key(event);
+    assert_eq!(app.screen, Screen::Glossary);
+    app.glossary_selected
+}
+
+#[test]
+fn glossary_less_and_vi_keys_move_like_home_end_and_page_keys() {
+    let count = glossary::bundled().unwrap().terms().len();
+    assert!(count > 25);
+    let middle = 15;
+    assert_eq!(glossary_selection_after(middle, key(KeyCode::Char('<'))), 0);
+    assert_eq!(glossary_selection_after(middle, key(KeyCode::Char('>'))), count - 1);
+    assert_eq!(
+        glossary_selection_after(middle, key(KeyCode::Char('<'))),
+        glossary_selection_after(middle, key(KeyCode::Home))
+    );
+    assert_eq!(
+        glossary_selection_after(middle, key(KeyCode::Char('>'))),
+        glossary_selection_after(middle, key(KeyCode::End))
+    );
+    for start in [0, 3, middle, count - 4, count - 1] {
+        assert_eq!(
+            glossary_selection_after(start, ctrl('u')),
+            glossary_selection_after(start, key(KeyCode::PageUp)),
+            "{start}"
+        );
+        assert_eq!(
+            glossary_selection_after(start, ctrl('d')),
+            glossary_selection_after(start, key(KeyCode::PageDown)),
+            "{start}"
+        );
+    }
+    assert_eq!(glossary_selection_after(middle, ctrl('d')), middle + 10);
+}
+
+#[test]
+fn glossary_search_takes_less_keys_as_text() {
+    let mut app = test_app(Config::default());
+    app.screen = Screen::About;
+    app.handle_key(key(KeyCode::Char('G')));
+    app.handle_key(key(KeyCode::Char('/')));
+    app.handle_key(key(KeyCode::Char('<')));
+    app.handle_key(key(KeyCode::Char('>')));
+    assert!(app.glossary_searching);
+    assert_eq!(app.glossary_query, "<>");
+    assert_eq!(app.glossary_selected, 0);
+}

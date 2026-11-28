@@ -93,8 +93,8 @@ pub fn render(frame: &mut Frame, app: &App) {
     render_content(frame, app, &terms, lang, theme, rows[1]);
 
     let footer = match lang {
-        Lang::En => "[↑/↓ k/j PgUp/PgDn Home/End] Select   [/] Search   [Esc/q] Back",
-        Lang::Ja => "[↑/↓ k/j PgUp/PgDn Home/End] 選ぶ   [/] 検索   [Esc/q] 戻る",
+        Lang::En => "[↑/↓ k/j PgUp/PgDn ^U/^D Home/End </>] Select   [/] Search   [Esc/q] Back",
+        Lang::Ja => "[↑/↓ k/j PgUp/PgDn ^U/^D Home/End </>] 選ぶ   [/] 検索   [Esc/q] 戻る",
     };
     frame.render_widget(Paragraph::new(footer).style(Style::default().fg(theme.accent)), rows[2]);
 }

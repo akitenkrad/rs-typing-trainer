@@ -750,3 +750,78 @@ fn history_detail_exports_a_readable_ttrec_and_reports_the_path() {
     let output = render(&app, 140, 42);
     assert!(output.contains(path.to_str().unwrap()), "{output}");
 }
+
+fn ctrl(character: char) -> KeyEvent {
+    KeyEvent::new(KeyCode::Char(character), KeyModifiers::CONTROL)
+}
+
+fn history_app_with_rows() -> TestApp {
+    let date = chrono::NaiveDate::from_ymd_opt(2026, 11, 16).unwrap();
+    let app = test_app_at(Config::default(), date);
+    let base = Utc.with_ymd_and_hms(2026, 11, 1, 0, 0, 0).unwrap();
+    for index in 0..24 {
+        save(
+            &app,
+            &record(
+                base + chrono::Duration::hours(index * 7),
+                "words",
+                None,
+                Some("en"),
+                40.0 + index as f64,
+                0.95,
+            ),
+        );
+    }
+    app
+}
+
+fn history_selection_after(start: usize, event: KeyEvent) -> usize {
+    let mut app = history_app_with_rows();
+    open_history(&mut app);
+    assert!(app.history.len() > 20, "{}", app.history.len());
+    app.history_selected = start;
+    app.handle_key(event);
+    assert_eq!(app.screen, Screen::History);
+    app.history_selected
+}
+
+#[test]
+fn history_less_and_vi_keys_move_like_home_end_and_page_keys() {
+    let last = {
+        let mut app = history_app_with_rows();
+        open_history(&mut app);
+        app.history.len() - 1
+    };
+    assert_eq!(history_selection_after(12, key(KeyCode::Char('<'))), 0);
+    assert_eq!(history_selection_after(12, key(KeyCode::Char('>'))), last);
+    assert_eq!(
+        history_selection_after(12, key(KeyCode::Char('>'))),
+        history_selection_after(12, key(KeyCode::End))
+    );
+    for start in [0, 4, 12, last - 3, last] {
+        assert_eq!(
+            history_selection_after(start, ctrl('u')),
+            history_selection_after(start, key(KeyCode::PageUp)),
+            "{start}"
+        );
+        assert_eq!(
+            history_selection_after(start, ctrl('d')),
+            history_selection_after(start, key(KeyCode::PageDown)),
+            "{start}"
+        );
+    }
+    assert_eq!(history_selection_after(1, ctrl('d')), 11);
+}
+
+#[test]
+fn history_greater_than_on_an_empty_list_stays_at_zero() {
+    let date = chrono::NaiveDate::from_ymd_opt(2026, 11, 16).unwrap();
+    let mut app = test_app_at(Config::default(), date);
+    open_history(&mut app);
+    assert!(app.history.is_empty());
+    app.handle_key(key(KeyCode::Char('>')));
+    assert_eq!(app.history_selected, 0);
+    app.handle_key(ctrl('d'));
+    assert_eq!(app.history_selected, 0);
+    assert_eq!(app.screen, Screen::History);
+}

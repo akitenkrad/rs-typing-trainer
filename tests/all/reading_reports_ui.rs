@@ -493,3 +493,67 @@ fn corrected_report_confirmation_mentions_and_removes_the_saved_correction() {
             .is_empty()
     );
 }
+
+fn ctrl(character: char) -> KeyEvent {
+    KeyEvent::new(KeyCode::Char(character), KeyModifiers::CONTROL)
+}
+
+fn many_reports_app() -> TestApp {
+    let mut app = common::test_app(Config::default());
+    for hour in 0..24 {
+        let text = format!("語{hour:02}");
+        report(&app, hour, ReadingReportKind::Romaji, &text, "ご");
+    }
+    open_reading_reports(&mut app);
+    app
+}
+
+fn reading_selection_after(start: usize, event: KeyEvent) -> usize {
+    let mut app = many_reports_app();
+    assert!(app.reading_reports.len() > 20, "{}", app.reading_reports.len());
+    app.reading_reports_selected = start;
+    app.handle_key(event);
+    assert_eq!(app.screen, Screen::ReadingReports);
+    assert!(!app.reading_reports_confirming);
+    app.reading_reports_selected
+}
+
+#[test]
+fn reading_reports_less_and_vi_keys_move_like_home_end_and_page_keys() {
+    let last = many_reports_app().reading_reports.len() - 1;
+    assert_eq!(reading_selection_after(12, key(KeyCode::Char('<'))), 0);
+    assert_eq!(reading_selection_after(12, key(KeyCode::Char('>'))), last);
+    assert_eq!(
+        reading_selection_after(12, key(KeyCode::Char('>'))),
+        reading_selection_after(12, key(KeyCode::End))
+    );
+    for start in [0, 4, 12, last - 3, last] {
+        assert_eq!(
+            reading_selection_after(start, ctrl('u')),
+            reading_selection_after(start, key(KeyCode::PageUp)),
+            "{start}"
+        );
+        assert_eq!(
+            reading_selection_after(start, ctrl('d')),
+            reading_selection_after(start, key(KeyCode::PageDown)),
+            "{start}"
+        );
+    }
+    assert_eq!(reading_selection_after(1, ctrl('d')), 11);
+}
+
+#[test]
+fn reading_reports_ctrl_d_does_not_ask_to_remove() {
+    let mut app = many_reports_app();
+    let count = app.reading_reports.len();
+    app.handle_key(ctrl('d'));
+    app.handle_key(ctrl('D'));
+    assert!(!app.reading_reports_confirming);
+    assert_eq!(app.screen, Screen::ReadingReports);
+    app.handle_key(key(KeyCode::Char('y')));
+    assert_eq!(app.reading_reports.len(), count);
+
+    // Plain `d` still asks.
+    app.handle_key(key(KeyCode::Char('d')));
+    assert!(app.reading_reports_confirming);
+}

@@ -91,8 +91,8 @@ pub fn render(frame: &mut Frame, app: &App) {
     app.set_review_scroll_max(max_scroll);
     frame.render_widget(Paragraph::new(lines).scroll((app.review_scroll.min(max_scroll), 0)), rows[0]);
     let hint = match lang {
-        Lang::En => "[↑/↓ PgUp/PgDn] Scroll    [?] Terms    [D/Esc] Result    [Enter] Continue",
-        Lang::Ja => "[↑/↓ PgUp/PgDn] 移動    [?] 用語    [D/Esc] 結果    [Enter] 続ける",
+        Lang::En => "[↑/↓ PgUp/PgDn ^U/^D] Scroll  [?] Terms  [D/Esc] Result  [Enter] Continue",
+        Lang::Ja => "[↑/↓ PgUp/PgDn ^U/^D] 移動  [?] 用語  [D/Esc] 結果  [Enter] 続ける",
     };
     frame.render_widget(Paragraph::new(hint).style(Style::default().fg(theme.accent)), rows[1]);
 }
