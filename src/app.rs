@@ -342,6 +342,9 @@ pub struct App {
     pub analysis_details: DetailedMetrics,
     pub analysis_summary: crate::analysis::summary::SummaryReport,
     pub analysis_coach: Option<crate::analysis::coach::CoachReport>,
+    /// What `analysis_coach.progress` was computed from, so the growth tab
+    /// can reuse it when it needs the progress of the same records.
+    pub analysis_coach_inputs: Option<crate::analysis::coach::ProgressInputs>,
     pub analysis_summary_scroll: u16,
     pub analysis_transition_selected: usize,
     pub analysis_keyboard_view: usize,
@@ -600,6 +603,7 @@ impl App {
             analysis_details: DetailedMetrics::default(),
             analysis_summary: crate::analysis::summary::SummaryReport::default(),
             analysis_coach: None,
+            analysis_coach_inputs: None,
             analysis_summary_scroll: 0,
             analysis_transition_selected: 0,
             analysis_keyboard_view: 0,
@@ -1887,19 +1891,17 @@ impl App {
 
     fn reload_growth(&mut self) {
         let records = db::load_records_filtered(&self.db_path(), None, None).unwrap_or_default();
-        let prescriptions = db::load_prescriptions(&self.db_path()).unwrap_or_default();
-        let selected_goal = db::load_selected_goal(&self.db_path()).unwrap_or_default();
-        let progress = crate::analysis::coach::build(
-            &records,
-            &self.config,
-            &self.home_dir,
-            &prescriptions,
-            selected_goal,
-            self.analysis_as_of,
-            self.config.general.lang,
-        )
-        .map(|report| report.progress)
-        .unwrap_or_default();
+        // The analysis report already holds this progress when its records
+        // are all the records (the period and the mode filter leave none out).
+        let inputs = crate::analysis::coach::ProgressInputs::new(&records, &self.config, &self.home_dir, self.analysis_as_of);
+        let reused = self
+            .analysis_coach
+            .as_ref()
+            .filter(|_| inputs.is_some() && self.analysis_coach_inputs == inputs)
+            .map(|report| report.progress.clone());
+        let progress = reused.unwrap_or_else(|| {
+            crate::analysis::coach::build_progress(&records, &self.config, &self.home_dir, self.analysis_as_of).unwrap_or_default()
+        });
         self.analysis_growth = crate::analysis::growth::build_growth(&records, &progress, self.analysis_as_of);
         let snapshots = db::load_skill_snapshots(&self.db_path()).unwrap_or_default();
         self.analysis_growth.promotions = crate::analysis::growth::skill_promotions(&snapshots);
@@ -1972,6 +1974,10 @@ impl App {
             self.config.general.lang,
         )
         .ok();
+        self.analysis_coach_inputs = self
+            .analysis_coach
+            .as_ref()
+            .and_then(|_| crate::analysis::coach::ProgressInputs::new(&self.analysis_records, &self.config, &self.home_dir, today));
         self.analysis_summary_scroll = 0;
         self.analysis_transition_selected = self.analysis_transition_selected.min(
             self.analysis_details

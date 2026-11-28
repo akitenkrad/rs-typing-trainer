@@ -46,6 +46,7 @@ mod glossary;
 mod grades;
 mod graphics_detect;
 mod growth;
+mod growth_reuse;
 mod growth_ui;
 mod habits;
 mod history;

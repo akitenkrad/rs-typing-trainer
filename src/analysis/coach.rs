@@ -63,19 +63,8 @@ pub fn build(
         shrinkage_k: config.analysis.shrinkage_k,
         half_life_days: config.analysis.half_life_days,
     };
-    let at = as_of.and_hms_opt(23, 59, 59).expect("valid end of day").and_utc();
-    let references = reference_prompts(&catalog, &layout, &keyboard_geometry);
-    let progress = analyze_progress(
-        records,
-        &layout,
-        &keyboard_geometry,
-        ProgressOptions {
-            model,
-            min_transition_n: config.analysis.min_transition_n,
-        },
-        at,
-        &references,
-    );
+    let at = end_of_day(as_of);
+    let progress = progress_with(records, config, &layout, &keyboard_geometry, &catalog, as_of);
     let grades = analyze_grades(
         records,
         &progress.forms,
@@ -122,6 +111,83 @@ pub fn build(
         selected_goal,
         map,
     })
+}
+
+/// The `progress` part of [`build`] alone, without the grades, diagnosis and
+/// the rest of the report. It equals `build(records, config, home, …,
+/// as_of, …)?.progress` for any prescriptions, goal and language.
+pub fn build_progress(records: &[SessionRecord], config: &Config, home: &std::path::Path, as_of: NaiveDate) -> AppResult<Progress> {
+    let layout = builtin_layout(&config.keyboard.layout).unwrap_or_else(|_| builtin_layout("qwerty").expect("bundled qwerty"));
+    let keyboard_geometry = geometry(&config.keyboard.geometry).unwrap_or_else(|| geometry("ansi").expect("bundled ansi"));
+    let catalog = DataCatalog::load(&DataConfig::default(), home)?;
+    Ok(progress_with(records, config, &layout, &keyboard_geometry, &catalog, as_of))
+}
+
+/// Everything the `progress` of a report depends on, so a caller can tell
+/// whether a report built earlier already holds the progress it needs.
+///
+/// The records are identified by their ids (with multiplicity); records
+/// without an id have no inputs, so they are never treated as the same.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProgressInputs {
+    record_ids: Vec<i64>,
+    layout: String,
+    geometry: String,
+    pause_ms: u64,
+    shrinkage_k: f64,
+    half_life_days: f64,
+    min_transition_n: u64,
+    home: std::path::PathBuf,
+    as_of: NaiveDate,
+}
+
+impl ProgressInputs {
+    pub fn new(records: &[SessionRecord], config: &Config, home: &std::path::Path, as_of: NaiveDate) -> Option<Self> {
+        let mut record_ids = records.iter().map(|record| record.header.id).collect::<Option<Vec<_>>>()?;
+        record_ids.sort_unstable();
+        Some(Self {
+            record_ids,
+            layout: config.keyboard.layout.clone(),
+            geometry: config.keyboard.geometry.clone(),
+            pause_ms: config.analysis.pause_ms,
+            shrinkage_k: config.analysis.shrinkage_k,
+            half_life_days: config.analysis.half_life_days,
+            min_transition_n: config.analysis.min_transition_n,
+            home: home.to_path_buf(),
+            as_of,
+        })
+    }
+}
+
+fn end_of_day(as_of: NaiveDate) -> chrono::DateTime<chrono::Utc> {
+    as_of.and_hms_opt(23, 59, 59).expect("valid end of day").and_utc()
+}
+
+fn progress_with(
+    records: &[SessionRecord],
+    config: &Config,
+    layout: &crate::layout::KeyboardLayout,
+    keyboard_geometry: &crate::layout::geometry::KeyboardGeometry,
+    catalog: &DataCatalog,
+    as_of: NaiveDate,
+) -> Progress {
+    let model = AnalysisSettings {
+        pause_ms: config.analysis.pause_ms,
+        shrinkage_k: config.analysis.shrinkage_k,
+        half_life_days: config.analysis.half_life_days,
+    };
+    let references = reference_prompts(catalog, layout, keyboard_geometry);
+    analyze_progress(
+        records,
+        layout,
+        keyboard_geometry,
+        ProgressOptions {
+            model,
+            min_transition_n: config.analysis.min_transition_n,
+        },
+        end_of_day(as_of),
+        &references,
+    )
 }
 
 fn reference_prompts(
